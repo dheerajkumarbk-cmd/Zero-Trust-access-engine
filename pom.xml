@@ -18,7 +18,7 @@
         <jacoco.version>0.8.12</jacoco.version>
         <spotbugs.plugin.version>4.8.6.4</spotbugs.plugin.version>
         <findsecbugs.version>1.13.0</findsecbugs.version>
-        <cyclonedx.version>2.9.1</cyclonedx.version>
+        <cyclonedx.version>2.9.3</cyclonedx.version>
         <!-- DevSecOps quality gate: build fails below this line coverage on the engine -->
         <coverage.minimum>0.80</coverage.minimum>
     </properties>
