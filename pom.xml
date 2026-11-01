@@ -13,7 +13,7 @@
     <properties>
         <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <snakeyaml.version>2.3</snakeyaml.version>
+        <snakeyaml.version>2.7</snakeyaml.version>
         <junit.version>5.11.3</junit.version>
         <jacoco.version>0.8.12</jacoco.version>
         <spotbugs.plugin.version>4.8.6.4</spotbugs.plugin.version>
