@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Narrow, evidence-backed suppressions only. Every entry names exact classes and is proven by a
+  test; never suppress a bug pattern project-wide.
+
+  EI_EXPOSE_REP on these records: each collection field is an unmodifiable copy made in the
+  compact constructor (List.copyOf / Set.copyOf / toUnmodifiableSet / Stream.toList), so returning
+  it exposes nothing mutable. Proof: ImmutabilityTest.
+-->
+<FindBugsFilter>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+        <Or>
+            <Class name="dev.dwarpal.decision.Decision"/>
+            <Class name="dev.dwarpal.domain.Subject"/>
+            <Class name="dev.dwarpal.policy.Conditions$AllOf"/>
+            <Class name="dev.dwarpal.policy.Conditions$AnyOf"/>
+            <Class name="dev.dwarpal.policy.Conditions$CountryIn"/>
+            <Class name="dev.dwarpal.policy.Conditions$DepartmentIn"/>
+            <Class name="dev.dwarpal.policy.Conditions$RegionIn"/>
+            <Class name="dev.dwarpal.policy.Conditions$ResourceIdIn"/>
+            <Class name="dev.dwarpal.policy.Conditions$RoleIn"/>
+        </Or>
+    </Match>
+</FindBugsFilter>

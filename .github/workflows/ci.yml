@@ -1,0 +1,59 @@
+# DevSecOps pipeline: every push and PR must pass ALL gates before merge.
+#   secrets -> build+tests+coverage -> SAST -> dependency review -> SBOM
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: the workflow token can only read the repo unless a job asks for more.
+permissions:
+  contents: read
+
+jobs:
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0          # scan full history, not just the last commit
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-test-sast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Build, unit + abuse-case tests, coverage gate (>=80%)
+        run: mvn -B verify
+      - name: SAST - SpotBugs + FindSecBugs
+        run: mvn -B spotbugs:check
+      - name: SBOM - CycloneDX
+        run: mvn -B cyclonedx:makeAggregateBom
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-and-coverage
+          path: |
+            target/bom.json
+            target/site/jacoco/
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          fail-on-severity: moderate

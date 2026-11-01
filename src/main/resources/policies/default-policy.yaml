@@ -1,0 +1,86 @@
+# Dwarpal reference policy set.
+#
+# Semantics: a policy's effect is a FLOOR. The risk engine may make the final outcome stricter
+# (e.g. PERMIT -> STEP_UP when P(attack) is high), never looser. Under DENY_OVERRIDES the most
+# restrictive matching policy wins; nothing matched -> default (DENY: fail-closed).
+#
+# YAML gotcha: unquoted NO / yes / on are parsed as booleans ("the Norway problem").
+# The loader rejects them, so always quote country codes and versions.
+
+version: "2026.11.01-1"
+algorithm: DENY_OVERRIDES
+default: DENY
+
+policies:
+  # ---- ZTNA: private applications --------------------------------------------------------
+  - id: P-01-employees-internal-apps
+    description: Employees may use internal apps.
+    when:
+      all:
+        - subjectType: HUMAN
+        - resourceKind: PRIVATE_APP
+        - classificationAtMost: INTERNAL
+    effect: PERMIT
+
+  - id: P-02-finance-confidential
+    description: Finance may use confidential finance apps.
+    when:
+      all:
+        - roleIn: [finance]
+        - classificationAtLeast: CONFIDENTIAL
+    effect: PERMIT
+
+  - id: P-03-confidential-needs-attested-health
+    description: Confidential data only from a healthy device whose health is agent-signed or better.
+    when:
+      all:
+        - classificationAtLeast: CONFIDENTIAL
+        - not:
+            deviceHealthyWithAssurance: AGENT_SIGNED
+    effect: DENY
+
+  - id: P-04-restricted-always-step-up
+    description: Restricted resources always need fresh strong authentication.
+    when:
+      classificationAtLeast: RESTRICTED
+    effect: REQUIRE_STEP_UP
+
+  - id: P-05-admin-actions-step-up
+    description: Administrative actions always need fresh strong authentication.
+    when:
+      actionIn: [ADMIN]
+    effect: REQUIRE_STEP_UP
+
+  # ---- SWG: outbound web -----------------------------------------------------------------
+  - id: P-10-web-public
+    description: Public web destinations are allowed (risk can still escalate).
+    when:
+      all:
+        - resourceKind: WEB
+        - classificationAtMost: PUBLIC
+    effect: PERMIT
+
+  # ---- CASB / DLP: SaaS data -------------------------------------------------------------
+  - id: P-20-saas-internal
+    description: Employees may use internal SaaS data.
+    when:
+      all:
+        - subjectType: HUMAN
+        - resourceKind: SAAS_DATA
+        - classificationAtMost: INTERNAL
+    effect: PERMIT
+
+  - id: P-21-saas-unmanaged-read-only
+    description: From unmanaged devices SaaS data is read-only (no download).
+    when:
+      all:
+        - resourceKind: SAAS_DATA
+        - deviceManaged: false
+    effect: PERMIT_LIMITED
+
+  # ---- Risk guardrail --------------------------------------------------------------------
+  - id: P-90-very-high-risk
+    description: Hard ceiling regardless of costs. Belt and braces over the cost model.
+    when:
+      riskAbove: 0.9
+    effect: DENY
