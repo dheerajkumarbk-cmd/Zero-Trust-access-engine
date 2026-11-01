@@ -28,6 +28,14 @@ administrators' signatures (`PolicyInstaller`). See [docs/security-architecture.
 - **M2, cost-optimal action** (after Elkan 2001, three-action extension):
   step up when `p > C_F / (C_F + C_B(1-β))`, deny when `p > (C_D-C_F) / (C_D-C_F+β·C_B)`.
   `β` = probability an attacker passes step-up, so weaker MFA makes the engine deny sooner.
+- **M1, novelty likelihood ratios** (adapted from Freeman et al. 2016): `P(new|legit) = (k+1)/(w+2)`
+  over the last 200 logins, backing off IP -> ASN -> country; plus IP reputation (Freeman's p(attack|x)).
+- **M4, Beta reputation** (Josang & Ismail 2002): `E = (r+1)/(r+s+2)`, with half-life forgetting.
+- **M6, circular login time:** circular kernel density (von Mises kernels) vs uniform; handles several daily habits.
+- **M7, impossible travel:** haversine distance minus both GeoIP accuracy radii, over elapsed time.
+- **Failure bursts:** Poisson likelihood ratio for brute force, password spray and org-wide surges, clamped at zero.
+
+Reports: [Layer 1](docs/layer-1-report.md), [Layer 2](docs/layer-2-report.md).
 
 ## Build
 

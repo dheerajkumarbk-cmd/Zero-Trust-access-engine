@@ -126,6 +126,9 @@ public final class Fixtures {
         private Action action = Action.READ;
         private String ip = "203.0.113.10";
         private String country = "IN";
+        private String asn = "AS64500";
+        private double lat = 19.07;
+        private double lon = 72.88;
 
         public RequestBuilder id(String v) { requestId = v; return this; }
         public RequestBuilder at(Instant v) { timestamp = v; return this; }
@@ -149,6 +152,10 @@ public final class Fixtures {
         public RequestBuilder action(Action v) { action = v; return this; }
         public RequestBuilder ip(String v) { ip = v; return this; }
         public RequestBuilder country(String v) { country = v; return this; }
+        /** Source network: IP, ISP (ASN), country and GeoIP coordinates (25 km accuracy). */
+        public RequestBuilder network(String ip, String asn, String country, double lat, double lon) {
+            this.ip = ip; this.asn = asn; this.country = country; this.lat = lat; this.lon = lon; return this;
+        }
 
         public AccessRequest build() {
             Evidence evidence = Evidence.none();
@@ -166,7 +173,7 @@ public final class Fixtures {
                     new Device(deviceId, managed, posture),
                     new Resource(resourceId, kind, classification, failMode),
                     action,
-                    new NetworkContext(ip, "AS64500", country, 19.07, 72.88, 25),
+                    new NetworkContext(ip, asn, country, lat, lon, 25),
                     "mumbai",
                     evidence);
         }

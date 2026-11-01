@@ -14,9 +14,11 @@ import java.util.Objects;
  * @param maxAuthenticationAge a step-up older than this no longer counts (re-authentication window)
  * @param maxPostureAge        a posture report older than this is not believed
  * @param bypassProbability    per-method beta: P(attacker passes this authenticator)
+ * @param challengeMethod      the authenticator the Policy Administrator challenges with on STEP_UP;
+ *                             its beta is the one the cost model must assume
  */
 public record AssuranceSettings(Duration maxAuthenticationAge, Duration maxPostureAge,
-                                Map<AuthMethod, Double> bypassProbability) {
+                                Map<AuthMethod, Double> bypassProbability, AuthMethod challengeMethod) {
 
     public AssuranceSettings {
         requirePositive(maxAuthenticationAge, "maxAuthenticationAge");
@@ -27,6 +29,16 @@ public record AssuranceSettings(Duration maxAuthenticationAge, Duration maxPostu
             copy.put(m, Validate.probability(beta, "bypassProbability." + m));
         }
         bypassProbability = Map.copyOf(copy);
+        Objects.requireNonNull(challengeMethod, "challengeMethod");
+        if (!challengeMethod.satisfiesStepUp()) {
+            throw new IllegalArgumentException("cannot step up with " + challengeMethod);
+        }
+    }
+
+    /** Challenge with number-matching push (beta 0.05), the common enterprise default. */
+    public AssuranceSettings(Duration maxAuthenticationAge, Duration maxPostureAge,
+                             Map<AuthMethod, Double> bypassProbability) {
+        this(maxAuthenticationAge, maxPostureAge, bypassProbability, AuthMethod.PUSH_NUMBER_MATCH);
     }
 
     /** 15-minute step-up window, 24-hour posture freshness, documented default betas. */

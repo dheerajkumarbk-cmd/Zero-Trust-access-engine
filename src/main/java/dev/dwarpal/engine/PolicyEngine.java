@@ -23,7 +23,7 @@ import java.util.Objects;
  * Policy Administrator's job, not this class's.
  *
  * <p>Pipeline (Chain of Responsibility):
- * hard gates -> attribute resolution -> evidence verification -> risk -> policy -> step-up resolution
+ * evidence verification -> hard gates -> attribute resolution -> risk -> policy -> step-up resolution
  * -> obligations.
  *
  * <p>Properties:
@@ -59,6 +59,13 @@ public final class PolicyEngine implements DecisionPoint {
         this.directory = Objects.requireNonNull(b.directory, "directory (attributes must never come from the request)");
         this.keyRing = Objects.requireNonNull(b.keyRing, "keyRing (signed evidence needs a trust anchor; use KeyRing.empty() to trust none)");
         this.assurance = Objects.requireNonNull(b.assurance, "assurance");
+        double challengeBeta = assurance.bypass(assurance.challengeMethod());
+        if (Math.abs(costModel(b).stepUpBypassProbability() - challengeBeta) > 1e-9) {
+            // Two sources of truth for "how strong is our MFA" would silently disagree.
+            throw new IllegalArgumentException("cost model assumes step-up beta "
+                    + costModel(b).stepUpBypassProbability() + " but the challenge method "
+                    + assurance.challengeMethod() + " has beta " + challengeBeta);
+        }
         this.gates = List.copyOf(b.gates);
         this.scorers = List.copyOf(b.scorers);
         this.aggregator = Objects.requireNonNull(b.aggregator, "aggregator");
@@ -69,13 +76,17 @@ public final class PolicyEngine implements DecisionPoint {
             throw new IllegalArgumentException("policy set has linter errors: " + errors);
         }
         this.pipeline = List.of(
+                new EvidenceVerificationStage(keyRing, assurance),
                 new HardGateStage(gates),
                 new AttributeResolutionStage(directory),
-                new EvidenceVerificationStage(keyRing, assurance),
                 new RiskStage(scorers, aggregator, costModel),
                 new PolicyStage(policySet),
                 new StepUpResolutionStage(assurance, costModel),
                 new ObligationStage());
+    }
+
+    private static CostModel costModel(Builder b) {
+        return Objects.requireNonNull(b.costModel, "costModel");
     }
 
     public static Builder builder() {
@@ -110,7 +121,8 @@ public final class PolicyEngine implements DecisionPoint {
                                 + "); failing closed");
             }
         }
-        return new Decision(request.requestId(), ctx.outcome(), ctx.restricted(), ctx.matchedPolicyId(),
+        return new Decision(request.requestId(), ctx.outcome(), ctx.restricted(), ctx.deviceVerified(),
+                ctx.matchedPolicyId(),
                 policySet.version(), ctx.risk(), ctx.reasons(), request.timestamp());
     }
 

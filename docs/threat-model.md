@@ -1,4 +1,4 @@
-# Dwarpal threat model (STRIDE), v0.3
+# Dwarpal threat model (STRIDE), v0.5
 
 Scope: the Policy Engine core. Policy Administrator, PEP and SIEM loop are added in later layers
 and get their own rows then.
@@ -71,6 +71,36 @@ Found during this pass and fixed before release:
 - Authentication proofs were initially not device-bound (stolen-proof replay); now bound to the device id.
 - Our own sanitiser and tests contained the literal invisible characters they defend against; replaced with escapes, and the hygiene gate added.
 
+## v0.4 Layer 2 (behavioural scorers) threats
+
+| # | STRIDE | Threat | Control | Tests |
+|---|---|---|---|---|
+| L1 | Tampering | Baseline poisoning: repeated attempts make the attacker's country/device "familiar" | Only a full, non-restricted, non-degraded ALLOW is learned | `repeatedAttacksCannotPoisonTheBaseline`, `stepUpDenyRestrictedAndDegradedDecisionsTeachNothing` |
+| L2 | Denial of service | Spamming DENYs in a victim's name ruins their reputation (lock-out) | Automatic bad marks only from honeytoken hits, and only on the device | `ordinaryDenialsNeverDamageTheVictimsReputation` |
+| L3 | Elevation | Fail once on purpose so the Poisson model reads "typo" and lowers risk | Failure LLR clamped at >= 0; zero failures give no evidence | `bruteForceIsPoissonAndCannotBeGamedWithOneFailure` |
+| L4 | Denial of service | Rotating IPs/usernames exhaust memory | Size caps + LRU on every store | `perUserValuesAreBounded`, `userCountIsBounded...`, `failureLogAndLedgerAreBoundedPerKey` |
+| L5 | Tampering | Future-dated ALLOW becomes "last login" and silences impossible-travel | Learner checks request time against its own clock | `futureOrStaleRequestsAreNeverLearned` (exploit reproduced first) |
+| L6 | Tampering | A scorer writes to the stores it reads | Read-only views `BehaviorHistory`, `TrustView`, `FailureView` | SAST (EI_EXPOSE_REP2 led to the fix) |
+| L7 | Spoofing | Replayed IP/device id buys reassurance | Known-value evidence is reassurance, capped per factor and in total (B1) | `noveltyOrdersEvidence...`, `b1_...` |
+| L8 | Elevation | Numeric blow-up (kappa = 1/0 for a perfectly regular user) | kappa capped at 20 | `perfectlyRegularUserDoesNotProduceInfiniteEvidence` |
+
+## v0.5 second red-team pass (both layers)
+
+Each was reproduced as a passing exploit test before the fix.
+
+| # | STRIDE | Weakness | Fix | Tests |
+|---|---|---|---|---|
+| C1 | Spoofing | Typing the victim's device id (no signature) bought "known device" reassurance and the laptop's reputation; a honeytoken hit with a typed id could get the real laptop flagged | Device identity counts only when the agent signature verifies; unproven devices share one `unverified-device` value that can add risk, never remove it; `Decision.deviceVerified`; evidence verification now runs first | `unprovenDevicesAreLearnedAsOneBucket...`, `honeytokenWithAnUnprovenDeviceId...`, `cloudServerWithStolenPasswordAndSpoofedLaptopId...` |
+| C2 | Repudiation / Tampering | Flooding 100k junk failures evicted password-spray evidence from the LRU store | Recent evidence is never evicted (new keys dropped and counted instead); a keyless per-minute counter sees every failure; `attack-surge` heightened-alert scorer, capped at x10 so a flood cannot lock everyone out | `floodingCannotEvictRecentAttackEvidence`, `orgWideSurge...` |
+| C3 | (correctness) | Distinct values capped at 256 while logins kept counting: long-tenure roamers were punished for normal behaviour | Novelty rate measured over the last 200 logins | `roamerWhoseEveryLoginIsANewIp...`, `novelUserWhoSettlesDown...` |
+| C4 | Tampering | Learning wrapped inside audit learned an ALLOW that audit had turned into DENY | `DecisionPipeline.standard` builds learning(audited(core)) in one place | `learnsWhatTheUserActuallyGotWhenAuditFails` |
+| C5 | (consistency) | MFA strength assumed by the cost model and by the step-up logic could silently disagree | `AssuranceSettings.challengeMethod`; engine refuses to build if the betas differ | `costModelAndChallengeMethodMustAgreeOnMfaStrength` |
+| C6 | (model fit) | Single von Mises curve averaged two daily habits into a time the user never uses and called it the most normal | Circular kernel density | `twoDailyHabitsAreBothNormalAndTheGapBetweenIsNot` |
+| C7 | Denial of service | Ed25519 in the JDK costs ~1.4 ms; repeated verification of identical proofs dominated latency | Bounded cache of successful verifications only; all policy checks still run every call | `verificationCacheNeverChangesAnAnswer`; p50 3.8 -> 0.3 ms |
+
+Robustness evidence: 3,000 fuzzed requests (no crash, no NaN, no engine error, intact audit chain);
+8 threads x 250 decisions (intact chain, exact learning counts); latency test p99 < 20 ms.
+
 ## Residual risks (accepted for this layer, scheduled)
 
 | Risk | Why accepted now | Planned in |
@@ -84,3 +114,9 @@ Found during this pass and fixed before release:
 | Admin endpoint flooding (each rejection is audited) | No admin API yet | Layer 3: rate limiting |
 | Per-method MFA beta values are assumptions | No peer-reviewed rates exist | Sensitivity analysis in evaluation |
 | Branch protection / required checks are GitHub settings | Needs the repo owner | When the repo is created |
+| Network novelty and impossible travel are correlated (double count) | Naive Bayes | Evaluation measures it |
+| Scorer probabilities (P(new country given attack), Poisson rates) are assumptions | No labelled data yet | Layer 4 calibration on simulated data |
+| Shared NAT with several mistyping users can look like a spray | Rates chosen for small offices | Per-IP allow-list for known office egress |
+| During a failure flood, brand-new attacking IPs may go untracked (store full of recent evidence) | Bounded memory | Flood itself raises `attack-surge` and `droppedKeys`; SOC alert in Layer 4 |
+| Ed25519 is not quantum-resistant | No ML-DSA in JDK 17 | Hybrid Ed25519 + ML-DSA after moving to JDK 25 LTS (see security-architecture.md) |
+| An attacker who passes strong MFA from a new place gets that place learned | By design (verified) | SOC review + `InMemoryBehaviorHistory.forget` for remediation |

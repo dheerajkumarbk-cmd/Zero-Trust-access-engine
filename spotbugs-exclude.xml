@@ -20,6 +20,7 @@
             <Class name="dev.dwarpal.policy.Conditions$RegionIn"/>
             <Class name="dev.dwarpal.policy.Conditions$ResourceIdIn"/>
             <Class name="dev.dwarpal.policy.Conditions$RoleIn"/>
+            <Class name="dev.dwarpal.pip.ThreatIntel"/>
         </Or>
     </Match>
 </FindBugsFilter>

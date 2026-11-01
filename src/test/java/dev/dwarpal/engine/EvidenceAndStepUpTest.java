@@ -203,11 +203,29 @@ class EvidenceAndStepUpTest {
         }
         AssuranceSettings distrustful = new AssuranceSettings(Duration.ofMinutes(15), Duration.ofHours(24), betas);
         PolicyEngine e = PolicyEngine.builder().policySet(PolicyEngineTest.POLICIES).directory(Fixtures.emptyDirectory())
-                .keyRing(Fixtures.KEYRING).assurance(distrustful).scorer(fixed("new-asn", 10))
+                .keyRing(Fixtures.KEYRING).assurance(distrustful).scorer(fixed("new-asn", 15))
                 .aggregator(new dev.dwarpal.risk.BayesianRiskAggregator(0.001, 7))
-                .costModel(new dev.dwarpal.decision.CostModel(1000, 1, 20, 0.05)).build();
+                .costModel(new dev.dwarpal.decision.CostModel(1000, 1, 20, 0.9)).build();
         AccessRequest r = Fixtures.request().authenticated(AuthMethod.WEBAUTHN, Duration.ofMinutes(1)).build();
         assertEquals(Outcome.STEP_UP, decide(e, r).outcome());
+    }
+
+    @Test
+    void costModelAndChallengeMethodMustAgreeOnMfaStrength() {
+        // Default challenge is PUSH_NUMBER_MATCH (beta 0.05); a cost model assuming WebAuthn's 0.01 is a config error.
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> PolicyEngine.builder()
+                .policySet(PolicyEngineTest.POLICIES).directory(Fixtures.emptyDirectory()).keyRing(Fixtures.KEYRING)
+                .aggregator(new dev.dwarpal.risk.BayesianRiskAggregator(0.001, 7))
+                .costModel(new dev.dwarpal.decision.CostModel(1000, 1, 20, 0.01)).build());
+        assertTrue(e.getMessage().contains("PUSH_NUMBER_MATCH"), e.getMessage());
+        AssuranceSettings webauthn = new AssuranceSettings(Duration.ofMinutes(15), Duration.ofHours(24),
+                AssuranceSettings.defaults().bypassProbability(), AuthMethod.WEBAUTHN);
+        PolicyEngine.builder().policySet(PolicyEngineTest.POLICIES).directory(Fixtures.emptyDirectory())
+                .keyRing(Fixtures.KEYRING).assurance(webauthn)
+                .aggregator(new dev.dwarpal.risk.BayesianRiskAggregator(0.001, 7))
+                .costModel(new dev.dwarpal.decision.CostModel(1000, 1, 20, 0.01)).build();
+        assertThrows(IllegalArgumentException.class, () -> new AssuranceSettings(Duration.ofMinutes(15),
+                Duration.ofHours(24), AssuranceSettings.defaults().bypassProbability(), AuthMethod.PASSWORD));
     }
 
     @Test

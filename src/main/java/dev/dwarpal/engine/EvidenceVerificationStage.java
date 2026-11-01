@@ -13,13 +13,14 @@ import dev.dwarpal.domain.DevicePosture;
 import java.util.Optional;
 
 /**
- * Stage 3: decide how much of the request's signed evidence to believe.
+ * Stage 1: decide how much of the request's signed evidence to believe. It runs first, so every
+ * decision (even a hard-gate DENY) knows whether the device proved its identity.
  *
  * <ul>
  *   <li><b>Device posture.</b> Without a valid signature from the agent key bound to <em>this</em>
- *       device, the posture counts as SELF_REPORTED whatever the request claims. A valid agent
- *       signature supports at most AGENT_SIGNED: hardware attestation is not verified here, so it
- *       cannot be claimed.</li>
+ *       device, the posture counts as SELF_REPORTED whatever the request claims, and the device id
+ *       is unproven. A valid agent signature means AGENT_SIGNED, whatever was claimed: hardware
+ *       attestation is not verified here, so it cannot be claimed.</li>
  *   <li><b>Authentication.</b> The login method and time count only with a valid identity
  *       provider signature bound to this subject <em>and this device</em>. Otherwise it is ignored, and any step-up will
  *       have to happen again.</li>
@@ -60,9 +61,8 @@ final class EvidenceVerificationStage implements DecisionStage {
                     SignedMessages.posture(device.id(), claimed, proof.get().signedAt()),
                     req.timestamp(), settings.maxPostureAge());
             if (r.valid()) {
-                effective = claimed.assurance().atLeast(AssuranceLevel.AGENT_SIGNED)
-                        ? AssuranceLevel.AGENT_SIGNED
-                        : claimed.assurance();
+                effective = AssuranceLevel.AGENT_SIGNED;
+                ctx.markDeviceVerified();
             } else {
                 ctx.note("device posture signature rejected: " + r.reason());
             }

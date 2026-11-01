@@ -26,6 +26,7 @@ final class DecisionContext {
     private String matchedPolicyId = "none";
     private boolean terminated;
     private AuthenticationContext verifiedAuthentication;
+    private boolean deviceVerified;
 
     DecisionContext(AccessRequest request, SignalSnapshot signals, RiskAssessment initialRisk) {
         this.request = request;
@@ -89,6 +90,15 @@ final class DecisionContext {
     /** Adds an explanation line without changing the outcome. */
     void note(String reason) {
         reasons.add(reason);
+    }
+
+    boolean deviceVerified() {
+        return deviceVerified;
+    }
+
+    /** Set only by evidence verification after the device agent's signature checked out. */
+    void markDeviceVerified() {
+        this.deviceVerified = true;
     }
 
     Optional<AuthenticationContext> verifiedAuthentication() {

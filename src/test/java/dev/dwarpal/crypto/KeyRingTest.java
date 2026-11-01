@@ -53,6 +53,27 @@ class KeyRingTest {
     }
 
     @Test
+    void verificationCacheNeverChangesAnAnswer() {
+        KeyRing ring = new KeyRing(List.of(new TrustedKey("admin-1", KeyPurpose.POLICY_SIGNER, "asha",
+                ADMIN.getPublic(), NOW.minus(Duration.ofDays(30)), NOW.plus(Duration.ofDays(30)))));
+        SignatureProof good = sign(ADMIN, "admin-1", MSG, NOW);
+        assertTrue(ring.verify(KeyPurpose.POLICY_SIGNER, null, good, MSG, NOW, Duration.ofHours(1)).valid());
+        assertEquals(1, ring.cachedVerifications());
+        assertTrue(ring.verify(KeyPurpose.POLICY_SIGNER, null, good, MSG, NOW, Duration.ofHours(1)).valid(), "cache hit");
+        // Same signature, different message: must not ride on the cached success.
+        assertFalse(ring.verify(KeyPurpose.POLICY_SIGNER, null, good, Canonical.encode("test/v1", "other"), NOW,
+                Duration.ofHours(1)).valid());
+        // Cached, but now too old / wrong purpose: the cheap checks still run every time.
+        assertFalse(ring.verify(KeyPurpose.POLICY_SIGNER, null, good, MSG, NOW.plus(Duration.ofHours(2)), Duration.ofHours(1)).valid());
+        assertFalse(ring.verify(KeyPurpose.DEVICE_AGENT, null, good, MSG, NOW, Duration.ofHours(1)).valid());
+        // Failures are never cached: junk cannot fill the cache.
+        for (int i = 0; i < 50; i++) {
+            ring.verify(KeyPurpose.POLICY_SIGNER, null, sign(Ed25519.generateKeyPair(), "admin-1", MSG, NOW), MSG, NOW, Duration.ofHours(1));
+        }
+        assertEquals(1, ring.cachedVerifications());
+    }
+
+    @Test
     void malformedSignaturesFailClosedWithoutExceptions() {
         assertFalse(Ed25519.verify(ADMIN.getPublic(), MSG, "%%%not-base64%%%"));
         assertFalse(Ed25519.verify(ADMIN.getPublic(), MSG, "AAAA"));

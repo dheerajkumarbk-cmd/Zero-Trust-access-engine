@@ -13,6 +13,9 @@ import java.util.Objects;
 /**
  * The Policy Engine's answer, with its full reasoning.
  *
+ * <p>{@code deviceVerified} is true only when the device proved its identity with a valid agent
+ * signature. A device id alone is a claim anyone can type.
+ *
  * <p>{@code restricted} is an obligation that survives escalation: if any policy limited the
  * session (read-only, no download), a later STEP_UP does not lift that limit. The PEP and Policy
  * Administrator must honour it even after the user passes MFA.
@@ -21,7 +24,8 @@ import java.util.Objects;
  * because "denied: new country" teaches an attacker which VPN exit to pick. The analyst view has
  * every factor and the matching policy. Reasons are sanitised because they can quote input.
  */
-public record Decision(String requestId, Outcome outcome, boolean restricted, String matchedPolicyId,
+public record Decision(String requestId, Outcome outcome, boolean restricted, boolean deviceVerified,
+                       String matchedPolicyId,
                        String policyVersion, RiskAssessment risk, List<String> reasons, Instant decidedAt) {
 
     public static final int MAX_REASON_LENGTH = 512;
@@ -53,7 +57,7 @@ public record Decision(String requestId, Outcome outcome, boolean restricted, St
     public String analystReport() {
         StringBuilder sb = new StringBuilder();
         sb.append(String.format(Locale.ROOT, "[%s] %s%s  policy=%s@%s  P(attack)=%.4f (prior %.4f)%n",
-                requestId, outcome, restricted ? " +RESTRICTED" : "", Sanitize.text(matchedPolicyId, 128),
+                requestId, outcome, (restricted ? " +RESTRICTED" : "") + (deviceVerified ? "" : " (device unverified)"), Sanitize.text(matchedPolicyId, 128),
                 Sanitize.text(policyVersion, 128), risk.posteriorAttack(), risk.priorAttack()));
         for (RiskFactor f : risk.factors()) {
             sb.append(String.format(Locale.ROOT, "  %+.3f  %-24s x%.2f  %s%n",

@@ -32,7 +32,7 @@ class ImmutabilityTest {
         Subject s = new Subject("a", SubjectType.HUMAN, new HashSet<>(Set.of("r")), "d");
         unmodifiable(() -> s.roles().add("admin"));
 
-        Decision d = new Decision("q", Outcome.DENY, false, "p", "v", RiskAssessment.notEvaluated(0.1),
+        Decision d = new Decision("q", Outcome.DENY, false, false, "p", "v", RiskAssessment.notEvaluated(0.1),
                 new ArrayList<>(List.of("x")), Fixtures.T0);
         unmodifiable(() -> d.reasons().add("forged"));
 
@@ -46,5 +46,10 @@ class ImmutabilityTest {
         unmodifiable(() -> new Conditions.CountryIn(new HashSet<>(Set.of("IN"))).countries().add("X"));
         unmodifiable(() -> new Conditions.RegionIn(new HashSet<>(Set.of("m"))).regions().add("x"));
         unmodifiable(() -> new Conditions.ResourceIdIn(new HashSet<>(Set.of("w"))).ids().add("x"));
+
+        var intel = new dev.dwarpal.pip.ThreatIntel(new HashSet<>(Set.of("1.2.3.4")), new HashSet<>(), new HashSet<>());
+        unmodifiable(() -> intel.abuseIps().clear());          // nobody can quietly delist an attacker
+        unmodifiable(() -> intel.torExitIps().add("x"));
+        unmodifiable(() -> intel.hostingAsns().add("x"));
     }
 }

@@ -119,8 +119,8 @@ public class PolicyEngineTest {
 
     @Test
     void selfReportedHealthIsNotEnoughForConfidentialData() {
-        AccessRequest r = Fixtures.request().roles("finance")
-                .posture(new DevicePosture(true, true, true, AssuranceLevel.SELF_REPORTED))
+        AccessRequest r = Fixtures.request().roles("finance").unsignedPosture()
+                .posture(new DevicePosture(true, true, true, AssuranceLevel.AGENT_SIGNED))
                 .resource("ledger", ResourceKind.PRIVATE_APP, DataClassification.CONFIDENTIAL).build();
         Decision d = decide(engine(), r);
         assertEquals(Outcome.DENY, d.outcome());

@@ -104,3 +104,27 @@ persisting anything. Integrity is the core's job, and it is cryptographic.
 
 Rule for future dependencies: Apache, Eclipse, OpenJDK or OWASP origin, actively maintained, no
 open critical CVEs, pinned version, listed in the SBOM, and a stated reason in this table.
+
+## 8. Post-quantum readiness
+
+| Primitive | Used for | Quantum status | Action |
+|---|---|---|---|
+| Ed25519 signatures | Device posture, login proofs, policy approvals | Broken by Shor's algorithm on a large quantum computer. NIST IR 8547 schedules quantum-vulnerable signatures for deprecation after 2030 and disallowal after 2035 | Plan hybrid Ed25519 + ML-DSA (FIPS 204) |
+| HMAC-SHA256 | Audit chain | Symmetric: Grover's algorithm at most halves the security level (about 128-bit), which is considered adequate | Keep |
+| SHA-256 | Hashes, digests | As above | Keep |
+| (Layer 4) TLS key exchange | PEP to PDP traffic | Vulnerable to "harvest now, decrypt later" | Hybrid X25519 + ML-KEM key exchange |
+
+Why signatures are not urgent today: Dwarpal's signatures are short-lived (login proofs 15 minutes,
+posture 24 hours, policy approvals 7 days) and checked at decision time. A forger needs a quantum
+computer *at the moment of the decision*, unlike encrypted traffic, which can be recorded now and
+decrypted later. The long-lived exposure is the trust anchors (administrators' and IdP keys).
+
+Plan (crypto-agility first, then hybrid):
+1. Move to **JDK 25 LTS**, which ships ML-DSA in the standard library (JEP 497, delivered in JDK 24):
+   no third-party crypto needed.
+2. Add an algorithm identifier to `TrustedKey` and `SignatureProof`, and raise the signature size
+   limit (an ML-DSA-65 signature is about 3.3 KB versus 64 bytes).
+3. **Hybrid AND-composition**: a proof is valid only if *both* the Ed25519 and the ML-DSA signature
+   verify, so the system is at least as strong as the stronger of the two. Start with policy approvals
+   and IdP proofs (the long-lived trust anchors), then device agents.
+4. Drop Ed25519 once ML-DSA has matured in the field.

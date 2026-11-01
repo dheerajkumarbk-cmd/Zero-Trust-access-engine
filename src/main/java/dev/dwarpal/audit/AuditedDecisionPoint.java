@@ -48,7 +48,8 @@ public final class AuditedDecisionPoint implements DecisionPoint {
         } catch (RuntimeException e) {
             List<String> reasons = new ArrayList<>(d.reasons());
             reasons.add("audit trail unavailable (" + e.getClass().getSimpleName() + "); failing closed");
-            return new Decision(d.requestId(), Outcome.DENY, d.restricted(), "audit-failure", d.policyVersion(),
+            return new Decision(d.requestId(), Outcome.DENY, d.restricted(), d.deviceVerified(), "audit-failure",
+                    d.policyVersion(),
                     d.risk(), reasons, d.decidedAt());
         }
     }
@@ -64,6 +65,7 @@ public final class AuditedDecisionPoint implements DecisionPoint {
         f.put("pAttack", String.format(Locale.ROOT, "%.6f", d.risk().posteriorAttack()));
         f.put("subject", r.subject().id());
         f.put("device", r.device().id());
+        f.put("deviceVerified", Boolean.toString(d.deviceVerified()));
         f.put("resource", r.resource().id());
         f.put("action", r.action().name());
         f.put("sourceIp", r.network().ip());
