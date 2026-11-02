@@ -87,6 +87,33 @@ class PolicyInstallerTest {
     }
 
     @Test
+    void aFloodOfJunkBundlesNeitherFloodsTheAuditTrailNorLocksAnyoneOut() {
+        // "asha" is only a name the caller types: a flood in her name must not stop her real change.
+        for (int i = 0; i < 60; i++) {
+            assertFalse(installer.install(new PolicyBundle(2, LOCKDOWN, List.of()), "asha").installed());
+        }
+        assertEquals(PolicyInstaller.AUDITED_REJECTIONS_PER_HOUR + 1, sink.snapshot().size(),
+                "10 rejections recorded one by one, then one summary");
+        assertEquals("POLICY_REJECTIONS_THROTTLED", lastAuditType());
+        assertEquals(50, installer.suppressedRejections());
+        PolicyInstaller.Result real = installer.install(new PolicyBundle(2, LOCKDOWN,
+                List.of(approve(ASHA, "asha-1", 2, LOCKDOWN), approve(RAVI, "ravi-1", 2, LOCKDOWN))), "asha");
+        assertTrue(real.installed(), "a correctly approved bundle is never rate limited: " + real.reason());
+        assertEquals("POLICY_INSTALLED", lastAuditType());
+    }
+
+    @Test
+    void manyInventedRequesterNamesStillCannotFloodTheAuditTrail() {
+        for (int i = 0; i < 500; i++) {
+            installer.install(new PolicyBundle(2, LOCKDOWN, List.of()), "name-" + i);
+        }
+        assertEquals(PolicyInstaller.AUDITED_REJECTIONS_PER_HOUR_TOTAL + 1, sink.snapshot().size(),
+                "100 rejections and one summary per hour, whatever names are used");
+        assertEquals(PolicyInstaller.AUDITED_REJECTIONS_PER_HOUR_TOTAL,
+                sink.snapshot().stream().filter(r -> r.type().equals("POLICY_REJECTED")).count());
+    }
+
+    @Test
     void twoDistinctAdministratorsCanInstallAndItIsAudited() {
         assertEquals(Outcome.ALLOW, aliceOutcome());
         PolicyInstaller.Result r = installer.install(new PolicyBundle(2, LOCKDOWN,

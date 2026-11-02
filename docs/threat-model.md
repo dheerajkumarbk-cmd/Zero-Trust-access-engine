@@ -1,7 +1,8 @@
-# Dwarpal threat model (STRIDE), v0.6
+# Dwarpal threat model (STRIDE), v0.8
 
-Scope: the Policy Engine core. Policy Administrator, PEP and SIEM loop are added in later layers
-and get their own rows then.
+Scope: the Policy Engine core (v0.1 to v0.6) and the Policy Administrator: sessions (v0.7, v0.8) and
+privileged access (v0.8). The PEP
+and the SIEM loop get their own rows when they are built.
 
 ## Design threats (v0.1)
 
@@ -110,17 +111,77 @@ Robustness evidence: 3,000 fuzzed requests (no crash, no NaN, no engine error, i
 
 Dependency scan: all 9 dependencies clean on OSV.dev (control check: snakeyaml 1.33 correctly reports CVE-2022-1471).
 
+## v0.7 Layer 3 (Policy Administrator: sessions)
+
+Design threats for sessions, and how each is met.
+
+| # | STRIDE | Threat | Mitigation in code | Test |
+|---|---|---|---|---|
+| S1 | Spoofing | Stolen bearer token used from the attacker's machine | Every use needs a signature by the session key (proof of possession, DPoP-style) over this exact request | `aStolenTokenIsUselessWithoutTheSessionKey` |
+| S2 | Tampering | Captured request replayed inside the proof's validity | Request id is single-use per session (`NonceCache`, retention = proof age + clock skew); checked after the proof, so nobody can burn the victim's ids | `aCapturedRequestCannotBeReplayed`, `parallelUsesAreAllServedAndAParallelReplayWinsOnlyOnce` |
+| S3 | Tampering | A valid proof moved to a different request (READ proof reused for WRITE) | Proof binds session, request id, subject, device, resource and action | `aProofCannotBeMovedToADifferentRequest` |
+| S4 | Info disclosure | Token leaks from logs or a store dump | Only the SHA-256 of the token is stored; `SessionGrant.toString()` redacts it; audit records carry the session id only | `anAllowedLoginOpensASessionThatCanBeUsed` |
+| S5 | Spoofing | Token guessed | 256-bit random tokens from `SecureRandom`; malformed tokens refused before lookup; no RNG injection point | `garbageTokensAreRefusedWithoutErrors`, `onlyWellFormedTokensReachTheStore` |
+| S6 | Elevation | A session outlives the conditions it was granted under (device deny-listed, risk rises) | Continuous evaluation: the engine decides every use; a risk-driven, hard-gate or READ denial revokes the session | `continuousEvaluationRevokesTheMomentADeviceIsDenyListed` |
+| S7 | Denial of service | One harmless action-specific denial (e.g. WRITE forbidden) kills a working session | Revoke only when the action was READ, a hard gate fired, or P(attack) is at least `revokeAboveRisk` | `anActionSpecificPolicyDenialDoesNotEndTheSession` |
+| S8 | Elevation | Read-only session used for downloads, or a downgrade lost | Read-only checked before the engine; downgrade is permanent for the session | `aReadOnlySessionMayReadButNotDownloadAndSurvivesTheAttempt` |
+| S9 | Spoofing | Stolen unlocked laptop keeps a session forever | Idle timeout 30 min; re-authentication every 8 h / 4 h / 1 h / 15 min by classification needs fresh, IdP-signed, subject- and device-bound MFA; absolute lifetime 10 h | `theStolenUnlockedLaptopIsCutOffAtTheNextReauthentication`, `afterTheReauthIntervalOnlyAFreshVerifiedMfaContinuesTheSession` |
+| S10 | Spoofing | Token presented for another subject or device | Treated as theft: session revoked and audited | `aTokenPresentedFromAnotherDeviceEndsTheSession` |
+| S11 | Repudiation | Sessions opened or ended without a record | `SESSION_OPENED` audited before the token is released (no audit, no session); revocations audited after removal (revocation never waits for the audit) | `noAuditNoSession`, `revocationBySessionSubjectOrDeviceIsImmediateAndAudited` |
+| S12 | Denial of service | Memory exhaustion through sessions or nonces | 100,000 sessions, 5 per subject (oldest closed), 200,000 nonces; when full of live entries, refuse (fail-closed) rather than forget | `aFullStoreRefusesNewSessionsUntilOldOnesExpire`, `aFullNonceCacheRefusesRatherThanForgetsLiveEntries` |
+| S13 | Denial of service | Fake login failures injected to lock users out (brute-force scorer) | Failure reports must be signed by the identity provider, recent, single-use; the subject is signed | `forgedReplayedAndStaleFailureReportsAreRefused` |
+| S14 | Tampering | Revocation racing an in-flight use | Session updates go through the store atomically and never re-create a removed session | `parallelUsesAreAllServedAndAParallelReplayWinsOnlyOnce` and the store design |
+
+Red-team pass on Layer 3 (each item first reproduced as a working exploit, now a permanent regression test):
+
+| # | STRIDE | Breach | Root cause | Fix | Tests |
+|---|---|---|---|---|---|
+| R1 | Spoofing | A captured login, replayed with a new request id and the attacker's own session key, opened a session the engine counted as coming from the victim's verified laptop | The signed posture report is valid for 24 h and is not tied to any key the client holds | When a login carries signed posture, the device agent must also sign (device, request id, session key thumbprint), at most 2 min old, usable once; checked before the engine runs, so a replay is neither decided nor learned | `aReplayedLoginCannotOpenASessionForAnotherKey`, `aBindingMustBeFreshAndFromThisDevicesAgent` |
+| P6 | (pipeline) | SpotBugs: the builder stored the shared audit log and an injectable random generator | Setter-style builder | The audit log is a required builder argument; the random generator is no longer injectable | SpotBugs gate |
+
+## v0.8 Layer 3 completed (second pass on sessions; privileged access)
+
+Second red-team pass on sessions (each first reproduced as a working probe, now a regression test in `SessionHardeningTest` or the engine tests):
+
+| # | STRIDE | Breach | Root cause | Fix | Tests |
+|---|---|---|---|---|---|
+| R2 | Elevation | A resource reclassified INTERNAL to CONFIDENTIAL kept its 4 h re-authentication interval (90 min without MFA observed) | Interval fixed when the session opened | The interval in force is the shorter of the opening one and the one for the resource's classification now | `r2_reclassifyingAResourceUpwardsShortensItsOpenSessions` |
+| R3 | Tampering | A login dated 3 h in the past opened a session | The PA trusted the request's timestamp (freshness gate is optional in the engine) | Sessions are live: requests more than 2 min from the PA clock are refused before the engine | `r3_requestsDatedAwayFromTheClockAreRefused` |
+| R4 | Spoofing | A captured MFA proof plus the password opened a session on an agentless device | MFA proofs were bound to a device *id*, which is only a name without an agent | Key-bound MFA (`dwarpal/authentication/v3`): the identity provider signs the session key's thumbprint; the PA refuses any MFA claim not bound to the session key, at login and on every use | `r4_aCapturedMfaProofCannotBeReplayedWithAnotherKey`, `r4_insideASessionAnMfaProofForAnotherKeyIsRefused` |
+| R5 | Elevation | Every employee held standing admin rights on internal apps (P-01, P-02 and P-20 granted every action) | Reference policy | Grants cover READ, WRITE and DOWNLOAD only; ADMIN needs the `admin` role (P-06), granted just in time by the PAM | `thereAreNoStandingAdminRights`, `r5_noStandingAdminEvenWithStrongMfa` |
+| R6 | Denial of service | Five idle sessions counted towards the per-subject limit and were closed as 'limit', never as expired | Dead sessions only removed when used | A subject's dead sessions are closed (audited as expired) before the limit is applied; `purgeExpired()` for a scheduler | `r6_deadSessionsDoNotCountTowardsTheLimitAndAreReportedAsExpired` |
+| P7 | Repudiation | A flood of refused proofs could flood the audit trail | Every refusal audited | Refusal records throttled to 20 per type and subject per minute, the rest counted | `aFloodOfRefusalsCannotFloodTheAuditTrail` |
+
+Privileged access (part B), design threats:
+
+| # | STRIDE | Threat | Mitigation in code | Test |
+|---|---|---|---|---|
+| A1 | Elevation | Standing admin rights waiting to be stolen | No grant for ADMIN without the `admin` role; the role exists only inside an approved time window (`ElevatedDirectory`) | `justInTimeAdminExistsOnlyInsideTheApprovedWindow` |
+| A2 | Elevation | One person grants themselves admin | Approver must be a different person; approval signed with an `ELEVATION_APPROVER` key bound to that approver | `nobodyApprovesTheirOwnElevation` |
+| A3 | Tampering | An approval reused for a longer duration, another role or another request | The approval signs request id, subject, role and duration | `anApprovalCoversExactlyWhatWasAskedAndNothingElse` |
+| A4 | Spoofing | Elevation requested with weak, stale or replayed MFA | WebAuthn only, at most 5 min old, identity-provider-signed, single-use | `requestingPrivilegeNeedsFreshPhishingResistantMfaUsedOnce`, `oneMfaCeremonyServesOneRequest` |
+| A5 | Elevation | Elevation outlives the need | At most 1 h (hard cap 8 h in settings); unapproved requests lapse after 30 min; revocation by grant or subject takes effect on the next decision | `anUnapprovedRequestLapses`, `revokingElevationTakesEffectOnTheNextDecision` |
+| A6 | Elevation | Break-glass used quietly or by the wrong account | Only designated accounts and roles; sealed `BREAK_GLASS` credential signs role and justification, once; 30 min; SOC alerted at once; mandatory review by someone else, 'misuse' ends the grant | `breakGlassWorksAlertsAtOnceAndMustBeReviewed`, `misuseFoundInReviewEndsTheGrantAtOnce`, `breakGlassCannotBeForgedReplayedOrSelfReviewed` |
+| A7 | Repudiation | Privilege granted without a record | Nothing is requested, granted or opened unless its audit record was written | `noAuditNoElevation`, `withoutAnAuditTrailThereIsNoApprovalAndNoBreakGlass` |
+| A8 | Denial of service | Unbounded requests, grants or admin endpoints | Bounded stores (refuse when full); rate limits on genuine requests (5/h), approvals (20/h), break-glass (3/day); policy-install rejections audited 10/h per name, 100/h overall | `elevationRequestsAndApprovalsAreRateLimited`, `genuineApprovalsAreLimitedPerApprover`, `oneGrantCanBeRevokedAndStoresStayBounded`, `aFloodOfJunkBundlesNeitherFloodsTheAuditTrailNorLocksAnyoneOut` |
+
+Red-team pass on part B:
+
+| # | STRIDE | Breach | Root cause | Fix | Tests |
+|---|---|---|---|---|---|
+| R7 | Denial of service | Ten junk requests sent in Alice's name (no MFA) used up her 5-per-hour quota, locking her out of elevation during an incident; the same held for approvals in Bob's name and for policy installs (the requester name is not authenticated) | Rate limits counted attempts before checking who was asking | Only authenticated actions count against a person's quota (after MFA, approval or sealed-credential verification); junk is refused and its audit records and alerts are throttled; policy installs are never blocked, only the auditing of rejections is throttled | `r7_junkSentInSomeonesNameCannotUseUpTheirQuota`, `aFloodOfJunkBundlesNeitherFloodsTheAuditTrailNorLocksAnyoneOut`, `manyInventedRequesterNamesStillCannotFloodTheAuditTrail` |
+
 ## Residual risks (accepted for this layer, scheduled)
 
 | Risk | Why accepted now | Planned in |
 |---|---|---|
-| Request-id replay inside the freshness window | Needs PA session/nonce state | Layer 3: PA nonce cache |
+| ~~Request-id replay inside the freshness window~~ | Closed in v0.7 for session traffic (S2) | Done (Layer 3) |
 | Hardware (TPM) attestation not verified | Needs an attestation verifier | Later layer; until then capped at AGENT_SIGNED |
 | HMAC audit key cannot live in an HSM yet (key must be extractable) | Simplicity | Layer 4: KMS-backed signing of chain heads |
 | Correlated scorers overcount under naive Bayes | Inherent in the model | Documented; evaluation chapter |
 | Linter conflict detection is structural only | SMT out of scope | What-If replay (Layer 4) |
 | PEP must treat an exception (null input) as DENY | Contract outside the engine | PEP layer contract + tests |
-| Admin endpoint flooding (each rejection is audited) | No admin API yet | Layer 3: rate limiting |
+| ~~Admin endpoint flooding (each rejection is audited)~~ | Closed in v0.8 (A8, R7) | Done (Layer 3) |
 | Per-method MFA beta values are assumptions | No peer-reviewed rates exist | Sensitivity analysis in evaluation |
 | Branch protection / required checks are GitHub settings | Needs the repo owner | When the repo is created |
 | Network novelty and impossible travel are correlated (double count) | Naive Bayes | Evaluation measures it |
@@ -128,6 +189,13 @@ Dependency scan: all 9 dependencies clean on OSV.dev (control check: snakeyaml 1
 | Shared NAT with several mistyping users can look like a spray | Rates chosen for small offices | Per-IP allow-list for known office egress |
 | During a failure flood, brand-new attacking IPs may go untracked (store full of recent evidence) | Bounded memory | Flood itself raises `attack-surge` and `droppedKeys`; SOC alert in Layer 4 |
 | Ed25519 is not quantum-resistant | Hybrid needs a format change | Build is on JDK 25 LTS (ML-DSA verified working); hybrid Ed25519 + ML-DSA after the college submission |
-| Stolen, unlocked laptop used at the victim's home with their password looks exactly like the victim (60/60 ALLOW in simulation) | Signals alone cannot separate them | Layer 3: session lifetime limits and periodic re-authentication |
+| Stolen, unlocked laptop used at the victim's home with their password looks exactly like the victim (60/60 ALLOW in simulation) | Signals alone cannot separate them | Narrowed in v0.7 (S9): the window ends at the next re-authentication (at most 8 h / 4 h / 1 h / 15 min by classification), and a laptop left idle 30 min has no session to take |
 | The org-wide failure counter only covers the last 2 hours of recorded time | Ring buffer | Fine for live use; What-If replay must rebuild it from the audit trail |
 | An attacker who passes strong MFA from a new place gets that place learned | By design (verified) | SOC review + `InMemoryBehaviorHistory.forget` for remediation |
+| MFA proofs outside sessions (single decisions straight to the engine) may still be unbound (`authentication/v2`) and replayable for 15 min | Backward compatibility for engine-only callers | Sessions require key-bound MFA (v0.8, R4); retire v2 when the enforcement point (Layer 4) always runs through the PA |
+| Whoever holds a stolen token can end the victim's session by presenting it for another device (S10) | Ending a possibly stolen session is the safe side | Accepted; the victim logs in again |
+| Sessions and nonces live in memory: a restart ends all sessions | Simplicity, no database yet | Layer 4 persistent store (tokens stay hashed) |
+| A session opened while its subject is being revoked can survive the revocation | Open and revoke are not one transaction | Continuous evaluation denies its first use once the directory disables the account; revoke together with the directory change |
+| Break-glass needs the identity provider for MFA on each admin action (P-05) | Consistency: every admin action needs fresh MFA | An offline emergency procedure for 'identity provider down' (Layer 5 runbook) |
+| Approvers are any holder of an `ELEVATION_APPROVER` key; no per-role approver lists; one human with two accounts could approve themselves | Simplicity | Per-role approver groups in the admin console (Layer 6) |
+| Elevation applies to all of the subject's sessions, not one device | The directory has no device context | Admin actions still need fresh MFA bound to the session key on every request (P-05 + R4), so another device without that key gains nothing |

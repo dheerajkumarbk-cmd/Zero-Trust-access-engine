@@ -92,7 +92,7 @@ public class PolicyEngineTest {
         assertEquals(Outcome.ALLOW, d.outcome());
         assertFalse(d.restricted());
         assertEquals("P-01-employees-internal-apps", d.matchedPolicyId());
-        assertEquals("2026.11.01-1", d.policyVersion());
+        assertEquals("2026.11.02-1", d.policyVersion());
     }
 
     @Test
@@ -137,8 +137,17 @@ public class PolicyEngineTest {
     }
 
     @Test
+    void thereAreNoStandingAdminRights() {
+        // Without the admin role (granted just in time by the PAM) an ADMIN action has no grant at all,
+        // and passing MFA does not change that: REQUIRE_STEP_UP is a constraint, not a grant.
+        Decision d = decide(engine(), Fixtures.request().action(Action.ADMIN)
+                .authenticated(dev.dwarpal.domain.AuthMethod.WEBAUTHN, java.time.Duration.ofMinutes(1)).build());
+        assertEquals(Outcome.DENY, d.outcome(), d.analystReport());
+    }
+
+    @Test
     void adminActionNeedsStepUp() {
-        assertEquals(Outcome.STEP_UP, decide(engine(), Fixtures.request().action(Action.ADMIN).build()).outcome());
+        assertEquals(Outcome.STEP_UP, decide(engine(), Fixtures.request().roles("engineer", "admin").action(Action.ADMIN).build()).outcome());
     }
 
     // ---- hard gates & failure handling ---------------------------------------------------------

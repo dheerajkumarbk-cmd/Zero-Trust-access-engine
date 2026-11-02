@@ -7,27 +7,29 @@
 # YAML gotcha: unquoted NO / yes / on are parsed as booleans ("the Norway problem").
 # The loader rejects them, so always quote country codes and versions.
 
-version: "2026.11.01-1"
+version: "2026.11.02-1"
 algorithm: DENY_OVERRIDES
 default: DENY
 
 policies:
   # ---- ZTNA: private applications --------------------------------------------------------
   - id: P-01-employees-internal-apps
-    description: Employees may use internal apps.
+    description: Employees may use internal apps (not administer them).
     when:
       all:
         - subjectType: HUMAN
         - resourceKind: PRIVATE_APP
         - classificationAtMost: INTERNAL
+        - actionIn: [READ, WRITE, DOWNLOAD]
     effect: PERMIT
 
   - id: P-02-finance-confidential
-    description: Finance may use confidential finance apps.
+    description: Finance may use confidential finance apps (not administer them).
     when:
       all:
         - roleIn: [finance]
         - classificationAtLeast: CONFIDENTIAL
+        - actionIn: [READ, WRITE, DOWNLOAD]
     effect: PERMIT
 
   - id: P-03-confidential-needs-attested-health
@@ -44,6 +46,15 @@ policies:
     when:
       classificationAtLeast: RESTRICTED
     effect: REQUIRE_STEP_UP
+
+  - id: P-06-admin-only-with-elevated-role
+    description: No standing admin rights. Administration needs the admin role, which the PAM grants just in time.
+    when:
+      all:
+        - subjectType: HUMAN
+        - roleIn: [admin]
+        - actionIn: [ADMIN]
+    effect: PERMIT
 
   - id: P-05-admin-actions-step-up
     description: Administrative actions always need fresh strong authentication.
@@ -62,12 +73,13 @@ policies:
 
   # ---- CASB / DLP: SaaS data -------------------------------------------------------------
   - id: P-20-saas-internal
-    description: Employees may use internal SaaS data.
+    description: Employees may use internal SaaS data (not administer it).
     when:
       all:
         - subjectType: HUMAN
         - resourceKind: SAAS_DATA
         - classificationAtMost: INTERNAL
+        - actionIn: [READ, WRITE, DOWNLOAD]
     effect: PERMIT
 
   - id: P-21-saas-unmanaged-read-only

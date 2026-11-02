@@ -149,6 +149,12 @@ public final class Fixtures {
             return this;
         }
         public RequestBuilder unsignedAuthentication() { signAuthentication = false; return this; }
+        /** The IdP binds the authentication to this client session key (call after {@code authenticated}). */
+        public RequestBuilder boundTo(java.security.PublicKey sessionKey) {
+            authentication = new AuthenticationContext(authentication.method(), authentication.authenticatedAt(),
+                    java.util.Optional.of(dev.dwarpal.crypto.Digests.thumbprint(sessionKey)));
+            return this;
+        }
         public RequestBuilder resource(String id, ResourceKind k, DataClassification c) {
             resourceId = id; kind = k; classification = c; return this;
         }

@@ -1,14 +1,14 @@
-# Dwarpal: project state document (Layers 1 and 2)
+# Dwarpal: project state document (Layers 1 to 3)
 
 | | |
 |---|---|
 | Document | Project state and progress log |
-| State as of | 2026-11-02 (commit `d7dff6b` on `main`) |
+| State as of | 2026-11-02 (Layer 3 complete and approved) |
 | Repository | https://github.com/dheerajkumarbk-cmd/Zero-Trust-access-engine (public) |
 | Platform | Java 25 LTS (Temurin 25.0.5), Maven 3.9, no Docker, runs on an 8 GB laptop |
-| Size | 90 main classes (5,128 lines), 23 test files (3,842 lines), 196 tests |
-| Layers complete | Layer 1 (core decision engine), Layer 2 (behavioural risk scorers) |
-| Next | Runnable demo, then Layer 3 (Policy Administrator: sessions, tokens, revocation) |
+| Size | 103 main classes (7,139 lines), 30 test files (5,536 lines), 267 tests |
+| Layers complete | Layer 1 (core decision engine), Layer 2 (behavioural risk scorers), Layer 3 (Policy Administrator: A sessions, B privileged access) |
+| Next | Layer 4 (enforcement point and SASE edge); the demo front end when requested |
 
 The name: a *dvārapāla* (Sanskrit, "door guardian") is the guardian figure at a temple gate who
 decides who may pass. Dwarpal does the same for every access request.
@@ -23,7 +23,7 @@ decides who may pass. Dwarpal does the same for every access request.
 4. [Architecture](#4-architecture)
 5. [Layer 1: the core decision engine](#5-layer-1-the-core-decision-engine)
 6. [Layer 2: behavioural risk scorers](#6-layer-2-behavioural-risk-scorers)
-7. [How the two layers work together](#7-how-the-two-layers-work-together)
+7. [How the layers work together, and Layer 3](#7-how-the-layers-work-together-and-layer-3)
 8. [Mathematics reference](#8-mathematics-reference)
 9. [Worked examples](#9-worked-examples)
 10. [What makes Dwarpal different from enterprise products](#10-what-makes-dwarpal-different-from-enterprise-products)
@@ -92,8 +92,8 @@ enforces.
   |  Policy Decision Point (PDP)                                       |
   |  +----------------------------+     +---------------------------+  |
   |  |  Policy Engine (PE)        |     |  Policy Administrator (PA)|  |
-  |  |  Dwarpal Layer 1 + 2       |---->|  Layer 3: sessions,       |  |
-  |  |  "should this be allowed?" |     |  tokens, revocation       |  |
+  |  |  Dwarpal Layer 1 + 2       |---->|  Dwarpal Layer 3: sessions|  |
+  |  |  "should this be allowed?" |     |  revocation, JIT admin    |  |
   |  +-------------^--------------+     +-------------+-------------+  |
   |                |                                  |                |
   |   Policy Information Points (PIPs)                |                |
@@ -110,10 +110,10 @@ enforces.
 | NIST 800-207 role | Status in Dwarpal |
 |---|---|
 | Policy Engine (PE) | **Done** (Layers 1 and 2): `engine.PolicyEngine` and the risk scorers |
-| Policy Administrator (PA) | **Partly done.** Policy administration is complete (two-person signed policy bundles, `admin.PolicyInstaller`). Session and token management is Layer 3 |
+| Policy Administrator (PA) | **Done** (Layer 3): sessions with proof of possession, continuous evaluation and revocation (`session.PolicyAdministrator`); privileged access (`pam.PrivilegedAccessManager`); two-person policy bundles (`admin.PolicyInstaller`) |
 | Policy Information Points (PIP) | **Done as interfaces with in-memory implementations**: `pip.AttributeDirectory`, `pip.ThreatIntel`, behaviour stores |
 | Policy Enforcement Point (PEP) | Not built (Layer 4). The PEP contract (`engine.DecisionPoint`) is defined |
-| Continuous diagnostics, SIEM | Audit trail is ready to ship to a SIEM (Layer 4) |
+| Continuous diagnostics, SIEM | Audit trail is ready to ship to a SIEM (Layer 5) |
 
 So Dwarpal is **more than a PDP**: alongside the decision engine it includes the parts of the Policy
 Administrator that change policy, the information points the decision reads, a tamper-evident audit
@@ -171,19 +171,22 @@ Mapping to the CISA Zero Trust Maturity Model (v2.0) pillars:
 
 | Layer | Package | Files | Lines | Responsibility |
 |---|---|---|---|---|
-| 1 | `domain` | 17 | 428 | Request, subject, device, posture, resource, network, evidence; validation and sanitising |
-| 1 | `crypto` | 8 | 377 | Ed25519, canonical signed messages, key ring, SHA-256 digests |
+| 1 | `domain` | 17 | 453 | Request, subject, device, posture, resource, network, evidence; validation and sanitising |
+| 1 | `crypto` | 8 | 450 | Ed25519, canonical signed messages (10 types), key ring with 5 key purposes, SHA-256 digests |
 | 1 | `pip` | 3 | 112 | Attribute directory and threat-intelligence snapshot |
 | 1 | `engine` | 16 | 968 | `PolicyEngine`, the seven stages, hard gates, MFA settings |
 | 1 | `risk` | 5 | 208 | Risk factors, scorer interface, Bayesian aggregation |
 | 1 | `decision` | 3 | 175 | Outcomes, cost model, decision object with user and analyst views |
 | 1 | `policy` | 10 | 939 | Policy language, safe YAML loader, linter, combining algorithms |
 | 1 | `audit` | 6 | 330 | HMAC-SHA256 chained audit trail, audited decision point |
-| 1 | `admin` | 2 | 178 | Two-person signed policy bundles |
-| 1 | `runtime` | 1 | 41 | `DecisionPipeline`: assembles the layers in the only safe order |
+| 1 | `admin` | 2 | 212 | Two-person signed policy bundles, throttled rejection auditing |
+| 1 | `runtime` | 1 | 50 | `DecisionPipeline`: assembles the layers in the only safe order |
 | 2 | `risk.scorers` | 10 | 732 | The ten behavioural scorers and their maths helpers |
 | 2 | `behavior` | 9 | 640 | Login history, reputation ledger, failure log, learning loop |
-| | **Total** | **90** | **5,128** | Layer 1: 3,756 lines. Layer 2: 1,372 lines |
+| 3 | `session` | 7 | 1,088 | Policy Administrator: sessions, proof of possession, re-authentication, revocation, signed failure reports |
+| 3 | `pam` | 4 | 632 | Privileged access: just-in-time elevation, approvals, break-glass, elevated directory |
+| 3 | `guard` | 2 | 150 | Replay cache and rate limiter shared by sessions, PAM and policy administration |
+| | **Total** | **103** | **7,139** | Layer 1: 3,897 lines. Layer 2: 1,372 lines. Layer 3: 1,870 lines |
 
 ### 4.2 The full request path
 
@@ -361,17 +364,18 @@ match wins; the default) and `FIRST_APPLICABLE` (file order).
 | Error messages sanitised and truncated | Parser messages leaking or forging file content |
 
 **Reference policy set** (`src/main/resources/policies/default-policy.yaml`, version
-`2026.11.01-1`, `DENY_OVERRIDES`, default DENY):
+`2026.11.02-1`, `DENY_OVERRIDES`, default DENY):
 
 | Id | Rule | Effect |
 |---|---|---|
-| P-01 | Humans may use internal private apps (classification at most INTERNAL) | PERMIT |
-| P-02 | Finance may use confidential finance apps | PERMIT |
+| P-01 | Humans may use (read, write, download) internal private apps (classification at most INTERNAL) | PERMIT |
+| P-02 | Finance may use (not administer) confidential finance apps | PERMIT |
 | P-03 | Confidential or higher only from a healthy device with at least agent-signed posture | DENY otherwise |
 | P-04 | Restricted resources always need fresh strong authentication | REQUIRE_STEP_UP |
 | P-05 | Administrative actions always need fresh strong authentication | REQUIRE_STEP_UP |
+| P-06 | Administrative actions only with the `admin` role, which exists only through a just-in-time grant (no standing admin) | PERMIT |
 | P-10 | Public web destinations | PERMIT |
-| P-20 | Humans may use internal SaaS data | PERMIT |
+| P-20 | Humans may use (not administer) internal SaaS data | PERMIT |
 | P-21 | SaaS data from unmanaged devices is read-only | PERMIT_LIMITED |
 | P-90 | P(attack) above 0.9 | DENY (hard ceiling over the cost model) |
 
@@ -467,7 +471,7 @@ it → the engine updates P(attack) with that method's β → ALLOW.
 | Signed claims (posture, login, policy) | Forgery, tampering | Ed25519 signatures give integrity and origin; encryption would not stop forgery | Done |
 | Audit trail | Editing or deleting history | HMAC-SHA256 chain and external head anchor | Done |
 | Enforcement point to engine traffic | Eavesdropping, spoofed answers | Mutual TLS 1.3 | Layer 4 |
-| Audit and session data at rest | Disk theft, insiders reading personal data | Encrypted storage (AES-256-GCM) and data minimisation | Layer 4 |
+| Audit and session data at rest | Disk theft, insiders reading personal data | Encrypted storage (AES-256-GCM) and data minimisation; session tokens already stored only as hashes | Layer 5 |
 | Keys (audit key, admin private keys) | Theft | Never in the repository (secret scanning), loaded from environment or KMS; admin keys on hardware tokens in production | Every layer |
 
 The core keeps request data in memory only for one decision, so its confidentiality comes from not
@@ -481,8 +485,8 @@ storing anything; its integrity is cryptographic.
 | No shared admin identities; every key bound to a named administrator | Done |
 | Privileged actions audited, including rejected attempts | Done |
 | Step-up for every admin action | Done (policy P-05) |
-| Just-in-time admin elevation, break-glass account, admin rate limiting | Layer 3 |
-| Database least privilege (audit tables insert-only) | Layer 4 |
+| Just-in-time admin elevation, break-glass account, admin rate limiting | Done (Layer 3 part B, section 7.2) |
+| Database least privilege (audit tables insert-only) | Layer 5 |
 
 ---
 
@@ -541,7 +545,7 @@ narrow:
 
 ---
 
-## 7. How the two layers work together
+## 7. How the layers work together, and Layer 3
 
 ```
                   Layer 2 (evidence)                     Layer 1 (decision)
@@ -566,12 +570,53 @@ narrow:
 - **Closed loop.** Layer 1's final, audited decisions feed Layer 2's learning, under the rules in
   section 6.3.
 
+Layer 3 sits on top: it never decides itself, it asks the engine again on every request.
+
+```
+          Layer 1-2: Policy Engine                       Layer 3: Policy Administrator
+login --> decide(login) -- ALLOW -->  A: open session (token + session key + limits)        --> client
+use   --> check token, key proof, replay, limits --> decide(use) again (continuous evaluation)
+          ALLOW: go on    STEP_UP: re-authenticate    DENY: revoke    incident: revoke user/device
+admin --> B: request role (eligible, WebAuthn, reason) --> approver signs --> role exists for 1 h
+          break-glass: sealed credential --> 30 min, SOC alerted, reviewed afterwards
+```
+
+### 7.1 Layer 3 part A: sessions
+
+| Element | Design |
+|---|---|
+| Token | 256-bit random; only its SHA-256 is stored; never printed or audited |
+| Proof of possession | The client makes an Ed25519 session key at login; every use is signed with it over (session, request id, subject, device, resource, action, time), at most 2 min old (the idea of DPoP) |
+| Replay | Each request id is single-use per session, remembered 4 min |
+| Device binding | A login with signed device posture must also carry the device agent's signature over this session key, for this login, within 2 min, once |
+| Key-bound MFA | The identity provider signs the session key's thumbprint into each MFA proof (`authentication/v3`); the PA refuses MFA bound to any other key |
+| Continuous evaluation | The engine decides every use again; a deny-list entry, honeytoken or rising risk ends the session on the next request |
+| Limits | Idle 30 min; lifetime 10 h; re-authentication every 8 h / 4 h / 1 h / 15 min for PUBLIC / INTERNAL / CONFIDENTIAL / RESTRICTED (stricter of opening and current classification); requests within 2 min of the PA clock |
+| Revocation | By session, user or device; removed first, audited second |
+| Bounds | 100,000 sessions, 5 per user, 200,000 replay entries; refuse when full |
+| Login failures | Only identity-provider-signed, recent, single-use failure reports reach the brute-force and spray detectors |
+
+### 7.2 Layer 3 part B: privileged access
+
+| Element | Design |
+|---|---|
+| No standing admin | ADMIN is granted only to the `admin` role (policy P-06), and nobody holds it permanently |
+| Just-in-time elevation | Eligible person, at most 1 h, written reason, WebAuthn at most 5 min old and single-use; a **different** person signs (request, person, role, duration) with an approver key; unapproved requests lapse after 30 min |
+| In force | `ElevatedDirectory` adds active grants to the roles the engine sees; the role disappears on the first decision after the window or a revocation; every admin action still needs fresh, key-bound MFA (P-05) |
+| Break-glass | Designated accounts open a sealed credential (signs role and reason, once); 30 min; SOC paged at once; mandatory signed review by someone else; misuse ends the grant |
+| Rate limits | 5 genuine requests per person per hour, 20 genuine approvals per approver per hour, 3 break-glass uses per account per day; only authenticated actions count, so junk cannot lock anyone out |
+| Accountability | Nothing is requested, granted or opened without its audit record; refusals audited with throttling |
+
+Exposure arithmetic: a standing admin account is an admin 8,760 hours a year; with three 1-hour
+elevations a week it is 156 hours, 98% less, each hour tied to an approver and a reason. Full details,
+the maths and the red-team results are in [layer-3-report.md](layer-3-report.md).
+
 ---
 
 ## 8. Mathematics reference
 
 All formulas below are implemented exactly as written. Parameter values marked "assumption" are
-stated design assumptions, to be calibrated on real data in Layer 4.
+stated design assumptions, to be calibrated on real data in Layer 5.
 
 **Reference configuration** (used by the tests and the accuracy simulation; deployers set their
 own): prior P(attack) = 0.001; attack cap per factor ln 1000; reassurance caps ln 10;
@@ -585,11 +630,11 @@ costs C_B = 1000, C_F = 1, C_D = 20; challenge β = 0.05.
 | M2 | Three-action cost model | "Which action loses least?" | Done (Layer 1) | 8.2 |
 | M3 | Bayes with a base rate | "How likely is an attack, honestly?" | Done (Layer 1) | 8.1 |
 | M4 | Beta reputation | "How trustworthy is this user or device, and how sure are we?" | Done (Layer 2) | 8.5 |
-| M5 | Exponential decay | "How fast should old evidence fade?" | Done for reputation; per-signal session decay in Layer 3 | 8.5 |
+| M5 | Exponential decay | "How fast should old evidence fade?" | Done for reputation; per-signal SOC decay in Layer 5 | 8.5 |
 | M6 | Circular login-time density | "Is this an unusual hour for this user?" | Done (Layer 2) | 8.6 |
 | M7 | Impossible travel with GeoIP radii | "Could one person have moved that fast?" | Done (Layer 2) | 8.7 |
-| M8 | Change-impact analysis | "What would this policy edit change?" | Linter done; What-If replay in Layer 4 | 8.13 |
-| M9 | MFA fatigue | "How strong is each MFA method?" (the β values) | β per method done; sensitivity analysis in Layer 4 | 8.3 |
+| M8 | Change-impact analysis | "What would this policy edit change?" | Linter done; What-If replay in Layer 5 | 8.13 |
+| M9 | MFA fatigue | "How strong is each MFA method?" (the β values) | β per method done; PAM accepts only WebAuthn; sensitivity analysis in Layer 5 | 8.3 |
 
 Two further detectors were added in Layer 2 on the same footing: **Poisson rate tests** (8.8) and
 **IP reputation** (8.9).
@@ -701,7 +746,7 @@ P(\text{success by prompt } n) = 1 - \prod_{i=1}^{n} (1 - q_i)
 
 This value is β for push MFA. There is no peer-reviewed measured value for q (vendor claims about
 number matching are vendor claims), so β is a stated parameter per method, and the planned
-sensitivity analysis (Layer 4) shows how decisions change as β varies. Phishing-resistant methods
+sensitivity analysis (Layer 5) shows how decisions change as β varies. Phishing-resistant methods
 (WebAuthn) are not exposed to fatigue or relay attacks, hence their much lower β.
 
 ### 8.4 M1: novelty with the rule of succession and back-off
@@ -877,7 +922,7 @@ Before a new policy P₂ replaces P₁, the question is which requests would be 
 
 Margrave (Fisler et al., ICSE 2005) and Cedar (OOPSLA 2024) compute this exactly with decision
 diagrams or SMT solvers. Dwarpal's plan is empirical: **What-If replay** of recorded traffic through
-both policies (Layer 4; the freshness gate is switched off for replay, which the engine already
+both policies (Layer 5; the freshness gate is switched off for replay, which the engine already
 supports). Today's structural part is the linter, which blocks identical conditions with different
 effects and shadowed rules before deployment.
 
@@ -981,7 +1026,7 @@ proprietary.
 | **Learning** | Vendor machine learning on global data; administrators can mark sign-ins safe or compromised | Per-user baselines that learn only from full, low-risk ALLOWs on proven devices, with bounded, flood-resistant stores | Explicit, tested resistance to baseline poisoning |
 | **Policy safety** | Policies edited in a web console | Hardened YAML loader (no code execution, no aliases, strict schema) plus a linter that blocks conflicts before deployment | Policy-as-code that is safe to review in a pull request |
 | **Deployment and transparency** | Closed-source cloud service, priced per user per month, data processed by the vendor | Open source, self-hosted, one runtime dependency, JDK cryptography, sub-millisecond decisions on a laptop | Fits organisations that cannot send identity data to a cloud vendor, and teaching labs |
-| **Verifying the vendor** | Certifications and audit reports (SOC 2, ISO 27001, FedRAMP) | Anyone can rebuild it (reproducible builds), read the SBOM, run the 196 tests and re-run CodeQL | Trust by verification rather than by reputation |
+| **Verifying the vendor** | Certifications and audit reports (SOC 2, ISO 27001, FedRAMP) | Anyone can rebuild it (reproducible builds), read the SBOM, run the 267 tests and re-run CodeQL | Trust by verification rather than by reputation |
 
 ### 10.2 Where enterprise products are ahead
 
@@ -992,7 +1037,7 @@ Stated plainly, so the comparison stays honest:
 | Threat intelligence | Signals from billions of sign-ins across all customers | Whatever feeds the deployer supplies |
 | Model calibration | Models trained and measured on real attack data | Probabilities are stated assumptions, tested on synthetic data |
 | Device trust | Hardware attestation (TPM, Secure Enclave), MDM compliance | Agent-signed posture; hardware attestation reserved |
-| Sessions | Token issuing, continuous access evaluation, instant revocation | Layer 3 |
+| Sessions | Mature session management at global scale, credential vaulting and session recording | Sessions, continuous evaluation, revocation and JIT admin done (Layer 3); no vaulting or recording |
 | Enforcement | Global gateways and points of presence | No enforcement point yet (Layer 4) |
 | Integrations | Thousands of applications through SAML and OpenID Connect | Programmatic API only |
 | Operations | High availability, 24/7 support, admin consoles, compliance certifications | Single-process library, command line, documentation |
@@ -1017,7 +1062,7 @@ Security work happens at every stage, not at the end.
 | **Code** | Fail-closed by construction; input allow-lists; immutable objects; no reflection, no scripting, no object deserialisation; all cryptography from the JDK; one runtime dependency (SnakeYAML 2.7) |
 | **Commit (local)** | `.githooks/pre-commit` blocks key files, `.env` files and build output; blocks private keys and tokens (AWS, GitHub, Slack patterns); blocks invisible bidi characters; runs gitleaks if installed |
 | **Build** | `-Xlint:all -Werror` (every compiler warning fails the build); maven-enforcer requires JDK 25 and Maven 3.9; JaCoCo coverage gate at 80%; reproducible builds (fixed output timestamp) |
-| **Test** | 196 tests: unit, abuse cases, attack scenarios, property-based, fuzzing, concurrency, latency, accuracy simulation, source hygiene (no invisible characters in source) |
+| **Test** | 267 tests: unit, abuse cases, attack scenarios, property-based, fuzzing, concurrency, latency, accuracy simulation, source hygiene (no invisible characters in source) |
 | **Static analysis** | SpotBugs 4.10.5 with FindSecBugs 1.14.0; CodeQL `security-extended` on every push and weekly |
 | **Supply chain** | CycloneDX SBOM as a build artifact; dependency review on pull requests (fails on moderate or worse); Dependabot for Maven and GitHub Actions; OSV.dev scan of all dependencies |
 | **CI hardening** | Every GitHub Action pinned to a full commit SHA; least-privilege tokens (`contents: read` by default); `persist-credentials: false` on checkout; gitleaks secret scan over the full history |
@@ -1030,7 +1075,7 @@ Security work happens at every stage, not at the end.
 push / pull request
    |
    +--> secrets-scan       gitleaks over the full history
-   +--> build-test-sast    mvn verify (compile with -Werror, 196 tests, coverage gate)
+   +--> build-test-sast    mvn verify (compile with -Werror, 267 tests, coverage gate)
    |                       -> SpotBugs + FindSecBugs -> CycloneDX SBOM artifact
    +--> analyze            CodeQL security-extended (also weekly)
    +--> dependency-review  pull requests only: block vulnerable new dependencies
@@ -1065,20 +1110,24 @@ signature, and both must verify, so the system stays secure if either algorithm 
 
 ## 12. Testing and quality evidence
 
-### 12.1 Test suite (196 tests)
+### 12.1 Test suite (267 tests)
 
 | Test class | Tests | What it proves |
 |---|---|---|
+| PolicyAdministratorTest | 28 | Layer 3A: opening, every check on a use, replay, stolen tokens and keys, limits, re-authentication, read-only, continuous evaluation, revocation, capacity, no audit no session, fuzzing, concurrency, latency, the stolen-laptop scenario |
 | ScorersTest | 21 | Every scorer's formula against hand-computed values |
+| PrivilegedAccessTest | 20 | Layer 3B: JIT window, eligibility, MFA rules, self-approval, exact approvals, lapse, revocation, break-glass and review, rate limits, bounds, no audit no elevation |
 | SafePolicyLoaderTest | 20 | Malicious, malformed and oversized policy files are refused |
-| PolicyEngineTest | 19 | Pipeline behaviour, fail-closed paths, explanations |
+| PolicyEngineTest | 20 | Pipeline behaviour, fail-closed paths, explanations, no standing admin rights |
 | EvidenceAndStepUpTest | 17 | Signature rules, freshness, device binding, MFA as evidence |
 | BehaviorStoresTest | 17 | Store bounds, flooding resistance, learning rules |
 | AuditLogTest | 11 | Chain detects edits, deletions, insertions, reordering and truncation |
 | BreachRegressionTest | 10 | Every attack found in red-team passes stays blocked |
 | AttackScenariosTest | 10 | End-to-end stories: normal morning login, brand-new user, credential stuffing from abroad, impossible travel, password spray, brute force, a real trip (strong MFA once, then learned), cloud server with a stolen password and a spoofed laptop id, Tor exit at the usual hour, repeated attacks trying to poison the baseline |
 | SanitizeAndLimitsTest | 9 | Log injection, Trojan Source characters, size limits |
-| PolicyInstallerTest | 9 | Two-person rule, rollback refusal, expired approvals, wrong key purpose |
+| SessionHardeningTest | 8 | Layer 3 second red-team pass: reclassification, back-dating, MFA replay, no standing admin, dead sessions, audit floods |
+| SessionPartsTest | 8 | Replay cache, limits, token secrecy, signed failure reports |
+| PolicyInstallerTest | 11 | Two-person rule, rollback refusal, expired approvals, wrong key purpose, junk floods neither flood the audit trail nor lock anyone out |
 | PolicySetTest | 8 | Grants vs constraints, combining algorithms |
 | BayesianRiskAggregatorTest | 8 | Caps, order independence, posterior values |
 | KeyRingTest | 7 | Purpose, binding, validity, skew, age, cache |
@@ -1087,7 +1136,9 @@ signature, and both must verify, so the system stays secure if either algorithm 
 | PolicyLinterTest | 5 | Conflicts and shadowing |
 | PropertyTest | 4 | Over 7,000 random cases: more attack evidence never lowers P(attack) or loosens the action; scorer order never matters |
 | FuzzAndConcurrencyTest | 3 | Random requests never crash the engine or corrupt the audit trail; parallel load keeps the chain intact; p99 latency under 20 ms |
+| RateLimiterTest | 3 | Windows, bounded keys, settings |
 | DecisionPipelineTest | 2 | Safe wrapping order |
+| JustInTimeAdminSessionTest | 1 | Both halves of Layer 3 together: admin inside a session lives exactly as long as the grant |
 | AccuracySimulationTest | 1 | 60 synthetic users, legitimate and attack traffic |
 | ImmutabilityTest | 1 | Every object with a SpotBugs exposure suppression really is immutable |
 | SourceHygieneTest | 1 | No invisible or bidi characters anywhere in the source |
@@ -1096,16 +1147,17 @@ signature, and both must verify, so the system stays secure if either algorithm 
 
 | Measure | Value |
 |---|---|
-| Tests | 196 passing |
-| Coverage | 97.1% of lines, 91.4% of branches (gate: 80%) |
-| Static analysis | 0 SpotBugs / FindSecBugs findings across 129 classes; CodeQL green |
+| Tests | 267 passing |
+| Coverage | 96.9% of lines, 88.7% of branches (gate: 80%); every Layer 3 package above 80% branch coverage |
+| Static analysis | 0 SpotBugs / FindSecBugs findings; CodeQL green on the last push |
 | Dependencies | 9 in total, all clean on OSV.dev |
 | Latency, full pipeline (10 scorers, audit, learning) | p50 0.08 to 0.3 ms, p99 under 1.2 ms (requirement: p99 under 20 ms) |
+| Latency, one session use (token, key proof, replay check, engine, audit) | p50 0.7 to 1.1 ms, p99 1.3 to 3.4 ms |
 | Accuracy simulation (60 synthetic users) | 0 of 300 legitimate logins denied; 0 of 60 normal logins asked for MFA; 0 of 360 password-only attacks allowed |
-| CI on GitHub | All checks green on `d7dff6b` (secret scan, build/test/SAST, CodeQL) |
+| CI on GitHub | Checks run on every push (secret scan, build/test/SAST, CodeQL); see the Actions tab for the latest commit |
 
 The accuracy numbers come from our own traffic generator, so they show the engine is consistent with
-its threat model, not real-world accuracy. Real-world calibration is Layer 4.
+its threat model, not real-world accuracy. Real-world calibration is Layer 5.
 
 ---
 
@@ -1150,14 +1202,14 @@ Stated openly, each with where it will be addressed:
 
 | Limit | Effect | Addressed in |
 |---|---|---|
-| **Stolen, unlocked laptop used at the victim's home with their password** | Looks exactly like the victim (60 of 60 allowed in simulation) | Layer 3: session limits, periodic re-authentication |
-| **Assumed probabilities** (P(new given attack), MFA β, Poisson rates, likelihood ratios) | Decisions are only as good as these numbers | Layer 4: calibration from real logs, sensitivity analysis |
-| **Correlated evidence** (network novelty and impossible travel) | Counted twice under naive Bayes; bounded by the caps | Layer 4: correlation-aware weighting |
-| **Request replay inside the freshness window** | A captured request could be resent within minutes | Layer 3: nonce cache and session state |
+| **Stolen, unlocked laptop used at the victim's home with their password** | Looks exactly like the victim to Layers 1 and 2 | **Narrowed by Layer 3:** cut off at the next re-authentication (at most 4 h for INTERNAL, 15 min for RESTRICTED), and no session left after 30 min idle |
+| **Assumed probabilities** (P(new given attack), MFA β, Poisson rates, likelihood ratios) | Decisions are only as good as these numbers | Layer 5: calibration from real logs, sensitivity analysis |
+| **Correlated evidence** (network novelty and impossible travel) | Counted twice under naive Bayes; bounded by the caps | Layer 5: correlation-aware weighting |
+| **Single decisions outside a session** | Engine-only callers may still send unbound MFA proofs (`authentication/v2`) | Closed for sessions in Layer 3; retire v2 once the enforcement point (Layer 4) always goes through the PA |
 | **Hardware attestation not verified** | Posture at most AGENT_SIGNED | Future: TPM / platform attestation |
 | **Audit key in process memory** | Protected by the operating system, not an HSM | Deployment: KMS or HSM |
 | **Ed25519 is not quantum-safe** | Long-term forgery risk after about 2030 | Hybrid Ed25519 + ML-DSA (JDK 25 ready) |
-| **In-memory stores** | Behaviour history is lost on restart | Layer 3/4: persistent stores |
+| **In-memory stores** | Behaviour history, sessions and grants are lost on restart | Layer 4/5: persistent stores (tokens stay hashed) |
 | **No runnable demo yet** | The engine is exercised through tests only | Next step |
 
 ---
@@ -1188,7 +1240,10 @@ Stated openly, each with where it will be addressed:
 | 09:09 | Repository made public; all GitHub Actions updated to Node 24 releases pinned to commit SHAs (`0f8f46b`); CodeQL and dependency review active |
 | 09:11 | CodeQL job permissions aligned with GitHub's template (`9b69af4`); all CI checks green |
 | 10:20 | **Layers 1 and 2 completed** (`d7dff6b`): safe policy loading from files, local pre-commit hook, reproducible builds, consolidated report; all CI checks green |
-| Now | This project state document |
+| 12:21 | Project state document pushed (`a717096`) |
+| 12:30 | **Layer 3 part A built** (sessions): tokens, proof of possession, replay cache, limits, re-authentication, continuous evaluation, revocation, signed failure reports; red-team pass 1 (R1) |
+| 13:15 | Red-team pass 2 on part A (R2 to R6): reclassification, back-dating, MFA replay (key-bound MFA, `authentication/v3`), no standing admin in the reference policy, dead sessions |
+| 14:15 | **Layer 3 part B built** (privileged access): just-in-time elevation with signed approvals, break-glass with review, rate limits; red-team pass 3 (R7, quota exhaustion); 267 tests green; reviewed, approved and pushed |
 
 ### Commit history
 
@@ -1200,6 +1255,8 @@ Stated openly, each with where it will be addressed:
 | `0f8f46b` | 2026-11-02 09:09 | CI actions on Node 24, pinned to SHAs |
 | `9b69af4` | 2026-11-02 09:11 | CodeQL job permissions |
 | `d7dff6b` | 2026-11-02 10:20 | Completion of layers 1 and 2 |
+| `a717096` | 2026-11-02 12:21 | Project state document |
+| (Layer 3 commit) | 2026-11-02 | Layer 3: Policy Administrator (sessions, privileged access) |
 
 ### Documents in the repository
 
@@ -1209,7 +1266,7 @@ Stated openly, each with where it will be addressed:
 | `SECURITY.md` | Vulnerability reporting, built-in safeguards |
 | `docs/threat-model.md` | STRIDE threat model, attack cases, residual risks |
 | `docs/security-architecture.md` | Defence in depth, IAM and PAM, encryption, ASVS mapping, post-quantum readiness |
-| `docs/layer-1-report.md`, `docs/layer-2-report.md` | Short per-layer reports |
+| `docs/layer-1-report.md`, `docs/layer-2-report.md`, `docs/layer-3-report.md` | Per-layer reports (Layer 3 in full detail) |
 | `docs/report-layers-1-2.md` | Consolidated report |
 | `docs/project-state.md` | This document |
 
@@ -1217,12 +1274,17 @@ Stated openly, each with where it will be addressed:
 
 ## 16. Roadmap
 
-| Step | Content |
-|---|---|
-| **Next: runnable demo** | A command-line demo that replays a scripted day (normal logins, a takeover, a spray, a step-up) and prints the analyst reports and the audit-chain check, for the viva |
-| **Layer 3: Policy Administrator** | Session tokens (short-lived, device-bound), revocation, nonce cache against replay, session limits and periodic re-authentication (closes the stolen-laptop gap), login service feeding the failure log, IAM and PAM admin console |
-| **Layer 4: operations** | What-If replay of recorded traffic against a proposed policy, calibration of the assumed probabilities from real logs, SIEM shipping of the audit chain and its head, enforcement point (gateway) with mTLS |
-| **Post-quantum** | Hybrid Ed25519 + ML-DSA signatures on every proof (signature field grows from 256 characters to about 4.5 KB) |
+The whole project has six layers:
+
+| Layer | Name | Content | Status |
+|---|---|---|---|
+| 1 | Core decision engine | One explained decision per request from signed evidence, policy and Bayesian risk; audit chain; two-person policy changes | Done |
+| 2 | Behavioural risk scorers | Ten detectors that turn a login into evidence; poisoning-resistant learning | Done |
+| 3 | Policy Administrator | A: sessions bound to a client key, re-checked on every request, revocable. B: no standing admin, just-in-time elevation, break-glass | Done |
+| 4 | Enforcement and SASE edge | The gateway in front of applications (ZTNA proxy, web gateway, SaaS/DLP controls) calling Layers 1 to 3 over an mTLS API; what the demo talks to | Next |
+| 5 | SOC loop and analytics | SIEM shipping of the audit chain, alerts, analyst feedback with decaying signals (M5), What-If replay (M8), calibration and accuracy measurement | Planned |
+| 6 | Console, demo and deployment | Web front end for users, admins and analysts; demo deployment (for example Vercel) | When requested |
+| Cross-cutting | Post-quantum | Hybrid Ed25519 + ML-DSA signatures on every proof (signature field grows from 256 characters to about 4.5 KB) | After submission |
 
 ---
 
@@ -1236,12 +1298,16 @@ Stated openly, each with where it will be addressed:
 | Base rate / prior | How common attacks are before looking at any evidence |
 | CASB | Cloud Access Security Broker: controls use of SaaS data |
 | DPoP | Demonstrating Proof of Possession: binding a token to a key the client holds |
+| Break-glass | An emergency account whose sealed credential grants privilege without an approver, under alerting and mandatory review |
 | HMAC | Keyed hash: proves a record was made by someone holding the key |
 | Honeytoken | A decoy account, device or credential; any use signals compromise |
+| JIT elevation | Just-in-time privilege: a role held only for an approved, short window |
 | LLR | Log-likelihood ratio: ln of how much more likely the evidence is under attack than under normal use |
 | Logit | ln(p / (1 - p)): probability on the log-odds scale |
 | PDP / PE / PA / PEP / PIP | Policy Decision Point / Engine / Administrator / Enforcement Point / Information Point (NIST 800-207) |
+| PAM | Privileged Access Management: controls on administrator rights |
 | Posterior | Probability of attack after the evidence |
+| Proof of possession | A signature with a key only the legitimate client holds, sent with each use of a token |
 | SASE | Secure Access Service Edge: networking and security (ZTNA, SWG, CASB) delivered as one service |
 | SBOM | Software Bill of Materials: list of every component in the build |
 | Step-up | Asking for additional authentication before allowing access |
@@ -1275,6 +1341,13 @@ Stated openly, each with where it will be addressed:
 | Brute force / spray / surge | 15 min; λ 0.2 vs 5 / 0.5 vs 10 / 20 vs 200 (cap ln 10) | `FailureRateScorer`, `AttackSurgeScorer` |
 | IP reputation | Abuse 50, Tor 20, hosting 10 (humans) | `IpReputationScorer` |
 | Store bounds | 100,000 users; 200,000 trust entities; 100,000 failure keys; 2,000,000 intel entries | `behavior`, `pip` |
+| Session limits | Idle 30 min; lifetime 10 h; re-authentication 8 h / 4 h / 1 h / 15 min by classification; 5 per user, 100,000 total | `SessionLimits` |
+| Proofs of possession and bindings | At most 2 min old; replay entries kept 4 min, 200,000 at most | `SessionLimits`, `NonceCache` |
+| Session revocation on denial | Action READ, hard gate, fail-closed, or P(attack) at least 0.05 | `SessionLimits` |
+| Elevation | At most 1 h (hard cap 8 h); requests lapse after 30 min; WebAuthn at most 5 min old; approvals at most 5 min old | `PamSettings` |
+| Break-glass | 30 min; 3 per account per day; failed-attempt pages at most 5 per hour | `PamSettings`, `PrivilegedAccessManager` |
+| PAM rate limits | 5 genuine requests per person per hour; 20 genuine approvals per approver per hour | `PamSettings` |
+| Audit throttles | Refusals 20 per type and person per minute; policy rejections 10 per name and 100 overall per hour | `PolicyAdministrator`, `PrivilegedAccessManager`, `PolicyInstaller` |
 
 ### How to build and verify
 

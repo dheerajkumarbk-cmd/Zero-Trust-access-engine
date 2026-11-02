@@ -28,6 +28,19 @@ posture and login claims count only when signed (Ed25519) by keys in the `KeyRin
 is written to an HMAC-chained audit trail ("no audit, no access"), and policy changes need two
 administrators' signatures (`PolicyInstaller`). See [docs/security-architecture.md](docs/security-architecture.md).
 
+## Sessions and privileged access (Layer 3)
+
+The **Policy Administrator** (`session.PolicyAdministrator`) turns an allowed login into a session:
+a 256-bit token stored only as a hash, bound to a key the client holds. Every request on the session
+is signed with that key, used once, and decided again by the engine (continuous evaluation).
+Sessions end on idle (30 min), at 10 h, or by revocation, and need fresh, key-bound MFA again after
+8 h / 4 h / 1 h / 15 min depending on the data's classification.
+
+**Privileged access** (`pam.PrivilegedAccessManager`): nobody holds admin rights permanently. An
+eligible person asks for a role for at most 1 h with WebAuthn and a reason; a different person
+approves by signing exactly that request. Break-glass accounts open a sealed credential for 30 min,
+page the SOC at once and must be reviewed. See the [Layer 3 report](docs/layer-3-report.md).
+
 ## The maths
 
 - **M3, Bayes with base rate** (Axelsson 2000): `logit P(attack|x) = logit P(attack) + Σ ln LR_k`
@@ -41,7 +54,8 @@ administrators' signatures (`PolicyInstaller`). See [docs/security-architecture.
 - **M7, impossible travel:** haversine distance minus both GeoIP accuracy radii, over elapsed time.
 - **Failure bursts:** Poisson likelihood ratio for brute force, password spray and org-wide surges, clamped at zero.
 
-Reports: [Layer 1](docs/layer-1-report.md), [Layer 2](docs/layer-2-report.md).
+Reports: [Layer 1](docs/layer-1-report.md), [Layer 2](docs/layer-2-report.md), [Layer 3](docs/layer-3-report.md),
+and the full [project state](docs/project-state.md).
 
 ## Build
 

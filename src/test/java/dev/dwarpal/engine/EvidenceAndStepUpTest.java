@@ -120,7 +120,7 @@ class EvidenceAndStepUpTest {
 
     @Test
     void freshWebAuthnSatisfiesAPolicyStepUp() {
-        AccessRequest r = Fixtures.request().action(Action.ADMIN).authenticated(AuthMethod.WEBAUTHN, Duration.ofMinutes(3)).build();
+        AccessRequest r = Fixtures.request().roles("engineer", "admin").action(Action.ADMIN).authenticated(AuthMethod.WEBAUTHN, Duration.ofMinutes(3)).build();
         Decision d = decide(engine(), r);
         assertEquals(Outcome.ALLOW, d.outcome(), d.analystReport());
         assertTrue(noted(d, "step-up satisfied"));
@@ -141,14 +141,14 @@ class EvidenceAndStepUpTest {
     @Test
     void staleUnsignedPasswordOnlyOrFutureAuthenticationsDoNotCount() {
         PolicyEngine e = engine();
-        Fixtures.RequestBuilder admin = Fixtures.request().action(Action.ADMIN);
-        assertEquals(Outcome.STEP_UP, decide(e, Fixtures.request().action(Action.ADMIN)
+        Fixtures.RequestBuilder admin = Fixtures.request().roles("engineer", "admin").action(Action.ADMIN);
+        assertEquals(Outcome.STEP_UP, decide(e, Fixtures.request().roles("engineer", "admin").action(Action.ADMIN)
                 .authenticated(AuthMethod.WEBAUTHN, Duration.ofMinutes(20)).build()).outcome(), "stale");
-        assertEquals(Outcome.STEP_UP, decide(e, Fixtures.request().action(Action.ADMIN)
+        assertEquals(Outcome.STEP_UP, decide(e, Fixtures.request().roles("engineer", "admin").action(Action.ADMIN)
                 .authenticated(AuthMethod.WEBAUTHN, Duration.ofMinutes(1)).unsignedAuthentication().build()).outcome(), "unsigned");
-        assertEquals(Outcome.STEP_UP, decide(e, Fixtures.request().action(Action.ADMIN)
+        assertEquals(Outcome.STEP_UP, decide(e, Fixtures.request().roles("engineer", "admin").action(Action.ADMIN)
                 .authenticated(AuthMethod.PASSWORD, Duration.ofMinutes(1)).build()).outcome(), "password only");
-        Decision future = decide(e, Fixtures.request().action(Action.ADMIN)
+        Decision future = decide(e, Fixtures.request().roles("engineer", "admin").action(Action.ADMIN)
                 .authenticated(AuthMethod.WEBAUTHN, Duration.ofMinutes(-1)).build());
         assertEquals(Outcome.STEP_UP, future.outcome(), "future-dated authentication");
         assertTrue(admin.build().evidence().authentication().isEmpty());
@@ -160,7 +160,7 @@ class EvidenceAndStepUpTest {
         AuthenticationContext bobAuth = new AuthenticationContext(AuthMethod.WEBAUTHN, Fixtures.T0.minusSeconds(60));
         SignatureProof bobProof = Fixtures.signAuthentication(Fixtures.IDP, Fixtures.IDP_KEY_ID, "bob", "laptop-alice", bobAuth,
                 bobAuth.authenticatedAt());
-        AccessRequest base = Fixtures.request().action(Action.ADMIN).build();
+        AccessRequest base = Fixtures.request().roles("engineer", "admin").action(Action.ADMIN).build();
         AccessRequest replayed = new AccessRequest(base.requestId(), base.timestamp(), base.subject(), base.device(),
                 base.resource(), base.action(), base.network(), base.pepRegion(),
                 base.evidence().withAuthentication(bobAuth, bobProof));
@@ -175,7 +175,7 @@ class EvidenceAndStepUpTest {
         AuthenticationContext auth = new AuthenticationContext(AuthMethod.WEBAUTHN, Fixtures.T0.minusSeconds(60));
         SignatureProof stolen = Fixtures.signAuthentication(Fixtures.IDP, Fixtures.IDP_KEY_ID, "alice", "laptop-alice",
                 auth, auth.authenticatedAt());
-        AccessRequest base = Fixtures.request().device("attacker-box").unsignedPosture().action(Action.ADMIN).build();
+        AccessRequest base = Fixtures.request().roles("engineer", "admin").device("attacker-box").unsignedPosture().action(Action.ADMIN).build();
         AccessRequest replayed = new AccessRequest(base.requestId(), base.timestamp(), base.subject(), base.device(),
                 base.resource(), base.action(), base.network(), base.pepRegion(),
                 base.evidence().withAuthentication(auth, stolen));

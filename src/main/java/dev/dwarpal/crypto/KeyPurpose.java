@@ -11,5 +11,9 @@ public enum KeyPurpose {
     /** Identity provider: signs "subject X authenticated with method M at time T". */
     IDENTITY_PROVIDER,
     /** Policy administrator: approves policy bundles. Bound to the administrator's identity. */
-    POLICY_SIGNER
+    POLICY_SIGNER,
+    /** Privileged-access approver: approves just-in-time elevations and reviews break-glass use. Bound to the approver. */
+    ELEVATION_APPROVER,
+    /** Sealed emergency credential of one break-glass account. Bound to that account. */
+    BREAK_GLASS
 }

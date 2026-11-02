@@ -11,6 +11,7 @@ import dev.dwarpal.domain.AccessRequest;
 import dev.dwarpal.domain.Validate;
 import dev.dwarpal.engine.DecisionPoint;
 import dev.dwarpal.engine.PolicyEngine;
+import dev.dwarpal.guard.RateLimiter;
 import dev.dwarpal.policy.PolicyLoadException;
 import dev.dwarpal.policy.PolicySet;
 import dev.dwarpal.policy.SafePolicyLoader;
@@ -36,8 +37,9 @@ import java.util.TreeSet;
  *   <li><b>Integrity.</b> Approvals sign the SHA-256 of the exact text; any edit voids them.</li>
  *   <li><b>Rollback protection.</b> The sequence number must strictly increase.</li>
  *   <li><b>Safe parsing + lint gate.</b> The text goes through {@link SafePolicyLoader}, strict.</li>
- *   <li><b>Accountability.</b> Every attempt, accepted or rejected, is written to the audit chain
- *       <em>before</em> taking effect; if auditing fails, nothing is installed.</li>
+ *   <li><b>Accountability.</b> Every install is written to the audit chain <em>before</em> taking
+ *       effect; if auditing fails, nothing is installed. Rejections are audited too, throttled so a
+ *       flood of junk cannot flood the trail (and never blocking a correctly approved bundle).</li>
  * </ul>
  *
  * Reads ({@link #decide}) are lock-free on an immutable engine; installs are serialised.
@@ -46,7 +48,16 @@ public final class PolicyInstaller implements DecisionPoint {
 
     /** Approvals older than this are stale: an approval is for a change now, not a blank cheque. */
     public static final Duration MAX_APPROVAL_AGE = Duration.ofDays(7);
+    /** Rejections audited one by one per requester per hour; a real change needs one or two attempts. */
+    public static final int AUDITED_REJECTIONS_PER_HOUR = 10;
+    /** Rejections audited one by one per hour across all requesters (names are not authenticated). */
+    public static final int AUDITED_REJECTIONS_PER_HOUR_TOTAL = 100;
 
+    private final RateLimiter rejectionAudits = new RateLimiter(AUDITED_REJECTIONS_PER_HOUR, Duration.ofHours(1), 1_000);
+    private final RateLimiter totalRejectionAudits = new RateLimiter(AUDITED_REJECTIONS_PER_HOUR_TOTAL,
+            Duration.ofHours(1), 1);
+    private final RateLimiter summaryAudits = new RateLimiter(1, Duration.ofHours(1), 1);
+    private long suppressedRejections;
     private final KeyRing keys;
     private final int requiredApprovers;
     private final AuditLog audit;
@@ -132,11 +143,34 @@ public final class PolicyInstaller implements DecisionPoint {
         return new Result(true, "installed sequence " + bundle.sequence() + " approved by " + approvers);
     }
 
+    /**
+     * Rejections are audited, but not without limit: {@code requestedBy} is just a name the caller
+     * supplies, so a flood of junk bundles could otherwise flood the audit trail. A requester's
+     * first {@value #AUDITED_REJECTIONS_PER_HOUR} rejections per hour (and at most
+     * {@value #AUDITED_REJECTIONS_PER_HOUR_TOTAL} overall) are recorded one by one, then a single
+     * summary record per hour overall, then only a counter. Rejections never block anyone: a correctly approved bundle
+     * installs whoever sends it and however many junk bundles came before.
+     */
     private Result reject(PolicyBundle bundle, String hash, String requestedBy, Instant now, String reason) {
-        Map<String, String> f = fields(bundle, hash, requestedBy);
-        f.put("reason", reason);
-        audit.append("POLICY_REJECTED", requestedBy, now, f);
+        if (rejectionAudits.tryAcquire(requestedBy, now) && totalRejectionAudits.tryAcquire("all", now)) {
+            Map<String, String> f = fields(bundle, hash, requestedBy);
+            f.put("reason", reason);
+            audit.append("POLICY_REJECTED", requestedBy, now, f);
+        } else {
+            suppressedRejections++;
+            if (summaryAudits.tryAcquire("all", now)) {
+                Map<String, String> f = new LinkedHashMap<>();
+                f.put("requestedBy", requestedBy);
+                f.put("auditedPerHour", Integer.toString(AUDITED_REJECTIONS_PER_HOUR));
+                audit.append("POLICY_REJECTIONS_THROTTLED", requestedBy, now, f);
+            }
+        }
         return new Result(false, reason);
+    }
+
+    /** Rejections counted but not individually audited (see {@link #reject}). */
+    public synchronized long suppressedRejections() {
+        return suppressedRejections;
     }
 
     private static Map<String, String> fields(PolicyBundle bundle, String hash, String requestedBy) {

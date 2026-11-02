@@ -19,4 +19,6 @@ rather than a public issue.
 | Accountability | HMAC-SHA256 chained audit trail; no audit, no access |
 | Administration | Policy changes need two administrators' signatures; rollback refused |
 | Learning | Behaviour baselines learn only from full ALLOWs; bounded, flood-resistant stores |
-| Pipeline | Local pre-commit hook; CI secret scan, 196 tests incl. abuse cases and property tests, coverage gate, SpotBugs/FindSecBugs, CodeQL, dependency review, SBOM; actions pinned to SHAs; JDK 25 enforced; reproducible builds |
+| Sessions | Hashed 256-bit tokens; every use signed with the client's session key and single-use; device-agent binding and key-bound MFA at login; continuous evaluation; idle, lifetime and classification-based re-authentication limits; instant revocation |
+| Privileged access | No standing admin; just-in-time elevation needs eligibility, fresh single-use WebAuthn, a reason and a different person's signed approval; break-glass is sealed, paged, time-boxed and reviewed; rate limits count only authenticated actions |
+| Pipeline | Local pre-commit hook; CI secret scan, 267 tests incl. abuse cases and property tests, coverage gate, SpotBugs/FindSecBugs, CodeQL, dependency review, SBOM; actions pinned to SHAs; JDK 25 enforced; reproducible builds |

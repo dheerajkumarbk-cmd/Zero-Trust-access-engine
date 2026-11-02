@@ -38,4 +38,13 @@ public final class DecisionPipeline {
         DecisionPoint audited = new AuditedDecisionPoint(core, audit, clock);
         return new LearningDecisionPoint(audited, history, trust, GOOD_EVENT_MAX_RISK, clock, LEARNING_MAX_SKEW);
     }
+
+    /**
+     * For each request made on an open session (the Policy Administrator's continuous evaluation):
+     * audited, but not learned. Baselines learn logins, not every click inside a session, which would
+     * swamp the history with one user's busy hour.
+     */
+    public static DecisionPoint continuous(DecisionPoint core, AuditLog audit, Clock clock) {
+        return new AuditedDecisionPoint(core, audit, clock);
+    }
 }
