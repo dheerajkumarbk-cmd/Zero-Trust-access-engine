@@ -23,8 +23,15 @@ It decides for three kinds of resources with one policy model (the SASE idea): p
 ## How it works
 
 ```
-request → freshness → honeytoken/deny-list gates → look up real attributes → verify signatures
-        → risk (Bayes) → policy (YAML) → MFA step-up check → read-only obligations → audit → decision
+request -> [1] Evidence verification   signed posture / signed login checked against the KeyRing
+           [2] Hard gates              freshness, honeytokens, deny-lists: instant DENY
+           [3] Attribute resolution    roles, classification, "managed" from the directory
+           [4] Risk                    10 Layer-2 scorers -> Bayes with base rate (M3)
+           [5] Policy                  YAML grants vs constraints; read-only survives constraints
+           [6] Step-up resolution      fresh, device-bound MFA as evidence (per-method beta)
+           [7] Obligations             a read-only session may only READ
+        -> Decision (+ explanation) -> audit (HMAC chain) -> learning (only from full ALLOWs)
+any error at any stage -> DENY
 ```
 
 - **Fail-closed:** any error, missing signal or unwritable audit record means DENY.
@@ -39,7 +46,7 @@ request → freshness → honeytoken/deny-list gates → look up real attributes
 | `risk` | Evidence as log-likelihood ratios; Bayesian aggregation with spoof-resistant caps |
 | `decision` | Outcomes, cost model, explained decisions (generic message for users, full report for analysts) |
 | `policy` | Safe YAML policy loader, condition language, linter, grant-vs-constraint evaluation |
-| `engine` | The 8-stage pipeline, honeytoken/deny-list/freshness gates, MFA step-up logic |
+| `engine` | The 7-stage pipeline, honeytoken/deny-list/freshness gates, MFA step-up logic |
 | `crypto` | Ed25519 signatures, key ring with one purpose per key, canonical signed messages |
 | `pip` | Directory of authoritative attributes (identity, resources, device inventory) |
 | `audit` | HMAC-SHA256 chained audit trail; audited decision point |
@@ -50,10 +57,10 @@ request → freshness → honeytoken/deny-list gates → look up real attributes
 - **Red-team passes:** 8 working exploits found in early versions and fixed (e.g. a forged role
   case bypassing a deny rule, a service account getting payroll after MFA). Each is now a
   permanent regression test.
-- **Pipeline:** secret scanning, 132 tests with an 80% coverage gate, SpotBugs + FindSecBugs,
+- **Pipeline:** secret scanning, 196 tests (whole project) with an 80% coverage gate, SpotBugs + FindSecBugs,
   CodeQL, dependency review, SBOM, GitHub Actions pinned to commit SHAs.
-- **Results:** 96.6% line coverage, 89.1% branch coverage, zero SAST findings, one runtime
-  dependency (SnakeYAML 2.3); all crypto from the JDK.
+- **Results (whole project, JDK 25):** 97.1% line / 91.4% branch coverage, zero SAST findings,
+  zero known-vulnerable dependencies, one runtime dependency (SnakeYAML 2.7); all crypto from the JDK.
 - **Standards:** controls mapped to OWASP ASVS 4.0.3 and NIST SP 800-207.
 
 ## What it is used for

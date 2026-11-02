@@ -1,0 +1,42 @@
+#!/bin/sh
+# Dwarpal pre-commit hook: the "shift-left" half of secret scanning.
+# CI scans too, but by then the secret is already pushed. This stops it before the commit exists.
+# Enable once per clone:   git config core.hooksPath .githooks
+# Bypassing (git commit --no-verify) is possible but CI will still catch it.
+
+fail=0
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+
+# 1. Files that must never be committed: keys, keystores, env files, build output.
+bad_files=$(printf '%s\n' "$staged" | grep -Ei '\.(pem|key|p12|pfx|jks|keystore|env)$|(^|/)target/|\.class$|\.jar$')
+if [ -n "$bad_files" ]; then
+    echo "pre-commit: refusing to commit key/env/build files:"
+    printf '  %s\n' $bad_files
+    fail=1
+fi
+
+# 2. Secret-looking content in the added lines.
+added=$(git diff --cached -U0 --diff-filter=ACMR | grep '^+' | grep -v '^+++')
+if printf '%s\n' "$added" | grep -Eq 'BEGIN (RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|xox[baprs]-[A-Za-z0-9-]{10,}'; then
+    echo "pre-commit: a private key or access token appears in the staged changes."
+    fail=1
+fi
+
+# 3. Invisible bidirectional / line-separator characters ("Trojan Source", CVE-2021-42574).
+# Built with printf octal escapes and matched byte-wise (LC_ALL=C), so it works in any POSIX sh.
+bidi=$(printf '\342\200[\250\251\252\253\254\255\256]|\342\201[\246\247\250\251]')
+if printf '%s\n' "$added" | LC_ALL=C grep -Eq "$bidi"; then
+    echo "pre-commit: invisible bidi/line-separator characters in staged changes; use escapes instead."
+    fail=1
+fi
+
+# 4. Full gitleaks scan when it is installed (https://github.com/gitleaks/gitleaks).
+if command -v gitleaks >/dev/null 2>&1; then
+    gitleaks protect --staged --redact --no-banner || fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+    echo "pre-commit: commit blocked. Remove the items above and try again."
+    exit 1
+fi
+exit 0

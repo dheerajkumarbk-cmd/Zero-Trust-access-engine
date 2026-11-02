@@ -15,4 +15,8 @@ rather than a public issue.
 | Inputs | Identifier allow-list blocks log injection (CWE-117); all domain objects validated at construction |
 | Failure | Fail-closed: engine errors and unavailable signals never become ALLOW |
 | Disclosure | Requesters see a generic message; full explanations go to analysts only |
-| Pipeline | Secret scan, unit + abuse-case tests, coverage gate, SpotBugs/FindSecBugs, CodeQL, dependency review, SBOM |
+| Trust | Device posture and login proofs count only when signed (Ed25519) by a key of the right purpose, owner and age |
+| Accountability | HMAC-SHA256 chained audit trail; no audit, no access |
+| Administration | Policy changes need two administrators' signatures; rollback refused |
+| Learning | Behaviour baselines learn only from full ALLOWs; bounded, flood-resistant stores |
+| Pipeline | Local pre-commit hook; CI secret scan, 196 tests incl. abuse cases and property tests, coverage gate, SpotBugs/FindSecBugs, CodeQL, dependency review, SBOM; actions pinned to SHAs; JDK 25 enforced; reproducible builds |

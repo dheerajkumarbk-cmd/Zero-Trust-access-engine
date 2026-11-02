@@ -226,6 +226,36 @@ class SafePolicyLoaderTest {
     }
 
     @Test
+    void loadsAPolicyFileFromDisk(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+        java.nio.file.Path f = dir.resolve("policy.yaml");
+        java.nio.file.Files.writeString(f, Fixtures.resource("/policies/default-policy.yaml"));
+        assertEquals("2026.11.01-1", loader.load(f).version());
+    }
+
+    @Test
+    void fileLevelAttacksAreRefused(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+        java.nio.file.Path big = dir.resolve("big.yaml");
+        java.nio.file.Files.write(big, new byte[SafePolicyLoader.MAX_BYTES + 10]);
+        assertTrue(assertThrows(PolicyLoadException.class, () -> loader.load(big)).getMessage().contains("exceeds"));
+
+        assertTrue(assertThrows(PolicyLoadException.class, () -> loader.load(dir)).getMessage().contains("regular file"),
+                "a directory is not a policy");
+        assertThrows(PolicyLoadException.class, () -> loader.load(dir.resolve("missing.yaml")));
+
+        java.nio.file.Path badUtf8 = dir.resolve("bad.yaml");
+        java.nio.file.Files.write(badUtf8, new byte[]{'v', ':', ' ', (byte) 0xC3, (byte) 0x28});
+        assertTrue(assertThrows(PolicyLoadException.class, () -> loader.load(badUtf8)).getMessage().contains("UTF-8"));
+
+        java.nio.file.Path link = dir.resolve("link.yaml");
+        try {
+            java.nio.file.Files.createSymbolicLink(link, big);
+        } catch (UnsupportedOperationException | java.io.IOException e) {
+            return;   // Windows without symlink privilege: the check above still covers non-regular files
+        }
+        assertTrue(assertThrows(PolicyLoadException.class, () -> loader.load(link)).getMessage().contains("symbolic"));
+    }
+
+    @Test
     void everyConditionKindCompiles() {
         String yaml = HEADER + """
                 policies:

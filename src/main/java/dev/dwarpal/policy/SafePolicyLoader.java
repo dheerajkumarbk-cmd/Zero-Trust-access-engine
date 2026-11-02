@@ -11,7 +11,15 @@ import org.yaml.snakeyaml.constructor.SafeConstructor;
 import org.yaml.snakeyaml.error.MarkedYAMLException;
 import org.yaml.snakeyaml.error.YAMLException;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -36,6 +44,10 @@ import java.util.stream.Collectors;
  *   <li><b>Strict schema.</b> Unknown keys are errors, not ignored, so a typo like
  *       {@code efect: DENY} cannot quietly turn a deny rule into nothing.</li>
  *   <li><b>Lint gate.</b> A file with linter ERRORs is rejected as a whole.</li>
+ *   <li><b>Safe file reading.</b> Only regular files, never symbolic links (a link could point the
+ *       loader at another file); at most {@link #MAX_BYTES} are ever read, so a file that grows
+ *       between a size check and the read cannot exhaust memory; invalid UTF-8 is rejected rather
+ *       than silently replaced.</li>
  * </ul>
  */
 public final class SafePolicyLoader {
@@ -59,6 +71,31 @@ public final class SafePolicyLoader {
     /** {@code failOnWarnings=false} is for tooling that shows warnings to an author, never for deployment. */
     public SafePolicyLoader(boolean failOnWarnings) {
         this.failOnWarnings = failOnWarnings;
+    }
+
+    /** Reads and loads a policy file from disk, with the file-level defences above. */
+    public PolicySet load(Path file) {
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+            throw new PolicyLoadException("not a regular file (symbolic links are refused): " + file.getFileName());
+        }
+        byte[] bytes;
+        try (InputStream in = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
+            bytes = in.readNBytes(MAX_BYTES + 1);      // bounded read: no time-of-check/time-of-use gap
+        } catch (IOException e) {
+            throw new PolicyLoadException("cannot read policy file " + file.getFileName() + " ("
+                    + e.getClass().getSimpleName() + ")");
+        }
+        if (bytes.length > MAX_BYTES) {
+            throw new PolicyLoadException("policy file exceeds " + MAX_BYTES + " bytes");
+        }
+        try {
+            return load(StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes)).toString());
+        } catch (CharacterCodingException e) {
+            throw new PolicyLoadException("policy file is not valid UTF-8");
+        }
     }
 
     public PolicySet load(String yamlText) {

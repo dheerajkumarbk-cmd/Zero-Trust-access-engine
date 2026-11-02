@@ -6,15 +6,16 @@ same protections instead of inventing their own.
 ## 1. Defence in depth: the request's path
 
 ```
- Request ──► [1] Freshness gate        stale / future-dated requests denied
-             [2] Hard gates            honeytokens, deny-lists: instant DENY
-             [3] Attribute resolution  roles, classification, "managed" from the directory, not the request
-             [4] Evidence verification posture + login count only if signed by the right key (KeyRing)
-             [5] Risk (Bayes, M3)      asymmetric caps: spoofed familiarity cannot cancel attack evidence
-             [6] Policy (signed)       grants vs constraints; policy is a floor
-             [7] Step-up resolution    MFA as evidence: beta of the method used, fresh + device-bound
-             [8] Obligations           read-only means READ only, even after MFA
-             [9] Audit (HMAC chain)    no audit, no access
+ Request ──► [1] Evidence verification  posture + login count only if signed by the right key (KeyRing);
+                                        runs first so every decision knows whether the device proved itself
+             [2] Hard gates             freshness, honeytokens, deny-lists: instant DENY
+             [3] Attribute resolution   roles, classification, "managed" from the directory, not the request
+             [4] Risk (Bayes, M3)       10 scorers; asymmetric caps: spoofed familiarity cannot cancel attack evidence
+             [5] Policy (signed)        grants vs constraints; policy is a floor; read-only survives constraints
+             [6] Step-up resolution     MFA as evidence: beta of the method used, fresh + device-bound
+             [7] Obligations            read-only means READ only, even after MFA
+         ──► Audit (HMAC chain)         no audit, no access
+         ──► Learning                   only from full ALLOWs, clock-checked, bounded stores
  Any error in any stage ─────────────► DENY (fail-closed)
 ```
 
@@ -97,7 +98,7 @@ persisting anything. Integrity is the core's job, and it is cryptographic.
 
 | Component | Source | Why |
 |---|---|---|
-| Crypto (Ed25519, HMAC, SHA-256) | JDK 17 JCA (SunEC, SunJCE) | Maintained by the OpenJDK security team, FIPS-capable providers exist; no third-party crypto on the decision path |
+| Crypto (Ed25519, HMAC, SHA-256; ML-DSA/ML-KEM available) | JDK 25 JCA (SunEC, SunJCE, SUN) | Maintained by the OpenJDK security team, FIPS-capable providers exist; no third-party crypto on the decision path |
 | YAML parsing | SnakeYAML 2.3 | Widely used; v2 fixed CVE-2022-1471 by default; we additionally use `SafeConstructor` and strict limits |
 | Tests | JUnit 5 | Test scope only |
 | Logging (future service layer) | SLF4J API + Log4j 2 ≥ 2.24.x | Log4j's lesson (Log4Shell, CVE-2021-44228) is to pin patched versions and never let untrusted input reach lookups; the core deliberately has **no** logging dependency: a library should not force one, and security events go to the HMAC audit chain, which plain logging cannot make tamper-evident |

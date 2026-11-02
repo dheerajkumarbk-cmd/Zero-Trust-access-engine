@@ -14,6 +14,8 @@
         <!-- JDK 25 LTS (supported to at least 2031): ships ML-DSA/ML-KEM for the post-quantum plan. -->
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- Reproducible builds: fixed timestamps in the jar, so anyone can rebuild and compare hashes. -->
+        <project.build.outputTimestamp>2026-11-02T00:00:00Z</project.build.outputTimestamp>
         <snakeyaml.version>2.7</snakeyaml.version>
         <junit.version>5.14.4</junit.version>
         <jacoco.version>0.8.16</jacoco.version>

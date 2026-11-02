@@ -9,9 +9,15 @@ private apps (ZTNA), web (SWG) and SaaS data (CASB) with one policy model, as in
 ## Decision pipeline
 
 ```
-request ─► Hard gates ─► Risk (Bayes, M3) ─► Cost-optimal action (M2) ─► Policy floor ─► Decision + explanation
-            honeytoken     log-likelihood        ALLOW / STEP_UP / DENY      YAML policies
-            deny-lists     ratios, prior          minimising expected loss    (deny-overrides)
+request -> [1] Evidence verification   signed posture / signed login checked against the KeyRing
+           [2] Hard gates              freshness, honeytokens, deny-lists: instant DENY
+           [3] Attribute resolution    roles, classification, "managed" from the directory
+           [4] Risk                    10 Layer-2 scorers -> Bayes with base rate (M3)
+           [5] Policy                  YAML grants vs constraints; read-only survives constraints
+           [6] Step-up resolution      fresh, device-bound MFA as evidence (per-method beta)
+           [7] Obligations             a read-only session may only READ
+        -> Decision (+ explanation) -> audit (HMAC chain) -> learning (only from full ALLOWs)
+any error at any stage -> DENY
 ```
 
 The outcome only ever gets stricter along the pipeline (the one exception: a STEP_UP already
@@ -42,9 +48,11 @@ Reports: [Layer 1](docs/layer-1-report.md), [Layer 2](docs/layer-2-report.md).
 Requires **JDK 25 LTS** and Maven 3.9+ (the build refuses older JDKs with a clear message).
 
 ```bash
+git config core.hooksPath .githooks   # once per clone: local secret / bidi pre-commit checks
 mvn verify                       # compile, tests (incl. abuse cases), coverage gate
 mvn spotbugs:check               # SAST with FindSecBugs
 mvn cyclonedx:makeAggregateBom   # SBOM -> target/bom.json
 ```
 
-See [SECURITY.md](SECURITY.md) and [docs/threat-model.md](docs/threat-model.md).
+See [SECURITY.md](SECURITY.md), [docs/threat-model.md](docs/threat-model.md) and the full
+[report on layers 1 and 2](docs/report-layers-1-2.md).
