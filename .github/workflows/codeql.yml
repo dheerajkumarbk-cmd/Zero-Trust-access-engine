@@ -15,6 +15,7 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     permissions:
+      actions: read          # CodeQL reads its own workflow run; missing this caused "Resource not accessible by integration"
       contents: read
       security-events: write
     steps:
