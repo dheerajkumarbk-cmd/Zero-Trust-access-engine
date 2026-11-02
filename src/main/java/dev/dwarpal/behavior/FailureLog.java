@@ -5,7 +5,6 @@ import dev.dwarpal.domain.Validate;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -20,6 +19,10 @@ import java.util.Objects;
  * red-teaming). So evidence younger than {@link #RETENTION} is never evicted; when the store is full
  * of recent evidence, new keys are dropped instead and counted. Separately, a keyless per-minute
  * counter records <em>every</em> failure, so a flood can never hide from the org-wide total.
+ *
+ * <p>Every failure keeps its own timestamp. An earlier version kept only the latest time per
+ * (IP, account), so a query about an earlier moment lost the evidence whenever events arrived out of
+ * order or a past moment was re-evaluated (found by the accuracy simulation).
  */
 public final class FailureLog implements FailureView {
 
@@ -30,10 +33,13 @@ public final class FailureLog implements FailureView {
 
     private final int maxKeys;
     private final Map<String, ArrayDeque<Instant>> bySubject = new LinkedHashMap<>(16, 0.75f, true);
-    private final Map<String, Map<String, Instant>> byIp = new LinkedHashMap<>(16, 0.75f, true);
+    private final Map<String, ArrayDeque<Failure>> byIp = new LinkedHashMap<>(16, 0.75f, true);
     private final long[] bucketMinute = new long[MINUTE_BUCKETS];
     private final long[] bucketCount = new long[MINUTE_BUCKETS];
     private long droppedKeys;
+
+    private record Failure(String subjectId, Instant at) {
+    }
 
     public FailureLog() {
         this(MAX_KEYS);
@@ -51,7 +57,7 @@ public final class FailureLog implements FailureView {
         countMinute(at);
 
         ArrayDeque<Instant> q = bySubject.get(subjectId);
-        if (q == null && admit(bySubject, at, e -> e.getValue().peekLast())) {
+        if (q == null && admit(bySubject, at, e -> e.getValue().stream().max(Instant::compareTo).orElse(null))) {
             q = new ArrayDeque<>();
             bySubject.put(subjectId, q);
         }
@@ -62,17 +68,15 @@ public final class FailureLog implements FailureView {
             }
         }
 
-        Map<String, Instant> subjects = byIp.get(ip);
-        if (subjects == null && admit(byIp, at, e -> e.getValue().values().stream().max(Instant::compareTo).orElse(Instant.MIN))) {
-            subjects = new LinkedHashMap<>(16, 0.75f, true);
-            byIp.put(ip, subjects);
+        ArrayDeque<Failure> fromIp = byIp.get(ip);
+        if (fromIp == null && admit(byIp, at, e -> e.getValue().stream().map(Failure::at).max(Instant::compareTo).orElse(null))) {
+            fromIp = new ArrayDeque<>();
+            byIp.put(ip, fromIp);
         }
-        if (subjects != null) {
-            subjects.merge(subjectId, at, (a, b) -> a.isAfter(b) ? a : b);
-            if (subjects.size() > MAX_PER_KEY) {
-                Iterator<String> it = subjects.keySet().iterator();
-                it.next();
-                it.remove();
+        if (fromIp != null) {
+            fromIp.addLast(new Failure(subjectId, at));
+            if (fromIp.size() > MAX_PER_KEY) {
+                fromIp.removeFirst();
             }
         }
     }
@@ -112,8 +116,9 @@ public final class FailureLog implements FailureView {
     /** Distinct subjects that failed from this IP within [from, to]. */
     @Override
     public synchronized long distinctSubjectsFromIp(String ip, Instant from, Instant to) {
-        Map<String, Instant> m = byIp.get(ip);
-        return m == null ? 0 : m.values().stream().filter(t -> !t.isBefore(from) && !t.isAfter(to)).count();
+        ArrayDeque<Failure> q = byIp.get(ip);
+        return q == null ? 0 : q.stream().filter(f -> !f.at().isBefore(from) && !f.at().isAfter(to))
+                .map(Failure::subjectId).distinct().count();
     }
 
     /** Org-wide failures in the whole minutes covering [from, to] (at most the last two hours). */

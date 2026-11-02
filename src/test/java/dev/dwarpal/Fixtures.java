@@ -117,6 +117,8 @@ public final class Fixtures {
         private boolean managed = true;
         private DevicePosture posture = new DevicePosture(true, true, true, AssuranceLevel.AGENT_SIGNED);
         private boolean signPosture = true;
+        private KeyPair postureKey = DEVICE_AGENT;
+        private String postureKeyId = DEVICE_KEY_ID;
         private AuthenticationContext authentication;
         private boolean signAuthentication = true;
         private String resourceId = "wiki";
@@ -139,6 +141,8 @@ public final class Fixtures {
         public RequestBuilder unmanaged() { managed = false; return this; }
         public RequestBuilder posture(DevicePosture v) { posture = v; return this; }
         public RequestBuilder unsignedPosture() { signPosture = false; return this; }
+        /** Sign the posture with this device's own agent key (default: alice's laptop key). */
+        public RequestBuilder postureSignedBy(KeyPair key, String keyId) { postureKey = key; postureKeyId = keyId; return this; }
         /** Subject passed {@code method} {@code ago} before the request; the IdP signs it. */
         public RequestBuilder authenticated(AuthMethod method, Duration ago) {
             authentication = new AuthenticationContext(method, timestamp.minus(ago));
@@ -160,7 +164,7 @@ public final class Fixtures {
         public AccessRequest build() {
             Evidence evidence = Evidence.none();
             if (signPosture) {
-                evidence = evidence.withPostureProof(signPosture(DEVICE_AGENT, DEVICE_KEY_ID, deviceId, posture, timestamp));
+                evidence = evidence.withPostureProof(signPosture(postureKey, postureKeyId, deviceId, posture, timestamp));
             }
             if (authentication != null) {
                 SignatureProof proof = signAuthentication

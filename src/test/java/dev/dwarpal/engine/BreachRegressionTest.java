@@ -174,6 +174,25 @@ class BreachRegressionTest {
     }
 
     @Test
+    void b9_aStepUpConstraintCannotEraseAReadOnlyGrant() {
+        // Found by a property test: unmanaged device + SaaS (read-only grant P-21) + ADMIN action
+        // (step-up constraint P-05). The constraint won and the read-only part vanished, so after
+        // WebAuthn the device got full admin access.
+        AccessRequest r = Fixtures.request().unmanaged().action(Action.ADMIN)
+                .resource("crm", ResourceKind.SAAS_DATA, DataClassification.INTERNAL)
+                .authenticated(dev.dwarpal.domain.AuthMethod.WEBAUTHN, Duration.ofMinutes(1)).build();
+        Decision d = decide(engine(), r);
+        assertEquals(Outcome.DENY, d.outcome(), "was ALLOW (unrestricted) in v0.5");
+        assertTrue(d.restricted());
+
+        AccessRequest read = Fixtures.request().unmanaged()
+                .resource("crm", ResourceKind.SAAS_DATA, DataClassification.INTERNAL)
+                .authenticated(dev.dwarpal.domain.AuthMethod.WEBAUTHN, Duration.ofMinutes(1)).build();
+        Decision readOnly = decide(engine(), read);
+        assertEquals(Outcome.ALLOW_LIMITED, readOnly.outcome(), "reading is still allowed, read-only");
+    }
+
+    @Test
     void b7_firstApplicableShadowingIsRejectedAtLoad() {
         String yaml = """
                 version: "t"

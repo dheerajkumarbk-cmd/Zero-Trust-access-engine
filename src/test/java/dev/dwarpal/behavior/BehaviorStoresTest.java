@@ -207,6 +207,21 @@ class BehaviorStoresTest {
     }
 
     @Test
+    void sprayEvidenceSurvivesOutOfOrderEvents() {
+        // Found by the accuracy simulation: keeping only the latest time per (IP, account) made a later
+        // event erase the evidence for an earlier moment (late log delivery, or What-If replay).
+        FailureLog log = new FailureLog();
+        for (int k = 0; k < 12; k++) {
+            log.recordFailure("victim" + k, "198.51.100.66", T.plus(Duration.ofHours(5)));   // arrives first, later time
+        }
+        for (int k = 0; k < 12; k++) {
+            log.recordFailure("victim" + k, "198.51.100.66", T.minusSeconds(60));            // the moment we ask about
+        }
+        assertEquals(12, log.distinctSubjectsFromIp("198.51.100.66", T.minus(Duration.ofMinutes(15)), T));
+        assertEquals(12, log.distinctSubjectsFromIp("198.51.100.66", T.plus(Duration.ofHours(4)), T.plus(Duration.ofHours(6))));
+    }
+
+    @Test
     void staleEvidenceIsStillEvictedSoTheStoreStaysBounded() {
         FailureLog log = new FailureLog(10);
         for (int i = 0; i < 10; i++) {

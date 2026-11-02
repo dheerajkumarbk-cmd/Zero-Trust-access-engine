@@ -22,6 +22,9 @@ final class PolicyStage implements DecisionStage {
         PolicySet.Result result = policySet.evaluate(
                 new EvaluationContext(ctx.request(), ctx.risk().posteriorAttack()));
         ctx.matchedPolicyId(result.policyId());
+        if (result.limited()) {
+            ctx.restrict("the granting policy limits this session to READ");
+        }
         ctx.escalate(result.effect().floor(), result.defaulted()
                 ? "no policy grants access; default effect " + result.effect()
                 : "policy " + result.policyId() + " requires at least " + result.effect().floor());

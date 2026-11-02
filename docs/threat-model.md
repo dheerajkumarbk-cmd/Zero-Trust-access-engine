@@ -1,4 +1,4 @@
-# Dwarpal threat model (STRIDE), v0.5
+# Dwarpal threat model (STRIDE), v0.6
 
 Scope: the Policy Engine core. Policy Administrator, PEP and SIEM loop are added in later layers
 and get their own rows then.
@@ -101,6 +101,15 @@ Each was reproduced as a passing exploit test before the fix.
 Robustness evidence: 3,000 fuzzed requests (no crash, no NaN, no engine error, intact audit chain);
 8 threads x 250 decisions (intact chain, exact learning counts); latency test p99 < 20 ms.
 
+## v0.6 third pass (JDK 25 migration, accuracy simulation, property tests)
+
+| # | STRIDE | Weakness | How it was found | Fix | Tests |
+|---|---|---|---|---|---|
+| B9 | Elevation | Unmanaged device + SaaS (read-only grant) + ADMIN action (step-up constraint): the constraint won, the read-only flag vanished, and after WebAuthn the device got full admin access | Property test: "attack evidence never lifts a restriction" | Policy result carries `limited` separately from the winning effect; the engine restricts the session whenever the grant was read-only | `b9_aStepUpConstraintCannotEraseAReadOnlyGrant`, `aStricterConstraintKeepsTheReadOnlyFlagOfTheGrant` |
+| C8 | Repudiation | Password-spray evidence kept only the latest time per (IP, account), so late-arriving events or a re-evaluated past moment lost it (18 of 60 spray logins only stepped up) | Accuracy simulation | Every failure keeps its own timestamp (bounded per IP) | `sprayEvidenceSurvivesOutOfOrderEvents`, `AccuracySimulationTest` |
+
+Dependency scan: all 9 dependencies clean on OSV.dev (control check: snakeyaml 1.33 correctly reports CVE-2022-1471).
+
 ## Residual risks (accepted for this layer, scheduled)
 
 | Risk | Why accepted now | Planned in |
@@ -118,5 +127,7 @@ Robustness evidence: 3,000 fuzzed requests (no crash, no NaN, no engine error, i
 | Scorer probabilities (P(new country given attack), Poisson rates) are assumptions | No labelled data yet | Layer 4 calibration on simulated data |
 | Shared NAT with several mistyping users can look like a spray | Rates chosen for small offices | Per-IP allow-list for known office egress |
 | During a failure flood, brand-new attacking IPs may go untracked (store full of recent evidence) | Bounded memory | Flood itself raises `attack-surge` and `droppedKeys`; SOC alert in Layer 4 |
-| Ed25519 is not quantum-resistant | No ML-DSA in JDK 17 | Hybrid Ed25519 + ML-DSA after moving to JDK 25 LTS (see security-architecture.md) |
+| Ed25519 is not quantum-resistant | Hybrid needs a format change | Build is on JDK 25 LTS (ML-DSA verified working); hybrid Ed25519 + ML-DSA after the college submission |
+| Stolen, unlocked laptop used at the victim's home with their password looks exactly like the victim (60/60 ALLOW in simulation) | Signals alone cannot separate them | Layer 3: session lifetime limits and periodic re-authentication |
+| The org-wide failure counter only covers the last 2 hours of recorded time | Ring buffer | Fine for live use; What-If replay must rebuild it from the audit trail |
 | An attacker who passes strong MFA from a new place gets that place learned | By design (verified) | SOC review + `InMemoryBehaviorHistory.forget` for remediation |

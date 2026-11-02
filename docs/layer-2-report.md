@@ -47,6 +47,30 @@ All output log-likelihood ratios, so Layer 1's Bayes and cost model use them unc
 | Tor exit at Alice's usual hour | DENY (P=0.67) | Tor + new country |
 | 30 attack attempts | all DENY | baseline and reputation untouched |
 
+## Accuracy on a synthetic organisation
+
+60 users (40 home workers, 10 mobile roamers, 10 frequent travellers), 45 days of history each.
+Expectations were written down before the first run.
+
+| Case | ALLOW | STEP_UP | DENY |
+|---|---|---|---|
+| Normal login | 60 | 0 | 0 |
+| Odd hour | 0 | 60 | 0 |
+| Domestic trip (then with WebAuthn) | 10 (60) | 50 (0) | 0 |
+| New company laptop | 0 | 60 | 0 |
+| Foreign credential stuffing | 0 | 0 | 60 |
+| Domestic cloud server, typed laptop id | 0 | 0 | 60 |
+| Same-city residential proxy (evasive) | 0 | 60 | 0 |
+| Impossible travel | 0 | 0 | 60 |
+| Tor exit | 0 | 0 | 60 |
+| Password-spray IP | 0 | 0 | 60 |
+| Stolen unlocked laptop at the victim's home | 60 | 0 | 0 |
+
+Legitimate users wrongly denied: **0 of 300**. Attacks with a stolen password let in: **0 of 360**.
+The last row is the known blind spot (password, device and network all genuine), left to Layer 3.
+Limit: the generator and the engine come from the same team, so this checks consistency with the
+threat model, not real-world accuracy.
+
 ## Security of Layer 2 itself
 
 | Threat | Protection |
@@ -63,8 +87,9 @@ All output log-likelihood ratios, so Layer 1's Bayes and cost model use them unc
 
 ## Numbers
 
-186 tests in total (including 10 end-to-end attack scenarios, a 3,000-request fuzz test and an
-8-thread concurrency test), 97% line / 91% branch coverage, 0 SAST findings, no new dependencies.
+194 tests in total (including 10 end-to-end attack scenarios, a 60-user accuracy simulation,
+property tests over 7,000+ random cases, a 3,000-request fuzz test and an 8-thread concurrency
+test), 0 SAST findings, 0 known-vulnerable dependencies, built on JDK 25 LTS.
 Full-pipeline latency p50 0.3 ms, p99 1.2 ms (target 20 ms).
 
 ## Known limits

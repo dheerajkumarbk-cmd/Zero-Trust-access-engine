@@ -32,7 +32,7 @@ jobs:
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '25'
           cache: maven
       - name: Build, unit + abuse-case tests, coverage gate (>=80%)
         run: mvn -B verify

@@ -33,8 +33,10 @@ public record PolicySet(String version, CombiningAlgorithm algorithm, Effect def
      * Outcome of evaluating the policy set against one request.
      *
      * @param defaulted true when no policy granted access, so the default effect was used
+     * @param limited   true when the grant was PERMIT_LIMITED, even if a stricter constraint won:
+     *                  a step-up must never erase a read-only restriction (red-team finding B9)
      */
-    public record Result(Effect effect, String policyId, boolean defaulted) {
+    public record Result(Effect effect, String policyId, boolean defaulted, boolean limited) {
     }
 
     public Result evaluate(EvaluationContext context) {
@@ -63,9 +65,10 @@ public record PolicySet(String version, CombiningAlgorithm algorithm, Effect def
 
         Effect base = grant == null ? defaultEffect : grant.effect();
         String baseId = grant == null ? DEFAULT_POLICY_ID : grant.id();
+        boolean limited = base == Effect.PERMIT_LIMITED;
         if (constraint != null && constraint.effect().compareTo(base) > 0) {
-            return new Result(constraint.effect(), constraint.id(), grant == null);
+            return new Result(constraint.effect(), constraint.id(), grant == null, limited);
         }
-        return new Result(base, baseId, grant == null);
+        return new Result(base, baseId, grant == null, limited);
     }
 }

@@ -87,6 +87,13 @@ final class DecisionContext {
         reasons.add(reason);
     }
 
+    /** Marks the session read-only; kept even if a stricter effect decides the outcome. */
+    void restrict(String reason) {
+        restricted = true;
+        outcome = Outcome.mostRestrictive(outcome, Outcome.ALLOW_LIMITED);
+        reasons.add(reason);
+    }
+
     /** Adds an explanation line without changing the outcome. */
     void note(String reason) {
         reasons.add(reason);

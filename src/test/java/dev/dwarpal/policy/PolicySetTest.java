@@ -48,6 +48,17 @@ class PolicySetTest {
     }
 
     @Test
+    void aStricterConstraintKeepsTheReadOnlyFlagOfTheGrant() {
+        var set = new PolicySet("v", CombiningAlgorithm.DENY_OVERRIDES, Effect.DENY,
+                List.of(p("RO", ENGINEER, Effect.PERMIT_LIMITED), p("MFA", MANAGED, Effect.REQUIRE_STEP_UP)));
+        var r = set.evaluate(ALICE);
+        assertEquals(Effect.REQUIRE_STEP_UP, r.effect());
+        assertTrue(r.limited(), "read-only must survive the step-up constraint");
+        assertFalse(new PolicySet("v", CombiningAlgorithm.DENY_OVERRIDES, Effect.DENY,
+                List.of(p("OK", ENGINEER, Effect.PERMIT))).evaluate(ALICE).limited());
+    }
+
+    @Test
     void failOpenDefaultIsStillTightenedByConstraints() {
         var set = new PolicySet("v", CombiningAlgorithm.DENY_OVERRIDES, Effect.PERMIT,
                 List.of(p("BLOCK", ENGINEER, Effect.DENY)));

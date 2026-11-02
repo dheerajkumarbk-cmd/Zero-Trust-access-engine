@@ -39,7 +39,7 @@ Reports: [Layer 1](docs/layer-1-report.md), [Layer 2](docs/layer-2-report.md).
 
 ## Build
 
-Requires JDK 17+ and Maven 3.9+.
+Requires **JDK 25 LTS** and Maven 3.9+ (the build refuses older JDKs with a clear message).
 
 ```bash
 mvn verify                       # compile, tests (incl. abuse cases), coverage gate
