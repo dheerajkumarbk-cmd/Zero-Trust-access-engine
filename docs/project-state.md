@@ -364,12 +364,12 @@ match wins; the default) and `FIRST_APPLICABLE` (file order).
 | Error messages sanitised and truncated | Parser messages leaking or forging file content |
 
 **Reference policy set** (`src/main/resources/policies/default-policy.yaml`, version
-`2026.11.02-1`, `DENY_OVERRIDES`, default DENY):
+`2026.11.03-1`, `DENY_OVERRIDES`, default DENY):
 
 | Id | Rule | Effect |
 |---|---|---|
 | P-01 | Humans may use (read, write, download) internal private apps (classification at most INTERNAL) | PERMIT |
-| P-02 | Finance may use (not administer) confidential finance apps | PERMIT |
+| P-02 | Finance may use (not administer) confidential private apps (no other resource kinds) | PERMIT |
 | P-03 | Confidential or higher only from a healthy device with at least agent-signed posture | DENY otherwise |
 | P-04 | Restricted resources always need fresh strong authentication | REQUIRE_STEP_UP |
 | P-05 | Administrative actions always need fresh strong authentication | REQUIRE_STEP_UP |

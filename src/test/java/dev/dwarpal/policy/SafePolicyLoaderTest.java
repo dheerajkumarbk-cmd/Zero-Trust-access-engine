@@ -24,7 +24,7 @@ class SafePolicyLoaderTest {
     @Test
     void loadsTheReferencePolicySet() {
         PolicySet set = loader.load(Fixtures.resource("/policies/default-policy.yaml"));
-        assertEquals("2026.11.02-1", set.version());
+        assertEquals("2026.11.03-1", set.version());
         assertEquals(CombiningAlgorithm.DENY_OVERRIDES, set.algorithm());
         assertEquals(Effect.DENY, set.defaultEffect());
         assertEquals(10, set.policies().size(), "P-06 added: no standing admin rights");
@@ -229,7 +229,7 @@ class SafePolicyLoaderTest {
     void loadsAPolicyFileFromDisk(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
         java.nio.file.Path f = dir.resolve("policy.yaml");
         java.nio.file.Files.writeString(f, Fixtures.resource("/policies/default-policy.yaml"));
-        assertEquals("2026.11.02-1", loader.load(f).version());
+        assertEquals("2026.11.03-1", loader.load(f).version());
     }
 
     @Test

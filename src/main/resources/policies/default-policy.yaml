@@ -7,7 +7,7 @@
 # YAML gotcha: unquoted NO / yes / on are parsed as booleans ("the Norway problem").
 # The loader rejects them, so always quote country codes and versions.
 
-version: "2026.11.02-1"
+version: "2026.11.03-1"
 algorithm: DENY_OVERRIDES
 default: DENY
 
@@ -24,10 +24,11 @@ policies:
     effect: PERMIT
 
   - id: P-02-finance-confidential
-    description: Finance may use confidential finance apps (not administer them).
+    description: Finance may use confidential finance apps (only apps; not administer them).
     when:
       all:
         - roleIn: [finance]
+        - resourceKind: PRIVATE_APP
         - classificationAtLeast: CONFIDENTIAL
         - actionIn: [READ, WRITE, DOWNLOAD]
     effect: PERMIT

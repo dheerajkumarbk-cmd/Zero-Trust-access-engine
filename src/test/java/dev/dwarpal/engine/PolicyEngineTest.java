@@ -92,7 +92,7 @@ public class PolicyEngineTest {
         assertEquals(Outcome.ALLOW, d.outcome());
         assertFalse(d.restricted());
         assertEquals("P-01-employees-internal-apps", d.matchedPolicyId());
-        assertEquals("2026.11.02-1", d.policyVersion());
+        assertEquals("2026.11.03-1", d.policyVersion());
     }
 
     @Test

@@ -1,4 +1,4 @@
-# Dwarpal threat model (STRIDE), v0.8
+# Dwarpal threat model (STRIDE), v0.9
 
 Scope: the Policy Engine core (v0.1 to v0.6) and the Policy Administrator: sessions (v0.7, v0.8) and
 privileged access (v0.8). The PEP
@@ -170,6 +170,27 @@ Red-team pass on part B:
 | # | STRIDE | Breach | Root cause | Fix | Tests |
 |---|---|---|---|---|---|
 | R7 | Denial of service | Ten junk requests sent in Alice's name (no MFA) used up her 5-per-hour quota, locking her out of elevation during an incident; the same held for approvals in Bob's name and for policy installs (the requester name is not authenticated) | Rate limits counted attempts before checking who was asking | Only authenticated actions count against a person's quota (after MFA, approval or sealed-credential verification); junk is refused and its audit records and alerts are throttled; policy installs are never blocked, only the auditing of rejections is throttled | `r7_junkSentInSomeonesNameCannotUseUpTheirQuota`, `aFloodOfJunkBundlesNeitherFloodsTheAuditTrailNorLocksAnyoneOut`, `manyInventedRequesterNamesStillCannotFloodTheAuditTrail` |
+
+## v0.9 Layer 4 part 0 (shared contracts for enforcement points)
+
+| # | STRIDE | Threat | Mitigation in code | Test |
+|---|---|---|---|---|
+| E1 | Elevation | An enforcement point (or an attacker controlling one) claims roles, a lower classification or a managed device | `EdgeRequest` has no such fields; `LocalSessionAuthority` takes them from the directory; the wire schema rejects unknown members | `theSchemaIsStrict`, `everyFieldTypeIsChecked` |
+| E2 | Tampering | An enforcement point switches off deny-lists or honeytokens | Threat signals come from an engine-side supplier, never from requests | `threatSignalsComeFromTheEngineSideOnly` |
+| E3 | Info disclosure | Results across the network teach an attacker what to evade | `EdgeResult` carries status, reference, generic message and flags only; analyst detail stays in the audit trail | `resultsRoundTripAndHideAnalystDetail` |
+| E4 | Denial of service / tampering | Malicious JSON: huge, deeply nested, million-digit numbers, duplicate keys, invalid UTF-8, lone surrogates | Own strict reader with hard limits (`JsonLimits`), bounded recursion, duplicate keys rejected, 25,000-case fuzzing | `JsonTest` |
+| E5 | Spoofing | A component certificate from another CA, an expired one, none at all, or TLS 1.2 | `TlsContexts`: TLS 1.3 only, AEAD suites, client certificate required, trust store with the Dwarpal CA only; callers identified by exact principal | `TlsContextsTest` |
+| E6 | Info disclosure | Session tokens in logs | `EdgeGrant` and `UseBody` redact the token in `toString` | `requestsProofsAndBodiesRoundTripExactly` |
+| E7 | Tampering | Response splitting or request smuggling through header values | `EdgeHttp.safeHeaderValue` (no CR, LF, NUL; bounded length); strict token and proof parsing | `headersAreParsedStrictly`, `malformedTokensAndProofHeadersAreRefused` |
+
+Red-team pass on part 0:
+
+| # | STRIDE | Breach | Root cause | Fix | Tests |
+|---|---|---|---|---|---|
+| R8 | Tampering | A single (non-session) decision dated 3 h in the past was GRANTED | The live-clock rule lived only in the Policy Administrator | `LocalSessionAuthority.decide` refuses requests more than 2 min from its clock | `r8_singleDecisionsDatedAwayFromTheClockAreRefused` |
+| R9 | Elevation | Invented headers (`X-Dwarpal-Roles`, `Dwarpal-Read-Only`, `X_Dwarpal_Subject`) would reach the application | Only the defined header names were stripped | `EdgeHttp.clientOnly` strips the whole `Dwarpal-` / `X-Dwarpal-` name spaces, case- and underscore-insensitive | `r9_everyHeaderInTheDwarpalNameSpacesIsStripped` |
+| R10 | Elevation | Finance was granted every CONFIDENTIAL+ resource of any kind, including a RESTRICTED web destination (after MFA) | Reference policy P-02 had no resource-kind condition | P-02 covers private apps only (policy `2026.11.03-1`) | `resultInvariantsHold` |
+| P8 | (pipeline) | SpotBugs: LDAP-injection pattern when reading a certificate's name; catching `NullPointerException` | Parsing the subject name; defensive catch | Callers compared by exact principal (no parsing); catch removed | SpotBugs gate |
 
 ## Residual risks (accepted for this layer, scheduled)
 
