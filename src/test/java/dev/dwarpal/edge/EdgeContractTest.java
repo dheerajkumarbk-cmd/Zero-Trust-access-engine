@@ -133,7 +133,8 @@ class EdgeContractTest {
 
     @Test
     void headersAreParsedStrictly() {
-        String token = "abcDEF0123456789-_".repeat(2) + "abcdefg";
+        // Built from a short repeated pattern: a random-looking literal would (rightly) trip the secret scanner.
+        String token = "Ab0-_".repeat(8) + "Ab0";
         assertEquals(Optional.of(token), EdgeHttp.bearerToken("Dwarpal " + token));
         assertTrue(EdgeHttp.bearerToken("Bearer " + token).isEmpty());
         assertTrue(EdgeHttp.bearerToken("Dwarpal  " + token).isEmpty(), "exactly one space");

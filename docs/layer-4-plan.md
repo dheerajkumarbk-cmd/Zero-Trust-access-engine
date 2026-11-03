@@ -77,7 +77,12 @@ Changes made while building Part 0 that parts must know:
    no paid feeds, nothing to buy. Hardware (security keys, TPM) is simulated in software.
 6. **Do not merge into `main`.** Commit and push your branch, then open a pull request. The project
    owner reviews and tells the integration session to evaluate it.
-7. **Notes file must contain:** what was built, design decisions and why, threats and mitigations
+7. **No secret-looking literals, even in tests.** CI runs gitleaks over every commit: a variable named token, key,
+   secret or password holding a random-looking string fails the build. Generate test secrets at run time
+   (`SecureRandom`, `Ed25519.generateKeyPair()`, `DevPki`) or build them from a short repeated pattern
+   (`"Ab0-_".repeat(8) + "Ab0"`). Never commit key stores, `.p12`, `.pem` or `.env` files (the pre-commit hook
+   blocks them).
+8. **Notes file must contain:** what was built, design decisions and why, threats and mitigations
    (STRIDE table, like `docs/threat-model.md`), red-team findings, test results, and requests to
    integration.
 
