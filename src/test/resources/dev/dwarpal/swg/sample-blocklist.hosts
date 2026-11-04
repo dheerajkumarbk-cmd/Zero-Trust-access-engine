@@ -1,0 +1,13 @@
+# Sample blocklist for tests (hosts format and domain-list format mixed, as free public lists are).
+# Nothing here is downloaded: real lists are placed by the operator.
+127.0.0.1 localhost
+::1 localhost ip6-localhost
+0.0.0.0 0.0.0.0
+0.0.0.0 evil.example
+0.0.0.0 tracker.example ads.tracker.example   # several names on one line
+phish.example
+*.malware.example
+||ransom.example^
+198.51.100.66
+xn--bcher-kva.example
+this line is not an entry
