@@ -1,4 +1,4 @@
-# Dwarpal threat model (STRIDE), v1.0
+# Dwarpal threat model (STRIDE), v1.1
 
 Scope: the Policy Engine core (v0.1 to v0.6) and the Policy Administrator: sessions (v0.7, v0.8) and
 privileged access (v0.8). The PEP
@@ -236,6 +236,24 @@ Cross-part red team at integration (`CrossPartRedTeamTest`, every component thro
 | X4 | Spoofing | A captured login replayed through another gateway instance would open a second session | Single use was remembered per gateway only | The PA remembers spent login MFA proofs for every PEP | `x4_aCapturedLoginCannotBeReplayedThroughAnotherGatewayInstance` |
 | X5 | Elevation | The web gateway's certificate could open and spend wiki sessions | Any PEP could ask about any resource | Every PEP caller has a required resource scope (`Caller.pepComponent("swg", "web:*")`); outside it: 403 | `x5_eachEnforcementPointStaysWithinItsOwnResources`, `ApiScopeTest` |
 | X6 | Elevation | Revoking a compromised person over the API left their admin elevation running | Revocation and PAM were separate calls | Subject revocation also ends their elevation grants | `revokingASubjectOverTheApiAlsoEndsTheirElevation` |
+
+## v1.1 Layer 5 part 0 (shared contracts for the SOC loop)
+
+| # | STRIDE | Threat | Mitigation in code | Test |
+|---|---|---|---|---|
+| K1 | Tampering | A reader of the audit trail (SIEM export, detection, analytics) is fed edited, inserted, deleted or reordered records | `AuditCursor` checks sequence continuity, the link to the previous MAC and, with the key, every MAC; at the first break it stops for good | `anAlteredRecordStopsTheCursorForGood`, `gapsReorderingAndDuplicatesAreBreaksEvenWithoutTheKey`, `aChainForgedWithAnotherKeyPassesTheLinksButNotTheMacs` |
+| K2 | Tampering | A truncated or rewritten trail is read as complete | `checkAgainst(anchoredHead)` | `aTruncatedOrRewrittenTrailDisagreesWithItsAnchor` |
+| K3 | Denial of service / tampering | A hostile store returns huge batches or malformed payloads to steer a reader | Batches capped and checked; payloads must be flat objects of strings within limits, otherwise a break (never skipped) | `aSourceThatSendsMoreThanAskedIsNotBelieved`, `payloadsMustBeFlatObjectsOfStrings`, `anUnreadablePayloadIsABreakNotASkip` |
+| K4 | Spoofing | A forged or misattributed verdict triggers a playbook | Verdicts count only when signed by a `SOC_ANALYST` key bound to the named analyst, over alert, analyst, outcome and time; at most 15 min old | `aVerdictCountsOnlyWhenItsAnalystSignedExactlyIt` |
+| K5 | Info disclosure / repudiation | An alert summary forges lines in an analyst's view or carries secrets | Summaries sanitised and capped at 200 characters; alerts cite audit sequence numbers instead of copying payloads | `alertsAreBoundedAndTheirSummaryIsSafeToShow` |
+| K6 | Elevation / denial of service | SOC signals used to lock people out for good, or to lower someone's risk | Denies end on their own (at most 30 days); watches only add risk, capped at x1000, and fade with a half-life; bounded store refuses rather than forgets; every change audited first | `aDenyIsNeverForeverAndOnlyEverExtendedHere`, `watchesOnlyAddRiskWithinBounds`, `theStoreIsBoundedAndRefusesRatherThanForgets`, `noAuditNoChange` |
+
+Red-team pass on part 0:
+
+| # | STRIDE | Breach (before the fix) | Root cause | Fix | Test |
+|---|---|---|---|---|---|
+| R11 | Elevation | A caller claiming to be five years ahead set a five-year deny on the CEO (still in force two years later) | `deny` measured its 30-day limit from a time the caller supplied | The feed keeps its own clock; changes take durations | `r1_aCallerCannotChooseTheTimeADenyIsMeasuredFrom` |
+| R12 | Elevation | A snapshot read for a far-future time deleted every deny ending before then, and the empty result was then served from the cache for the present | Building a snapshot removed expired entries; the cache had no lower time bound | Reading never changes the store; the cache covers only the interval it was built for | `r2_readingTheFutureNeitherDeletesNorHidesDenies` |
 
 ## Residual risks (accepted for this layer, scheduled)
 

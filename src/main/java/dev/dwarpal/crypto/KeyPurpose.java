@@ -15,5 +15,7 @@ public enum KeyPurpose {
     /** Privileged-access approver: approves just-in-time elevations and reviews break-glass use. Bound to the approver. */
     ELEVATION_APPROVER,
     /** Sealed emergency credential of one break-glass account. Bound to that account. */
-    BREAK_GLASS
+    BREAK_GLASS,
+    /** SOC analyst: signs verdicts on alerts, which can trigger response playbooks. Bound to the analyst. */
+    SOC_ANALYST
 }

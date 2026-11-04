@@ -23,6 +23,7 @@ public final class SignedMessages {
     public static final String ELEVATION_APPROVAL_V1 = "dwarpal/elevation-approval/v1";
     public static final String BREAK_GLASS_V1 = "dwarpal/break-glass/v1";
     public static final String BREAK_GLASS_REVIEW_V1 = "dwarpal/break-glass-review/v1";
+    public static final String SOC_VERDICT_V1 = "dwarpal/soc-verdict/v1";
 
     /**
      * What an approver signs: this request, this person, this role, for this long. Changing any of
@@ -42,6 +43,11 @@ public final class SignedMessages {
     /** What a reviewer signs after examining one break-glass use. */
     public static byte[] breakGlassReview(String grantId, String verdict, Instant signedAt) {
         return Canonical.encode(BREAK_GLASS_REVIEW_V1, grantId, verdict, signedAt.toString());
+    }
+
+    /** An analyst's verdict on one alert: which alert, who decided, what, and when (Layer 5). */
+    public static byte[] socVerdict(String alertId, String analystId, String outcome, Instant signedAt) {
+        return Canonical.encode(SOC_VERDICT_V1, alertId, analystId, outcome, signedAt.toString());
     }
 
     private SignedMessages() {

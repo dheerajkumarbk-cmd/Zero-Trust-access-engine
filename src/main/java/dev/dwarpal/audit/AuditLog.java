@@ -101,6 +101,14 @@ public final class AuditLog {
         return new Verification(true, -1, "intact");
     }
 
+    /** Whether one record's MAC is right for its own content and link (used by {@link AuditCursor}). */
+    static boolean macValid(SecretKey key, AuditRecord r) {
+        String recomputed = mac(requireStrongKey(key), r.sequence(), r.at(), r.type(), r.actor(), r.payloadJson(),
+                r.previousMac());
+        return MessageDigest.isEqual(recomputed.getBytes(StandardCharsets.US_ASCII),
+                r.mac().getBytes(StandardCharsets.US_ASCII));
+    }
+
     private static String mac(SecretKey key, long seq, Instant at, String type, String actor, String payload, String prev) {
         try {
             Mac m = Mac.getInstance("HmacSHA256");
