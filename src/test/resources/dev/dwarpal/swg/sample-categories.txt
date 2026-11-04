@@ -1,0 +1,7 @@
+# host  category
+general.example        news
+news.example           news
+search.example         search
+mail.example           webmail
+shop.example           shopping
+gambling.example       gambling
