@@ -166,6 +166,9 @@ class GatewayPartsTest {
         assertThrows(IllegalArgumentException.class, () -> GatewayConfig.builder(t, secret, EdgeFixtures.keyRing()).port(70_000).build());
         assertThrows(IllegalArgumentException.class, () -> GatewayConfig.builder(t, secret, EdgeFixtures.keyRing()).port(-1).build());
         assertThrows(IllegalArgumentException.class, () -> GatewayConfig.builder(t, secret, EdgeFixtures.keyRing()).maxInFlight(0).build());
+        assertThrows(IllegalArgumentException.class, () -> GatewayConfig.builder(t, secret, EdgeFixtures.keyRing()).requestDeadline(Duration.ofMillis(10)).build());
+        assertThrows(IllegalArgumentException.class, () -> GatewayConfig.builder(t, secret, EdgeFixtures.keyRing()).requestDeadline(Duration.ofHours(1)).build());
+        assertEquals(Duration.ofSeconds(30), c.requestDeadline());
         assertThrows(IllegalArgumentException.class, () -> GatewayConfig.builder(t, secret, EdgeFixtures.keyRing()).pepRegion("a b").build());
         assertThrows(NullPointerException.class, () -> GatewayConfig.builder(t, secret, null).build());
     }

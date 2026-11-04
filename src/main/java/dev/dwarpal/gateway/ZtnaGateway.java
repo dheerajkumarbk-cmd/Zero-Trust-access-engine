@@ -48,7 +48,11 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -78,7 +82,7 @@ public final class ZtnaGateway implements AutoCloseable {
 
     /** Counters for monitoring; no identifiers, no secrets. */
     public record Stats(long forwarded, long refused, long invalid, long upstreamFailures, long overloaded,
-                        long internalFailures) {
+                        long internalFailures, long timedOut) {
     }
 
     private final GatewayConfig config;
@@ -97,6 +101,12 @@ public final class ZtnaGateway implements AutoCloseable {
     private final AtomicLong upstreamFailures = new AtomicLong();
     private final AtomicLong overloaded = new AtomicLong();
     private final AtomicLong internalFailures = new AtomicLong();
+    private final AtomicLong timedOut = new AtomicLong();
+    private final ScheduledExecutorService watchdog = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "ztna-deadline");
+        t.setDaemon(true);
+        return t;
+    });
 
     private ZtnaGateway(GatewayConfig config, SessionAuthority authority, HttpServer server) {
         this.config = config;
@@ -156,7 +166,7 @@ public final class ZtnaGateway implements AutoCloseable {
 
     public Stats stats() {
         return new Stats(forwarded.get(), refused.get(), invalid.get(), upstreamFailures.get(), overloaded.get(),
-                internalFailures.get());
+                internalFailures.get(), timedOut.get());
     }
 
     /** Sessions this gateway is tracking. */
@@ -168,6 +178,7 @@ public final class ZtnaGateway implements AutoCloseable {
     public void close() {
         server.stop(0);
         executor.shutdownNow();
+        watchdog.shutdownNow();
         upstream.close();
     }
 
@@ -181,6 +192,16 @@ public final class ZtnaGateway implements AutoCloseable {
             ex.close();
             return;
         }
+        // B9: one deadline for the whole request, body reading included. A client that stalls is cut off
+        // (the interrupt closes the blocked read) and its slot comes back.
+        Thread handler = Thread.currentThread();
+        AtomicBoolean finished = new AtomicBoolean();
+        ScheduledFuture<?> deadline = watchdog.schedule(() -> {
+            if (!finished.get()) {
+                timedOut.incrementAndGet();
+                handler.interrupt();
+            }
+        }, config.requestDeadline().toMillis(), TimeUnit.MILLISECONDS);
         try {
             dispatch(ex, reply);
         } catch (IOException e) {
@@ -190,6 +211,9 @@ public final class ZtnaGateway implements AutoCloseable {
             internalFailures.incrementAndGet();
             reply.error(403, "access denied");
         } finally {
+            finished.set(true);
+            deadline.cancel(false);
+            Thread.interrupted();
             inFlight.release();
             ex.close();
         }

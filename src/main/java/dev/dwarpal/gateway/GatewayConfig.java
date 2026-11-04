@@ -20,6 +20,8 @@ import java.util.Optional;
 public final class GatewayConfig {
 
     public static final int MIN_SECRET_BYTES = 32;
+    public static final Duration MIN_DEADLINE = Duration.ofMillis(100);
+    public static final Duration MAX_DEADLINE = Duration.ofMinutes(5);
 
     private final byte[] bindAddress;
     private final int port;
@@ -38,6 +40,7 @@ public final class GatewayConfig {
     private final int loginsPerMinutePerAddress;
     private final Duration connectTimeout;
     private final Duration upstreamTimeout;
+    private final Duration requestDeadline;
     private final Duration maxLoginAuthenticationAge;
     private final SSLContext tls;
     private final boolean requireClientCertificate;
@@ -66,6 +69,10 @@ public final class GatewayConfig {
         this.loginsPerMinutePerAddress = positive(b.loginsPerMinutePerAddress, "loginsPerMinutePerAddress");
         this.connectTimeout = Objects.requireNonNull(b.connectTimeout, "connectTimeout");
         this.upstreamTimeout = Objects.requireNonNull(b.upstreamTimeout, "upstreamTimeout");
+        this.requestDeadline = Objects.requireNonNull(b.requestDeadline, "requestDeadline");
+        if (requestDeadline.compareTo(MIN_DEADLINE) < 0 || requestDeadline.compareTo(MAX_DEADLINE) > 0) {
+            throw new IllegalArgumentException("requestDeadline must be between " + MIN_DEADLINE + " and " + MAX_DEADLINE);
+        }
         this.maxLoginAuthenticationAge = Objects.requireNonNull(b.maxLoginAuthenticationAge, "maxLoginAuthenticationAge");
         this.tls = b.tls;
         this.requireClientCertificate = b.requireClientCertificate;
@@ -150,6 +157,11 @@ public final class GatewayConfig {
         return upstreamTimeout;
     }
 
+    /** The most time one request may take from the moment it holds a slot, body reading included (B9). */
+    public Duration requestDeadline() {
+        return requestDeadline;
+    }
+
     public Duration maxLoginAuthenticationAge() {
         return maxLoginAuthenticationAge;
     }
@@ -195,6 +207,7 @@ public final class GatewayConfig {
         private int loginsPerMinutePerAddress = 30;
         private Duration connectTimeout = Duration.ofSeconds(2);
         private Duration upstreamTimeout = Duration.ofSeconds(10);
+        private Duration requestDeadline = Duration.ofSeconds(30);
         private Duration maxLoginAuthenticationAge = Duration.ofMinutes(5);
         private SSLContext tls;
         private boolean requireClientCertificate;
@@ -231,6 +244,7 @@ public final class GatewayConfig {
         public Builder loginsPerMinutePerAddress(int v) { loginsPerMinutePerAddress = v; return this; }
         public Builder connectTimeout(Duration v) { connectTimeout = v; return this; }
         public Builder upstreamTimeout(Duration v) { upstreamTimeout = v; return this; }
+        public Builder requestDeadline(Duration v) { requestDeadline = v; return this; }
         public Builder maxLoginAuthenticationAge(Duration v) { maxLoginAuthenticationAge = v; return this; }
         /** Serve HTTPS with this context (TLS 1.3 only); optionally demand a client certificate. */
         public Builder tls(SSLContext v, boolean requireClientCertificate) {

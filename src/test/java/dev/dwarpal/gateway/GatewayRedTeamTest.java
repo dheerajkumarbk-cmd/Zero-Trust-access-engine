@@ -145,6 +145,33 @@ class GatewayRedTeamTest {
         assertTrue(g.idp.forClient("127.0.0.1").challenge("alice", "laptop-alice", thumb).isPresent());
     }
 
+    // B9: the body of a login was read with no deadline while holding an in-flight slot, so a few
+    // sockets that sent a header and half a body (slow loris) held every slot for ever and every honest
+    // request got 503.
+    @Test
+    void b9SlowBodiesCannotHoldTheInFlightSlots() throws Exception {
+        g = GatewayWorld.start(b -> b.maxInFlight(4).requestDeadline(java.time.Duration.ofSeconds(1)));
+        String crlf = "\r\n";
+        String head = "POST /.dwarpal/v1/sessions HTTP/1.1" + crlf + "Host: x" + crlf + "Content-Length: 1000" + crlf + crlf + "{\"v\":";
+        java.util.List<java.net.Socket> loris = new java.util.ArrayList<>();
+        try {
+            for (int i = 0; i < 4; i++) {
+                java.net.Socket sock = new java.net.Socket(g.gateway.uri().getHost(), g.gateway.uri().getPort());
+                sock.getOutputStream().write(head.getBytes(StandardCharsets.ISO_8859_1));
+                sock.getOutputStream().flush();
+                loris.add(sock);
+            }
+            Thread.sleep(2500);
+            assertEquals(401, g.http.send(java.net.http.HttpRequest.newBuilder(g.uri("/wiki/pages/home")).build(),
+                    HttpResponse.BodyHandlers.ofString()).statusCode(), "slots are free again after the deadline: no 503");
+            assertTrue(g.gateway.stats().timedOut() >= 4);
+        } finally {
+            for (java.net.Socket sock : loris) {
+                sock.close();
+            }
+        }
+    }
+
     // Held without changes (kept as regressions): MFA bound to another key; a session for one resource
     // used on another; a token presented with another session's id.
     @Test

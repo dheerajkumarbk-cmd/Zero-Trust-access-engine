@@ -44,6 +44,7 @@
 | T7 | I | Internal address leaked by redirects; analyst detail in answers | Location rewrite (B5); generic bodies | `b5`, `stepUpIsAnsweredWith401AndAChallenge` |
 | T8 | I | Secrets in logs or `toString` | Secret and password redacted; token never stored in clear | `configurationRefusesUnsafeValuesAndHidesTheSecret`, `theWireFormatIsStrictBothWays` |
 | T9 | D | Oversized headers, bodies, responses; floods | 431 / 413 / 502, in-flight 503, login 429, IdP per-address limits, bounded tables (B6, B8) | `oversizedHeadersAndBodiesAreRefused`, `overloadIsAnsweredBusyAndABugIsADeny`, `b6`, `b8` |
+| T14 | D | Slow-loris: stalled bodies hold in-flight slots for ever | Per-request deadline (`GatewayConfig.requestDeadline`, 100 ms to 5 min, default 30 s) enforced by a watchdog that interrupts the handler; the slot comes back | `GatewayRedTeamTest.b9SlowBodiesCannotHoldTheInFlightSlots` |
 | T10 | D | Upstream down or slow | Timeouts, 502, nothing forwarded | `oversizedResponsesAndAnUnreachableAppAreBadGateway` |
 | T11 | E | Direct access to the app around the gateway | Loopback only + constant-time gateway secret | `theSampleAppTrustsOnlyTheGateway` |
 | T12 | E | Phished or cloned authenticator | rpId scoping, origin and rpId-hash checks, counter must rise | `theAuthenticatorIsPhishingResistantAndClonesAreCaught`, `tamperedAssertionsAreRefused` |
@@ -51,7 +52,7 @@
 
 ## Red-team findings
 
-Each one first reproduced as a working probe, then fixed, then kept as a regression test (`GatewayRedTeamTest`). Before the fixes the probe run gave `Tests run: 9, Failures: 8`; after, all 9 pass.
+Each one first reproduced as a working probe, then fixed, then kept as a regression test (`GatewayRedTeamTest`). Before the fixes the probe run gave `Tests run: 9, Failures: 8`; after, all 9 pass. B9 came later from the integration review: reproduced first (honest request got 503), then fixed.
 
 | # | Breach | Root cause | Fix | Test |
 |---|---|---|---|---|
@@ -63,6 +64,7 @@ Each one first reproduced as a working probe, then fixed, then kept as a regress
 | B6 | 8 logins by alice filled an 8-slot table; carol got 503 | Sessions closed by the PA (per-user limit) stayed in the gateway table | Per-subject limit of 5 in `GatewaySessions` | `b6OneUserCannotFillTheGatewaySessionTable` |
 | B7 | A captured login from a device without an agent replayed 5 times opened 5 sessions and closed the victim's | No single-use check without device binding | Login MFA proof single-use | `b7ACapturedLoginCannotBeReplayed` |
 | B8 | One address took all 10,000 IdP challenge slots; nobody else could log in | Global cap only | 30 challenges per minute per address | `b8OneAddressCannotExhaustTheIdentityProvidersChallenges` |
+| B9 | 4 sockets that sent a login header and half a body held all 4 in-flight slots; an honest request got 503, and with defaults one address could fill 256 slots in about 9 minutes (found by the integration review) | Login body read with no deadline while holding a slot | Per-request deadline in `GatewayConfig` (bounds checked), watchdog interrupts the handler, slot freed, counted in `Stats.timedOut` | `b9SlowBodiesCannotHoldTheInFlightSlots` |
 
 Held without changes: MFA bound to another key; a wiki session used on the vault; a token presented with another session's id; stolen token; replay; READ proof spent on a write; header injection; path tricks.
 
@@ -82,7 +84,7 @@ Held without changes: MFA bound to another key; a wiki session used on the vault
 2. `EdgeHttp`: add `EVIDENCE = "Dwarpal-Evidence"`; `WireFormat`: public `evidence(...)` / `readEvidence(...)` for posture + evidence, so `ClientEvidence` need not wrap a placeholder request.
 3. `WireFormat`: a client login body without `timestamp`, `network`, `pepRegion` and `action` (the gateway sets them; the agent now sends placeholders).
 4. Deployment config must give the gateway a `KeyRing` holding the identity provider's public key (`IDENTITY_PROVIDER`).
-5. Slow-loris limits of the JDK server are JVM-wide system properties (`sun.net.httpserver.maxReqTime`, `maxRspTime`, `idleInterval`); the demo launcher should set them. Not set or tested in this part.
+5. Slow-loris on the gateway is now handled in code (B9, per-request deadline). The JDK-wide properties (`sun.net.httpserver.maxReqTime`, `maxRspTime`, `idleInterval`) still matter for the sample app and dev IdP servers, which have no deadline.
 6. Pre-commit hook: also refuse `*.authenticator` key files written by `AgentMain enrol` (or name them `.key`).
 7. Consider `AssuranceSettings.challengeMethod = WEBAUTHN` for the demo; the agent always answers a challenge with WebAuthn.
 8. Threat model: add B1 to B8.
