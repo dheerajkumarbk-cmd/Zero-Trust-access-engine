@@ -5,7 +5,9 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLPeerUnverifiedException;
 import javax.net.ssl.SSLSession;
+import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509ExtendedTrustManager;
 import javax.security.auth.x500.X500Principal;
 import java.io.IOException;
 import java.io.InputStream;
@@ -52,6 +54,40 @@ public final class TlsContexts {
         return ctx;
     }
 
+    /**
+     * A client context that trusts the Dwarpal CA <em>and</em> only the server whose certificate subject is
+     * exactly {@code expectedServer}, checked during the handshake. Every component certificate is valid
+     * for the same host names, so trusting the CA alone would let any compromised component answer in
+     * another's place (Layer 4 finding A1). Use this for every client connection between components.
+     */
+    public static SSLContext createPinned(Path keyStore, char[] keyStorePassword, Path trustStore,
+                                          char[] trustStorePassword, X500Principal expectedServer)
+            throws IOException, GeneralSecurityException {
+        Objects.requireNonNull(expectedServer, "expectedServer");
+        KeyManagerFactory kmf = KeyManagerFactory.getInstance("PKIX");
+        kmf.init(load(keyStore, keyStorePassword), keyStorePassword);
+        SSLContext ctx = SSLContext.getInstance("TLSv1.3");
+        ctx.init(kmf.getKeyManagers(), new TrustManager[]{pinnedTrustManager(trustStore, trustStorePassword, expectedServer)},
+                null);
+        return ctx;
+    }
+
+    /** The trust manager of {@link #createPinned} on its own: PKIX against the trust store, then the exact subject. */
+    public static X509ExtendedTrustManager pinnedTrustManager(Path trustStore, char[] trustStorePassword,
+                                                              X500Principal expectedServer)
+            throws IOException, GeneralSecurityException {
+        return PinnedTrust.trust(load(trustStore, trustStorePassword), Objects.requireNonNull(expectedServer, "expectedServer"));
+    }
+
+    /**
+     * Whether two certificate subjects are exactly the same name. {@code X500Principal.equals} compares
+     * canonical forms, which fold case, so {@code CN=GATEWAY} would equal {@code CN=gateway} (Layer 4
+     * finding A5); this compares the RFC 2253 strings instead.
+     */
+    public static boolean samePrincipal(X500Principal a, X500Principal b) {
+        return a.getName(X500Principal.RFC2253).equals(b.getName(X500Principal.RFC2253));
+    }
+
     /** For a server: TLS 1.3, strong suites, client certificate required. */
     public static SSLParameters serverParameters(SSLContext ctx) {
         SSLParameters p = hardened(ctx);
@@ -68,8 +104,8 @@ public final class TlsContexts {
 
     /**
      * The subject of the peer's verified certificate (who is calling), if the peer presented one.
-     * Callers identify components by comparing this whole name exactly, for example with
-     * {@code new X500Principal("CN=gateway")}, never by parsing parts out of it.
+     * Callers identify components by comparing this whole name exactly with {@link #samePrincipal}
+     * (not {@code equals}, which folds case), never by parsing parts out of it.
      */
     public static Optional<X500Principal> peerPrincipal(SSLSession session) {
         Objects.requireNonNull(session, "session");

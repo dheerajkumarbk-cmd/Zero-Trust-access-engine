@@ -7,8 +7,9 @@
 fail=0
 staged=$(git diff --cached --name-only --diff-filter=ACMR)
 
-# 1. Files that must never be committed: keys, keystores, env files, build output.
-bad_files=$(printf '%s\n' "$staged" | grep -Ei '\.(pem|key|p12|pfx|jks|keystore|env)$|(^|/)target/|\.class$|\.jar$')
+# 1. Files that must never be committed: keys, keystores, env files, build output, and the
+#    software security keys written by `AgentMain enrol` (*.authenticator).
+bad_files=$(printf '%s\n' "$staged" | grep -Ei '\.(pem|key|p12|pfx|jks|keystore|env|authenticator)$|(^|/)target/|\.class$|\.jar$')
 if [ -n "$bad_files" ]; then
     echo "pre-commit: refusing to commit key/env/build files:"
     printf '  %s\n' $bad_files

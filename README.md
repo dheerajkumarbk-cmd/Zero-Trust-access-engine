@@ -41,6 +41,29 @@ eligible person asks for a role for at most 1 h with WebAuthn and a reason; a di
 approves by signing exactly that request. Break-glass accounts open a sealed credential for 30 min,
 page the SOC at once and must be reviewed. See the [Layer 3 report](docs/layer-3-report.md).
 
+## Enforcement points and the SASE edge (Layer 4)
+
+The decision point is useless until something enforces it. Layer 4 puts three enforcement points
+(PEPs) in front of real traffic, all reaching the engine only through one **engine API**:
+
+```
+ client agent --HTTPS--> ZTNA gateway ----+
+ browser -----proxy----> web gateway -----+--mutual TLS 1.3--> engine API --> PA / PAM / engine
+ SaaS upload ----------> data guard ------+       (each PEP: own certificate, own resource scope)
+```
+
+| Package | Role (SASE name) | What it does |
+|---|---|---|
+| `api` | engine API | HTTPS with client certificates; per-caller roles, resource scopes and rate limits; strict JSON; generic errors; every call audited. `RemoteSessionAuthority` is the PEP side: pinned to the API, one deadline, any failure is a deny |
+| `gateway`, `agent`, `devidp` | ZTNA | Reverse proxy in front of private apps; every request on a session is signed by the client agent and decided again; a development identity provider with passwords (PBKDF2) and a software security key (WebAuthn, simulated) |
+| `swg` | Secure web gateway | Forward proxy filtering by host name: block lists, categories, look-alike names, raw IPs, internal addresses; no TLS interception |
+| `casb` | CASB / DLP | SaaS reads and uploads through sessions; validated detectors (Luhn, Verhoeff, PAN, keys, tokens); block, redact or audit by classification |
+| `edge`, `wire` | contracts | The shared request/result types, header protocol, wire format, TLS settings and a strict JSON reader |
+
+A session opens only on fresh, verified MFA bound to the client's session key, and each MFA proof
+opens one session. Single decisions without a session exist only for web browsing. See the
+[Layer 4 report](docs/layer-4-report.md).
+
 ## The maths
 
 - **M3, Bayes with base rate** (Axelsson 2000): `logit P(attack|x) = logit P(attack) + Σ ln LR_k`
@@ -55,6 +78,7 @@ page the SOC at once and must be reviewed. See the [Layer 3 report](docs/layer-3
 - **Failure bursts:** Poisson likelihood ratio for brute force, password spray and org-wide surges, clamped at zero.
 
 Reports: [Layer 1](docs/layer-1-report.md), [Layer 2](docs/layer-2-report.md), [Layer 3](docs/layer-3-report.md),
+[Layer 4](docs/layer-4-report.md),
 and the full [project state](docs/project-state.md).
 
 ## Build

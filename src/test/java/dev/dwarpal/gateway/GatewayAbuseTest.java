@@ -268,12 +268,21 @@ class GatewayAbuseTest {
             return slow.get();
         });
         GatewayWorld.RawSession s = aliceWiki();
-        java.util.concurrent.CompletableFuture<HttpResponse<String>> first = g.http.sendAsync(
-                g.signed(s, s.key(), "GET", "/wiki/pages/home", Action.READ, "wiki", g.newId()).build(),
-                HttpResponse.BodyHandlers.ofString());
+        // The gateway answers before its handler gives the slot back, so a request sent the moment the login
+        // answer arrives can still find the one slot taken. Retry until the first request holds the slot.
+        java.util.concurrent.CompletableFuture<HttpResponse<String>> first = null;
+        for (int attempt = 0; attempt < 20 && slow.get().entered.getCount() > 0; attempt++) {
+            first = g.http.sendAsync(
+                    g.signed(s, s.key(), "GET", "/wiki/pages/home", Action.READ, "wiki", g.newId()).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            if (!slow.get().entered.await(500, TimeUnit.MILLISECONDS)) {
+                assertEquals(503, first.get(10, TimeUnit.SECONDS).statusCode(), "only the slot race may delay it");
+            }
+        }
         assertTrue(slow.get().entered.await(10, TimeUnit.SECONDS));
+        long busyBefore = g.gateway.stats().overloaded();
         assertEquals(503, read(s).statusCode(), "the one slot is taken");
-        assertEquals(1, g.gateway.stats().overloaded());
+        assertEquals(busyBefore + 1, g.gateway.stats().overloaded());
         slow.get().release.countDown();
         assertEquals(200, first.get(10, TimeUnit.SECONDS).statusCode());
 

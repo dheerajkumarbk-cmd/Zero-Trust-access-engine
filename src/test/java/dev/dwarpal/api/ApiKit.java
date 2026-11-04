@@ -40,8 +40,8 @@ import java.util.Optional;
 final class ApiKit {
 
     static final List<Caller> CALLERS = List.of(
-            Caller.component("gateway", CallerRole.PEP),
-            Caller.component("swg", CallerRole.PEP),
+            Caller.pepComponent("gateway", "*"), // the unit tests ask about every resource
+            Caller.pepComponent("swg", "web:*"),
             Caller.component("console", CallerRole.ADMIN_CONSOLE),
             Caller.component("soc", CallerRole.SOC));
 

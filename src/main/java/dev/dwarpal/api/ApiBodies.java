@@ -31,7 +31,7 @@ import java.util.function.Supplier;
  * approval     {"v":1,"requestId","approverId","approval":proof}
  * break-glass  {"v":1,"accountId","role","justification","sealed":proof}
  * review       {"v":1,"grantId","reviewerId","verdict","signed":proof}
- * answers      {"revoked":n}   {"ok":true,"id"} or {"ok":false}   {"error":"..."}
+ * answers      {"revoked":n} (subject scope also {"elevations":m})   {"ok":true,"id"} or {"ok":false}   {"error":"..."}
  * </pre>
  */
 public final class ApiBodies {

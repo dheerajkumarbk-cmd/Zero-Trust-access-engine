@@ -62,7 +62,7 @@ class PolicyAdministratorTest {
         AuditLog audit = SessionFixtures.auditLog(sink);
         DecisionPoint pdp = DecisionPipeline.continuous(engine, audit, clock);
         return PolicyAdministrator.builder(audit).opening(pdp).continuous(pdp).directory(SessionFixtures.DIRECTORY)
-                .keyRing(Fixtures.KEYRING).limits(limits).clock(clock).build();
+                .keyRing(Fixtures.KEYRING).limits(limits).clock(clock).allowLoginWithoutMfa().build();
     }
 
     /** Alice on her laptop, reading the wiki, now. */
@@ -398,7 +398,7 @@ class PolicyAdministratorTest {
         });
         PolicyEngine engine = SessionFixtures.engine();
         pa = PolicyAdministrator.builder(broken).opening(engine).continuous(engine).directory(SessionFixtures.DIRECTORY)
-                .keyRing(Fixtures.KEYRING).clock(clock).build();
+                .keyRing(Fixtures.KEYRING).clock(clock).allowLoginWithoutMfa().build();
         SessionResult r = openRaw(key, alice().build());
         assertEquals(DENIED, r.status());
         assertTrue(r.reason().contains("no audit, no session"), r.reason());

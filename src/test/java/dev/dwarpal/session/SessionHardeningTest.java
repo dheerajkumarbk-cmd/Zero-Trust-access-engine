@@ -78,7 +78,7 @@ class SessionHardeningTest {
                 .costModel(new CostModel(1000, 1, 20, 0.05)).build();
         DecisionPoint pdp = DecisionPipeline.continuous(engine, audit, clock);
         pa = PolicyAdministrator.builder(audit).opening(pdp).continuous(pdp).directory(directory)
-                .keyRing(Fixtures.KEYRING).clock(clock).build();
+                .keyRing(Fixtures.KEYRING).clock(clock).allowLoginWithoutMfa().build();
     }
 
     private Fixtures.RequestBuilder alice() {

@@ -29,7 +29,7 @@ import java.util.Set;
  */
 public final class ClientEvidence {
 
-    public static final String HEADER = "Dwarpal-Evidence";
+    public static final String HEADER = EdgeHttp.EVIDENCE;
 
     /** What the header carries. */
     public record Claims(DevicePosture posture, Evidence evidence) {

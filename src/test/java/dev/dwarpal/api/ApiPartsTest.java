@@ -41,7 +41,7 @@ class ApiPartsTest {
 
     @Test
     void thePinnedTrustManagerAcceptsOnlyTheApi() throws Exception {
-        X509ExtendedTrustManager tm = PinnedTls.trust(ApiKit.pki().trustStore(), ApiKit.pki().password(),
+        X509ExtendedTrustManager tm = TlsContexts.pinnedTrustManager(ApiKit.pki().trustStore(), ApiKit.pki().password(),
                 TlsContexts.component("api"));
         X509Certificate[] api = chain("api");
         X509Certificate[] swg = chain("swg");
@@ -55,7 +55,9 @@ class ApiPartsTest {
         assertThrows(CertificateException.class, () -> tm.checkClientTrusted(api, "ECDHE_ECDSA", (Socket) null));
         assertThrows(CertificateException.class, () -> tm.checkClientTrusted(api, "ECDHE_ECDSA", (javax.net.ssl.SSLEngine) null));
         assertEquals(1, tm.getAcceptedIssuers().length, "the Dwarpal CA only");
-        assertTrue(PinnedTls.sameSubject(TlsContexts.component("api"), new javax.security.auth.x500.X500Principal("CN=api")));
+        assertTrue(TlsContexts.samePrincipal(TlsContexts.component("api"), new javax.security.auth.x500.X500Principal("CN=api")));
+        assertTrue(!TlsContexts.samePrincipal(TlsContexts.component("api"), new javax.security.auth.x500.X500Principal("CN=API")),
+                "case matters (finding A5)");
     }
 
     private static X509Certificate[] chain(String leaf) throws Exception {

@@ -80,6 +80,9 @@ public final class PolicyAdministrator {
     private final SecureRandom random;
     private final SessionStore store = new SessionStore();
     private final NonceCache nonces;
+    /** Login MFA proofs already spent: each opens at most one session (finding B7, at the PA). */
+    private final NonceCache loginProofs;
+    private final boolean requireMfaAtOpen;
     private final Object openLock = new Object();
     private final AtomicLong malformedTokens = new AtomicLong();
     private final AtomicLong unknownTokens = new AtomicLong();
@@ -98,6 +101,9 @@ public final class PolicyAdministrator {
         this.random = new SecureRandom();
         // A request id is remembered for as long as a proof carrying it could still verify.
         this.nonces = new NonceCache(limits.maxProofAge().plus(KeyRing.MAX_CLOCK_SKEW), b.nonceCapacity);
+        // An MFA proof is remembered for as long as it could still count as fresh.
+        this.loginProofs = new NonceCache(assurance.maxAuthenticationAge().plus(KeyRing.MAX_CLOCK_SKEW), b.nonceCapacity);
+        this.requireMfaAtOpen = b.requireMfaAtOpen;
     }
 
     /** The audit trail is not optional: no audit, no session. */
@@ -146,6 +152,19 @@ public final class PolicyAdministrator {
             auditRefusal("SESSION_MFA_NOT_BOUND", request, null, "MFA proof not bound to the session key", now);
             return SessionResult.rejected("the MFA proof is not bound to this session's key", false);
         }
+        // Finding B1 at the PA: a session opens only on verified MFA, whichever enforcement point asks.
+        // Finding B7: a login MFA proof opens at most one session, so a captured login cannot be replayed.
+        Optional<Instant> verifiedMfa = verifiedAuthentication(request, now, thumbprint);
+        if (verifiedMfa.isEmpty() && requireMfaAtOpen) {
+            auditRefusal("SESSION_MFA_REQUIRED", request, null, "no fresh, verified, key-bound MFA proof", now);
+            return SessionResult.of(SessionResult.Status.STEP_UP, null,
+                    "verified MFA required before a session opens; challenge with " + assurance.challengeMethod(), false);
+        }
+        if (verifiedMfa.isPresent()
+                && !loginProofs.firstUse(request.evidence().authenticationProof().orElseThrow().signature(), now)) {
+            auditRefusal("SESSION_LOGIN_REPLAY", request, null, "login MFA proof already used", now);
+            return SessionResult.rejected("this MFA proof has already opened a session: replay refused", false);
+        }
         Decision d = opening.decide(request, signals);
         if (d.outcome() == Outcome.STEP_UP) {
             return SessionResult.of(SessionResult.Status.STEP_UP, d,
@@ -161,7 +180,7 @@ public final class PolicyAdministrator {
 
         String token = newToken();
         Duration reauth = limits.reauthFor(resource.get().classification());
-        Instant lastAuth = verifiedAuthentication(request, now, thumbprint).orElse(now);
+        Instant lastAuth = verifiedMfa.orElse(now);
         boolean restricted = d.restricted() || d.outcome() == Outcome.ALLOW_LIMITED;
         Session session = new Session(newSessionId(), Digests.sha256Hex(token), request.subject().id(),
                 request.device().id(), request.resource().id(), restricted, proofKey, now, now, lastAuth,
@@ -591,6 +610,7 @@ public final class PolicyAdministrator {
         private final AuditLog audit;
         private Clock clock = Clock.systemUTC();
         private int nonceCapacity = 200_000;
+        private boolean requireMfaAtOpen = true;
 
         private Builder(AuditLog audit) {
             this.audit = audit;
@@ -635,6 +655,15 @@ public final class PolicyAdministrator {
 
         public Builder nonceCapacity(int v) {
             nonceCapacity = v;
+            return this;
+        }
+
+        /**
+         * Lets a login without verified MFA reach the engine, which then treats authentication as risk
+         * evidence only. For tests of the engine path; never for a deployment.
+         */
+        public Builder allowLoginWithoutMfa() {
+            requireMfaAtOpen = false;
             return this;
         }
 

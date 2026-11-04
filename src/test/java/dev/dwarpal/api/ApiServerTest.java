@@ -148,7 +148,8 @@ class ApiServerTest {
         for (ApiBodies.Scope scope : List.of(ApiBodies.Scope.SUBJECT, ApiBodies.Scope.DEVICE)) {
             try (ApiKit.Raw console = h.raw("console")) {
                 String b = JsonWriter.write(ApiBodies.revoke(new ApiBodies.RevokeBody(scope, "nobody", "cleanup")));
-                assertEquals("{\"revoked\":0}", console.post("/v1/sessions/revoke", b).body());
+                assertEquals(scope == ApiBodies.Scope.SUBJECT ? "{\"revoked\":0,\"elevations\":0}" : "{\"revoked\":0}",
+                        console.post("/v1/sessions/revoke", b).body());
             }
         }
     }
@@ -351,7 +352,10 @@ class ApiServerTest {
         ApiBodies.ElevationBody req = new ApiBodies.ElevationBody("alice", "laptop-alice", "admin", Duration.ofMinutes(30),
                 "INC-4211: rotate the wiki signing key", webauthn, idp);
         KeyPair key = Ed25519.generateKeyPair();
-        assertFalse(gateway.decide(adminAction(key)).status().allowed(), "not admin before approval");
+        // Administration of a private application happens in a session (finding X2: never by single decision).
+        EdgeGrant session = h.open(gateway, key, h.world.request().mfa(AuthMethod.WEBAUTHN, Duration.ofMinutes(1), key)
+                .build()).grant().orElseThrow();
+        assertFalse(h.use(gateway, key, session, adminAction(key)).status().allowed(), "not admin before approval");
         try (ApiKit.Raw console = h.raw("console")) {
             ApiKit.Reply asked = console.post("/v1/pam/requests", JsonWriter.write(ApiBodies.elevation(req)));
             assertEquals(200, asked.status());
@@ -367,7 +371,28 @@ class ApiServerTest {
                     JsonWriter.write(ApiBodies.approval(new ApiBodies.ApprovalBody(id, "bob", approval))));
             assertTrue(ok.body().startsWith("{\"ok\":true"), ok.body());
         }
-        assertEquals(EdgeResult.Status.GRANTED, gateway.decide(adminAction(key)).status(), "admin while the grant lasts");
+        assertEquals(EdgeResult.Status.GRANTED, h.use(gateway, key, session, adminAction(key)).status(),
+                "admin while the grant lasts");
+    }
+
+    @Test
+    void revokingASubjectOverTheApiAlsoEndsTheirElevation() throws Exception {
+        // Integration request R8: cutting a person off must not leave their admin rights running.
+        Instant now = h.world.clock.now();
+        String why = "IdP outage, rotating keys per runbook 12";
+        SignatureProof sealed = new SignatureProof(EdgeFixtures.BREAK_GLASS_KEY_ID, now,
+                Ed25519.sign(EdgeFixtures.BREAK_GLASS.getPrivate(), SignedMessages.breakGlass("bg-admin-1", "admin", why, now)));
+        try (ApiKit.Raw console = h.raw("console"); ApiKit.Raw soc = h.raw("soc")) {
+            assertTrue(console.post("/v1/pam/break-glass", JsonWriter.write(ApiBodies.breakGlass(
+                    new ApiBodies.BreakGlassBody("bg-admin-1", "admin", why, sealed)))).body().startsWith("{\"ok\":true"));
+            assertFalse(h.world.pam.activeRoles("bg-admin-1", h.world.clock.now()).isEmpty(), "elevated");
+            String b = JsonWriter.write(ApiBodies.revoke(new ApiBodies.RevokeBody(ApiBodies.Scope.SUBJECT, "bg-admin-1",
+                    "SOC ticket 91: account compromised")));
+            assertEquals("{\"revoked\":0,\"elevations\":1}", soc.post("/v1/sessions/revoke", b).body());
+        }
+        assertTrue(h.world.pam.activeRoles("bg-admin-1", h.world.clock.now()).isEmpty(), "the elevation ended with the subject");
+        assertTrue(h.world.sink.snapshot().stream().anyMatch(r -> r.type().equals("ELEVATION_REVOKED")
+                && r.actor().equals("api/soc")));
     }
 
     @Test

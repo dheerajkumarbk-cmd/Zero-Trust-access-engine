@@ -101,7 +101,7 @@ public final class RemoteSessionAuthority implements SessionAuthority, AutoClose
                                                  char[] trustStorePassword, X500Principal api, Duration timeout)
             throws IOException, GeneralSecurityException {
         return new RemoteSessionAuthority(base,
-                PinnedTls.client(keyStore, keyStorePassword, trustStore, trustStorePassword, api), timeout);
+                TlsContexts.createPinned(keyStore, keyStorePassword, trustStore, trustStorePassword, api), timeout);
     }
 
     /** With a context made elsewhere (tests only: such a context trusts any component as the server). */

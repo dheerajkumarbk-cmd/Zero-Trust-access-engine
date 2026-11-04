@@ -95,6 +95,12 @@ public final class LocalSessionAuthority implements SessionAuthority {
             if (Duration.between(clock.instant(), request.timestamp()).abs().compareTo(KeyRing.MAX_CLOCK_SKEW) > 0) {
                 return result(EdgeResult.Status.REJECTED, request.requestId(), false, Optional.empty(), false);
             }
+            // Finding X2: a single decision has no session, so no MFA at open and no proof of possession.
+            // It is for session-less traffic (web browsing through the SWG) only; private applications and
+            // SaaS data are reached through sessions, or a stolen PEP certificate could skip both.
+            if (directory.resource(request.resourceId()).map(r -> r.kind() != ResourceKind.WEB).orElse(true)) {
+                return result(EdgeResult.Status.DENIED, request.requestId(), false, Optional.empty(), false);
+            }
             Decision d = singleDecisions.decide(assemble(request), currentSignals());
             EdgeResult.Status status = switch (d.outcome()) {
                 case ALLOW -> EdgeResult.Status.GRANTED;

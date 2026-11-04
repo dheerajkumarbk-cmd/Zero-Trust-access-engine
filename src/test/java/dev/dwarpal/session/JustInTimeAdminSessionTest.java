@@ -69,7 +69,7 @@ class JustInTimeAdminSessionTest {
                 .costModel(new CostModel(1000, 1, 20, 0.05)).build();
         DecisionPoint pdp = DecisionPipeline.continuous(engine, audit, clock);
         PolicyAdministrator pa = PolicyAdministrator.builder(audit).opening(pdp).continuous(pdp).directory(directory)
-                .keyRing(keys).clock(clock).build();
+                .keyRing(keys).clock(clock).allowLoginWithoutMfa().build();
 
         KeyPair session = Ed25519.generateKeyPair();
         int[] n = {0};

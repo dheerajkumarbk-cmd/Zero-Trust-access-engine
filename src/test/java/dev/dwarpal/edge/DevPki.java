@@ -47,6 +47,14 @@ public final class DevPki {
 
     /** A CA named {@code caName} in {@code dir}, and one key store per leaf. */
     public static DevPki create(Path dir, String caName, List<Leaf> leaves) throws IOException, InterruptedException {
+        // On Windows and macOS Gateway.p12 and gateway.p12 are one file: refuse names that differ only in case.
+        java.util.Set<String> folded = new java.util.HashSet<>();
+        for (Leaf leaf : leaves) {
+            if (!folded.add(leaf.name().toLowerCase(java.util.Locale.ROOT)) || leaf.name().equalsIgnoreCase("ca")
+                    || leaf.name().equalsIgnoreCase("trust")) {
+                throw new IllegalArgumentException("leaf names must differ in more than case, and not be ca or trust");
+            }
+        }
         Files.createDirectories(dir);
         byte[] random = new byte[18];
         new SecureRandom().nextBytes(random);

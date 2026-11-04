@@ -1,4 +1,4 @@
-# Dwarpal threat model (STRIDE), v0.9
+# Dwarpal threat model (STRIDE), v1.0
 
 Scope: the Policy Engine core (v0.1 to v0.6) and the Policy Administrator: sessions (v0.7, v0.8) and
 privileged access (v0.8). The PEP
@@ -192,6 +192,51 @@ Red-team pass on part 0:
 | R10 | Elevation | Finance was granted every CONFIDENTIAL+ resource of any kind, including a RESTRICTED web destination (after MFA) | Reference policy P-02 had no resource-kind condition | P-02 covers private apps only (policy `2026.11.03-1`) | `resultInvariantsHold` |
 | P8 | (pipeline) | SpotBugs: LDAP-injection pattern when reading a certificate's name; catching `NullPointerException` | Parsing the subject name; defensive catch | Callers compared by exact principal (no parsing); catch removed | SpotBugs gate |
 
+## v1.0 Layer 4 (enforcement points and SASE edge)
+
+Each part's full STRIDE table is in its notes file ([part A](layer-4/part-a.md), [part B](layer-4/part-b.md),
+[part C](layer-4/part-c.md)). The findings below were each first reproduced as a working attack, then
+fixed, then kept as a regression test. They are numbered 4A, 4B and 4C here because A1 to A8, B1 to B9 and
+C1 to C8 above are older findings; the notes files use the short names.
+
+| # | Part | STRIDE | Breach (before the fix) | Fix | Test |
+|---|---|---|---|---|---|
+| 4A-1 | API | Spoofing | A compromised web gateway (valid Dwarpal certificate, valid for `localhost`) answered in the API's place, said GRANTED and received session tokens and proofs | Clients pin the API's exact subject during the handshake (`TlsContexts.createPinned`) | `a1_aCompromisedComponentCannotPoseAsTheApi` |
+| 4A-2 | API | Denial of service | Four slow connections (one byte short of a body, half a header line) held every worker; even the SOC's health check timed out | A deadline per worker task; the watchdog interrupts the worker, which closes its channel | `a2_slowBodiesAndSlowHeadersCannotStarveTheServer` |
+| 4A-3 | API | Denial of service | A server dripping one byte every 100 ms held the client past 8 s; a 128 MB answer would have been buffered | One deadline for the whole exchange; bounded body subscriber (64 KiB) | `a3_theClientHasADeadline...` |
+| 4A-4 | API | Tampering | A GRANTED answer for another request id was accepted | The answer's reference must equal the request id; the status must fit the call | `a4_anAnswerMustBelongToTheQuestion` |
+| 4A-5 | API | Spoofing | `CN=GATEWAY` was the gateway (`X500Principal.equals` folds case) | Exact RFC 2253 comparison (`TlsContexts.samePrincipal`) | `a5_callerSubjectsAreComparedExactly...` |
+| 4B-1 | ZTNA | Spoofing | A login without MFA, or with MFA signed by an attacker key, opened a session | `LoginGuard` at the gateway, and since integration the PA itself (X3) | `b1LoginWithoutVerifiedAuthenticationIsRefused` |
+| 4B-2 | ZTNA | Info disclosure | The login endpoint opened sessions for resources the gateway does not front (a login oracle) | Logins only for routed resources | `b2LoginOnlyForResourcesThisGatewayFronts` |
+| 4B-3 | ZTNA | Elevation | `POST /wiki/Admin/settings` was authorised as WRITE and changed admin settings | Case-insensitive download and admin classification | `b3RouteClassificationIsCaseInsensitive` |
+| 4B-4 | ZTNA | Elevation | `GET` with `X-HTTP-Method-Override: DELETE` deleted a page under a READ grant | Override headers and `_method` refused | `b4MethodOverrideHeadersAreRefused` |
+| 4B-5 | ZTNA | Info disclosure | Redirects revealed the app's internal address | `Location` rewritten to gateway-relative paths | `b5RedirectsNeverRevealTheInternalAddress` |
+| 4B-6 | ZTNA | Denial of service | One user's logins filled the gateway's session table | At most 5 tracked sessions per subject | `b6OneUserCannotFillTheGatewaySessionTable` |
+| 4B-7 | ZTNA | Spoofing | A captured login from a device without an agent, replayed 5 times, opened 5 sessions | Login MFA proof single-use (gateway, and since integration the PA: X4) | `b7ACapturedLoginCannotBeReplayed` |
+| 4B-8 | IdP | Denial of service | One address took all 10,000 login challenge slots | 30 challenges per minute per address | `b8OneAddressCannotExhaust...` |
+| 4B-9 | ZTNA | Denial of service | Four stalled login bodies held every in-flight slot; honest users got 503 (found in the integration review) | One deadline per request, body included; the slot comes back | `b9SlowBodiesCannotHoldTheInFlightSlots` |
+| 4C-1 | SWG | Elevation | `2130706433`, `0x7f000001`, `127.1` passed as host names and skipped the raw-IP rule | Names with a numeric or hex last label refused | `r1_numericSpellingsOfAnIpAddressAreNotHostNames` |
+| 4C-2 | SWG | Info disclosure | An allowed name resolving to 127.0.0.1 or the metadata address got a tunnel (SSRF) | Every resolved address checked; connect only to the checked address | `r2_aNameThatResolvesToAnInternalAddress...` |
+| 4C-3 | SWG | Spoofing | A Cyrillic look-alike name passed as ordinary | Mixed-script labels decided as `web:malicious` | `r3_namesMixingWritingSystemsAreLookalikes` |
+| 4C-4 | SWG | Denial of service | One byte per 250 ms held a connection although the read timeout was 1 s | Total time limit per head and body | `r4_aSlowTrickleCannotHoldAConnectionOpen` |
+| 4C-5 | CASB | Info disclosure | 10,500 e-mail addresses pushed an AWS key out of the findings and the upload passed | Cap per finding type; truncated + REDACT becomes BLOCK | `r5_...` |
+| 4C-6 | CASB | Info disclosure | A card number in UTF-16 text passed | UTF-16 recognised; other NUL-bearing content uninspectable (blocked) | `r6_...` |
+| 4C-7 | CASB | Info disclosure | Zero-width spaces or full-width digits hid a card number | Any Unicode digit; invisible characters ignored | `r7_...` |
+| 4C-8 | CASB | Denial of service | 2 MB of key markers took 32 s to scan (quadratic) | Linear scan; 8 MiB now 137 ms | `r8_...` |
+| 4C-9 | CASB | Info disclosure | Forwarding the original bytes of a REDACTED upload undid the redaction | `GuardResult.forward(original)` | `r9_...` |
+| 4C-10 | SWG | Denial of service | Under load the 503 of a busy gateway was lost (reset) | Short lingering close on the busy path | `tooManyConnectionsGetServiceUnavailable` |
+
+Cross-part red team at integration (`CrossPartRedTeamTest`, every component through the real API over mutual TLS):
+
+| # | STRIDE | Breach (before the fix) | Root cause | Fix | Test |
+|---|---|---|---|---|---|
+| X1 | Denial of service | Slow login bodies held the ZTNA gateway's slots (= 4B-9) | Part A's deadline lesson not applied in part B | Fixed in part B | `b9...` |
+| X2 | Elevation | A gateway certificate asked `/v1/decisions` about the wiki and got GRANTED: no session, so no MFA at open and no proof of possession | Single decisions were allowed for every resource kind | Single decisions only for `WEB` resources (session-less browsing); private apps and SaaS data need a session | `x2_aSingleDecisionCannotStandInForASessionOnAPrivateApp` |
+| X3 | Spoofing | A gateway certificate could open sessions without MFA straight at the API | MFA at login was checked only in the gateway (`LoginGuard`) | The PA requires fresh, verified, key-bound MFA at open (`allowLoginWithoutMfa()` only for engine-path tests) | `x3_aStolenGatewayCertificateCannotOpenASessionWithoutMfa`, `MfaAtOpenTest` |
+| X4 | Spoofing | A captured login replayed through another gateway instance would open a second session | Single use was remembered per gateway only | The PA remembers spent login MFA proofs for every PEP | `x4_aCapturedLoginCannotBeReplayedThroughAnotherGatewayInstance` |
+| X5 | Elevation | The web gateway's certificate could open and spend wiki sessions | Any PEP could ask about any resource | Every PEP caller has a required resource scope (`Caller.pepComponent("swg", "web:*")`); outside it: 403 | `x5_eachEnforcementPointStaysWithinItsOwnResources`, `ApiScopeTest` |
+| X6 | Elevation | Revoking a compromised person over the API left their admin elevation running | Revocation and PAM were separate calls | Subject revocation also ends their elevation grants | `revokingASubjectOverTheApiAlsoEndsTheirElevation` |
+
 ## Residual risks (accepted for this layer, scheduled)
 
 | Risk | Why accepted now | Planned in |
@@ -201,7 +246,7 @@ Red-team pass on part 0:
 | HMAC audit key cannot live in an HSM yet (key must be extractable) | Simplicity | Layer 4: KMS-backed signing of chain heads |
 | Correlated scorers overcount under naive Bayes | Inherent in the model | Documented; evaluation chapter |
 | Linter conflict detection is structural only | SMT out of scope | What-If replay (Layer 4) |
-| PEP must treat an exception (null input) as DENY | Contract outside the engine | PEP layer contract + tests |
+| ~~PEP must treat an exception (null input) as DENY~~ | Closed in v1.0: every enforcement point maps any failure, timeout or odd answer to a deny (`RemoteSessionAuthority`, `aFailingOrSilentAuthorityIsADeny`) | Done (Layer 4) |
 | ~~Admin endpoint flooding (each rejection is audited)~~ | Closed in v0.8 (A8, R7) | Done (Layer 3) |
 | Per-method MFA beta values are assumptions | No peer-reviewed rates exist | Sensitivity analysis in evaluation |
 | Branch protection / required checks are GitHub settings | Needs the repo owner | When the repo is created |
@@ -213,10 +258,16 @@ Red-team pass on part 0:
 | Stolen, unlocked laptop used at the victim's home with their password looks exactly like the victim (60/60 ALLOW in simulation) | Signals alone cannot separate them | Narrowed in v0.7 (S9): the window ends at the next re-authentication (at most 8 h / 4 h / 1 h / 15 min by classification), and a laptop left idle 30 min has no session to take |
 | The org-wide failure counter only covers the last 2 hours of recorded time | Ring buffer | Fine for live use; What-If replay must rebuild it from the audit trail |
 | An attacker who passes strong MFA from a new place gets that place learned | By design (verified) | SOC review + `InMemoryBehaviorHistory.forget` for remediation |
-| MFA proofs outside sessions (single decisions straight to the engine) may still be unbound (`authentication/v2`) and replayable for 15 min | Backward compatibility for engine-only callers | Sessions require key-bound MFA (v0.8, R4); retire v2 when the enforcement point (Layer 4) always runs through the PA |
+| MFA proofs outside sessions (single decisions straight to the engine) may still be unbound (`authentication/v2`) and replayable for 15 min | Narrowed in v1.0 (X2): single decisions exist only for web browsing, which never needs MFA | Retire v2 after the submission |
 | Whoever holds a stolen token can end the victim's session by presenting it for another device (S10) | Ending a possibly stolen session is the safe side | Accepted; the victim logs in again |
 | Sessions and nonces live in memory: a restart ends all sessions | Simplicity, no database yet | Layer 4 persistent store (tokens stay hashed) |
 | A session opened while its subject is being revoked can survive the revocation | Open and revoke are not one transaction | Continuous evaluation denies its first use once the directory disables the account; revoke together with the directory change |
 | Break-glass needs the identity provider for MFA on each admin action (P-05) | Consistency: every admin action needs fresh MFA | An offline emergency procedure for 'identity provider down' (Layer 5 runbook) |
 | Approvers are any holder of an `ELEVATION_APPROVER` key; no per-role approver lists; one human with two accounts could approve themselves | Simplicity | Per-role approver groups in the admin console (Layer 6) |
 | Elevation applies to all of the subject's sessions, not one device | The directory has no device context | Admin actions still need fresh MFA bound to the session key on every request (P-05 + R4), so another device without that key gains nothing |
+| The web gateway knows its users by source address (`IdentityResolver.fixed`) | No proxy authentication yet; fine on a protected network, wrong behind NAT | HTTPS-proxy mode with the device certificate as identity (tested in part C), wired in the demo launcher |
+| No TLS interception in the web gateway: only host names are seen | Interception needs a certificate on every client | Accepted; stated as a limit |
+| DLP does not decode base64, compressed or Office/PDF content | Lite DLP; binary containers are blocked by default | Accepted; a determined insider can always encode |
+| DLP findings reach the audit trail but not the behavioural scorers | Engine-side change | Layer 5 (SOC loop) |
+| The JDK HTTP server's own slow-request limits (`sun.net.httpserver.maxReqTime`) are JVM-wide | Each server already has its own per-request deadline in code | The demo launcher sets them on the command line as a second layer |
+| A compromised ZTNA gateway holds the application's shared secret and can reach the app directly | The gateway is the app's only door by design | Mutual TLS from gateway to app instead of a shared secret (later) |

@@ -114,4 +114,13 @@ class TlsContextsTest {
         assertEquals(List.of("TLSv1.3"), List.of(TlsContexts.serverParameters(gw).getProtocols()));
         assertTrue(TlsContexts.serverParameters(gw).getNeedClientAuth());
     }
+
+    @Test
+    void devPkiRefusesLeafNamesThatWouldShareAFile() {
+        // Integration request R6: Gateway.p12 and gateway.p12 are the same file on Windows.
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> DevPki.create(
+                java.nio.file.Path.of("unused"), "x", java.util.List.of(DevPki.Leaf.valid("gateway"), DevPki.Leaf.valid("Gateway"))));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> DevPki.create(
+                java.nio.file.Path.of("unused"), "x", java.util.List.of(DevPki.Leaf.valid("CA"))));
+    }
 }

@@ -1,14 +1,14 @@
-# Dwarpal: project state document (Layers 1 to 3)
+# Dwarpal: project state document (Layers 1 to 4)
 
 | | |
 |---|---|
 | Document | Project state and progress log |
-| State as of | 2026-11-02 (Layer 3 complete and approved) |
+| State as of | 2026-11-04 (Layer 4 integrated) |
 | Repository | https://github.com/dheerajkumarbk-cmd/Zero-Trust-access-engine (public) |
 | Platform | Java 25 LTS (Temurin 25.0.5), Maven 3.9, no Docker, runs on an 8 GB laptop |
-| Size | 103 main classes (7,139 lines), 30 test files (5,536 lines), 267 tests |
-| Layers complete | Layer 1 (core decision engine), Layer 2 (behavioural risk scorers), Layer 3 (Policy Administrator: A sessions, B privileged access) |
-| Next | Layer 4 (enforcement point and SASE edge); the demo front end when requested |
+| Size | 170 main classes (16,937 lines), 70 test files (12,917 lines), 531 tests |
+| Layers complete | Layer 1 (core decision engine), Layer 2 (behavioural risk scorers), Layer 3 (Policy Administrator: A sessions, B privileged access), Layer 4 (enforcement points: engine API, ZTNA gateway, web gateway, SaaS data guard) |
+| Next | Layer 5 (SOC loop and analytics); the demo front end (Layer 6) when requested |
 
 The name: a *dvārapāla* (Sanskrit, "door guardian") is the guardian figure at a temple gate who
 decides who may pass. Dwarpal does the same for every access request.
@@ -186,7 +186,15 @@ Mapping to the CISA Zero Trust Maturity Model (v2.0) pillars:
 | 3 | `session` | 7 | 1,088 | Policy Administrator: sessions, proof of possession, re-authentication, revocation, signed failure reports |
 | 3 | `pam` | 4 | 632 | Privileged access: just-in-time elevation, approvals, break-glass, elevated directory |
 | 3 | `guard` | 2 | 150 | Replay cache and rate limiter shared by sessions, PAM and policy administration |
-| | **Total** | **103** | **7,139** | Layer 1: 3,897 lines. Layer 2: 1,372 lines. Layer 3: 1,870 lines |
+| 4 | `wire` | 5 | 657 | Strict JSON reader and writer with hard limits |
+| 4 | `edge` | 10 | 1,202 | Contracts for every enforcement point: request and result types, header protocol, wire format, TLS settings and pinning |
+| 4 | `api` | 6 | 1,261 | The engine API over mutual TLS (server) and `RemoteSessionAuthority` (the enforcement point's client) |
+| 4 | `gateway` | 10 | 1,754 | ZTNA reverse proxy, login guard, routes, header policy, sample internal app |
+| 4 | `agent` | 4 | 725 | Client agent: session keys, signed requests, step-up; simulated device agent |
+| 4 | `devidp` | 7 | 971 | Development identity provider: PBKDF2 passwords, simulated WebAuthn, key-bound MFA proofs |
+| 4 | `swg` | 16 | 1,967 | Secure web gateway: forward proxy, host canonicalisation, block lists, categories, SSRF guard |
+| 4 | `casb` | 9 | 1,232 | SaaS data guard: validated detectors, DLP policy, redaction |
+| | **Total** | **170** | **16,937** | Layers 1 to 3: 7,168 lines. Layer 4: 9,769 lines |
 
 ### 4.2 The full request path
 
@@ -611,6 +619,27 @@ Exposure arithmetic: a standing admin account is an admin 8,760 hours a year; wi
 elevations a week it is 156 hours, 98% less, each hour tied to an approver and a reason. Full details,
 the maths and the red-team results are in [layer-3-report.md](layer-3-report.md).
 
+### 7.3 Layer 4: enforcement points and the SASE edge
+
+Layer 4 puts the decisions in front of real traffic. Enforcement points (PEPs) never decide; they ask
+the engine through one API and enforce the answer. Full report: [layer-4-report.md](layer-4-report.md).
+
+```
+ client agent --HTTPS--> ZTNA gateway ----+
+ browser -----proxy----> web gateway -----+--mutual TLS 1.3--> engine API --> PA / PAM / engine
+ SaaS upload ----------> data guard ------+       (each PEP: own certificate, own resource scope)
+```
+
+| Element | Design |
+|---|---|
+| Engine API | JDK `HttpsServer`, TLS 1.3, client certificate required; callers known by exact certificate subject, each with a role and (for a PEP) the resources it fronts; per-caller rate limits; 64 KiB strict JSON; generic error bodies; every call audited; a deadline per request |
+| PEP client | `RemoteSessionAuthority`: pinned to the API's certificate during the handshake, one deadline for the whole exchange, bounded answers checked against the question; any failure is a deny |
+| ZTNA gateway | Reverse proxy; path prefix to resource, method to action; subject and device from the session it opened, network from the socket; only GRANTED is forwarded; client-supplied `Dwarpal-*` headers removed; the app trusts only the gateway |
+| Client agent and IdP | A fresh Ed25519 session key per application; login with password and a (software) security key over a single-use challenge; MFA proof bound to the session key; every request signed |
+| Web gateway | Forward proxy for HTTP and HTTPS tunnels, decided by host name: one canonical form, block lists and categories from local files, look-alike names, raw IPs refused, every resolved address checked against internal ranges; the engine decides, and the stricter of the local filter and the engine wins |
+| SaaS data guard | Reads, downloads and uploads through sessions; uploads scanned by validated detectors (Luhn, Verhoeff, PAN, IFSC, keys, tokens) and blocked, redacted or audited by the data's classification; values never logged |
+| Sessions at the edge | The PA opens a session only on fresh, verified MFA bound to the session key, and each MFA proof opens one session, whichever PEP asks. Single decisions exist only for web browsing |
+
 ---
 
 ## 8. Mathematics reference
@@ -1026,7 +1055,12 @@ proprietary.
 | **Learning** | Vendor machine learning on global data; administrators can mark sign-ins safe or compromised | Per-user baselines that learn only from full, low-risk ALLOWs on proven devices, with bounded, flood-resistant stores | Explicit, tested resistance to baseline poisoning |
 | **Policy safety** | Policies edited in a web console | Hardened YAML loader (no code execution, no aliases, strict schema) plus a linter that blocks conflicts before deployment | Policy-as-code that is safe to review in a pull request |
 | **Deployment and transparency** | Closed-source cloud service, priced per user per month, data processed by the vendor | Open source, self-hosted, one runtime dependency, JDK cryptography, sub-millisecond decisions on a laptop | Fits organisations that cannot send identity data to a cloud vendor, and teaching labs |
-| **Verifying the vendor** | Certifications and audit reports (SOC 2, ISO 27001, FedRAMP) | Anyone can rebuild it (reproducible builds), read the SBOM, run the 267 tests and re-run CodeQL | Trust by verification rather than by reputation |
+| **Verifying the vendor** | Certifications and audit reports (SOC 2, ISO 27001, FedRAMP) | Anyone can rebuild it (reproducible builds), read the SBOM, run the 531 tests and re-run CodeQL | Trust by verification rather than by reputation |
+| **SASE coverage** | ZTNA, SWG and CASB are often separate products or modules, each with its own policy console | One policy language and one engine decide for private apps, the web and SaaS data; the three PEPs only enforce | One place to read and test who may do what, everywhere |
+| **Enforcement point trust** | Connectors and gateways authenticate to the vendor cloud and are trusted for everything they forward | Each PEP has its own certificate, pinned both ways, and is limited to the resources it fronts; it cannot state roles, classification or device management | A stolen gateway credential reaches only that gateway's applications, and still needs a user's MFA and session key |
+| **MFA at the edge** | The identity provider decides MFA; the gateway trusts its token | The PA itself verifies the identity provider's signature, the MFA's age and its binding to the session key, and uses each proof once | A token or MFA result copied from another machine opens nothing |
+| **Web filtering** | Cloud proxies decrypt TLS and use large commercial category feeds | Host-name filtering without decryption, from local lists the organisation controls; look-alike and SSRF checks built in | No certificate on every laptop, no traffic sent to a vendor; less visibility into page contents |
+| **DLP** | Hundreds of trained classifiers, document fingerprinting, OCR | A small set of validated detectors (checksums, not just patterns) with linear-time scans and redaction | Few false positives and predictable cost; far smaller coverage |
 
 ### 10.2 Where enterprise products are ahead
 
@@ -1110,7 +1144,7 @@ signature, and both must verify, so the system stays secure if either algorithm 
 
 ## 12. Testing and quality evidence
 
-### 12.1 Test suite (267 tests)
+### 12.1 Test suite (531 tests)
 
 | Test class | Tests | What it proves |
 |---|---|---|
@@ -1142,6 +1176,17 @@ signature, and both must verify, so the system stays secure if either algorithm 
 | AccuracySimulationTest | 1 | 60 synthetic users, legitimate and attack traffic |
 | ImmutabilityTest | 1 | Every object with a SpotBugs exposure suppression really is immutable |
 | SourceHygieneTest | 1 | No invisible or bidi characters anywhere in the source |
+
+Layer 4 (enforcement points):
+
+| Test classes | Tests | What they prove |
+|---|---|---|
+| EndToEndTest, CrossPartRedTeamTest | 9 | All parts through the real API over mutual TLS: agent to gateway to PA; browser tunnels through the web gateway; SaaS uploads through the data guard; SOC revocation; API outage is a deny; the cross-part attacks stay blocked |
+| ApiServerTest, ApiRedTeamTest, ApiScopeTest, ApiBodiesTest, ApiPartsTest, ApiLatencyTest | 40 | Mutual TLS, exact callers, roles and resource scopes, strict bodies, generic errors, slow-loris, floods, fuzzing, pinning, audit, latency |
+| Gateway*Test, ClientAgentTest, DevIdentityProviderTest | 64 | ZTNA flow on real sockets, header and path tricks, method override, redirects, stolen tokens, replay, slow logins, MFA and phishing resistance, lockout, latency |
+| Swg*Test, WebAccessTest, WebGateway*Test, HostNameAndListsTest, AddressesAndParsingTest, HttpsProxyTest, WebLatencyTest | 62 | Host canonicalisation, block lists, look-alikes, numeric IPs, SSRF, strict HTTP heads, tunnels, limits, HTTPS-proxy mode |
+| DataGuardTest, CasbRedTeamTest, DetectorsTest, InspectionAndResultsTest, DetectorPerformanceTest | 50 | Validated detectors, DLP actions per classification, redaction, encodings, evasion with invisible characters, linear-time scans, read-only sessions |
+| EdgeContractTest, EdgeValidationTest, TlsContextsTest, JsonTest, MfaAtOpenTest | 39 | Shared contracts, header stripping, TLS 1.3 settings and pinning, the strict JSON reader, MFA required at session open |
 
 ### 12.2 Results
 

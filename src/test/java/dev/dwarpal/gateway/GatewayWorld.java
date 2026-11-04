@@ -66,7 +66,7 @@ public final class GatewayWorld implements AutoCloseable {
     public static final int ITERATIONS = UserFile.MIN_ITERATIONS;
     public static final NetworkContext MUMBAI = new NetworkContext("127.0.0.1", "AS64500", "IN", 19.07, 72.88, 25);
 
-    public final EdgeFixtures.World w = EdgeFixtures.world();
+    public final EdgeFixtures.World w;
     public final byte[] secret = new byte[32];
     public final Map<String, SoftwareAuthenticator> authenticators = new LinkedHashMap<>();
     public final List<FailureReportReceiver.FailureReport> failureReports = Collections.synchronizedList(new ArrayList<>());
@@ -80,6 +80,12 @@ public final class GatewayWorld implements AutoCloseable {
     private final AtomicInteger ids = new AtomicInteger();
 
     private GatewayWorld(Consumer<GatewayConfig.Builder> tweak, UnaryOperator<SessionAuthority> wrap) throws IOException {
+        this(EdgeFixtures.world(), tweak, wrap);
+    }
+
+    private GatewayWorld(EdgeFixtures.World world, Consumer<GatewayConfig.Builder> tweak,
+                         UnaryOperator<SessionAuthority> wrap) throws IOException {
+        this.w = world;
         new SecureRandom().nextBytes(secret);
         StringBuilder file = new StringBuilder("# test users\n");
         for (String u : List.of("alice", "bob", "carol")) {
@@ -116,6 +122,12 @@ public final class GatewayWorld implements AutoCloseable {
     public static GatewayWorld start(Consumer<GatewayConfig.Builder> tweak, UnaryOperator<SessionAuthority> wrap)
             throws IOException {
         return new GatewayWorld(tweak, wrap);
+    }
+
+    /** A world on {@code world} (for example {@link EdgeFixtures#strictWorld()}) whose gateway asks {@code wrap(local)}. */
+    public static GatewayWorld start(EdgeFixtures.World world, Consumer<GatewayConfig.Builder> tweak,
+                                     UnaryOperator<SessionAuthority> wrap) throws IOException {
+        return new GatewayWorld(world, tweak, wrap);
     }
 
     public static char[] password(String user) {

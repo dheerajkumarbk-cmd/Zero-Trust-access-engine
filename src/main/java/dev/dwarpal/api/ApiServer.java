@@ -365,13 +365,18 @@ public final class ApiServer implements AutoCloseable {
         return switch (e) {
             case OPEN -> {
                 WireFormat.OpenBody b = WireFormat.readOpen(body);
-                yield edge(authority.open(b.login(), b.sessionKey(), b.deviceBinding()));
+                yield inScope(c, b.login().resourceId())
+                        .orElseGet(() -> edge(authority.open(b.login(), b.sessionKey(), b.deviceBinding())));
             }
             case USE -> {
                 WireFormat.UseBody b = WireFormat.readUse(body);
-                yield edge(authority.use(b.token(), b.proof(), b.request()));
+                yield inScope(c, b.request().resourceId())
+                        .orElseGet(() -> edge(authority.use(b.token(), b.proof(), b.request())));
             }
-            case DECIDE -> edge(authority.decide(WireFormat.readDecide(body).request()));
+            case DECIDE -> {
+                WireFormat.DecideBody b = WireFormat.readDecide(body);
+                yield inScope(c, b.request().resourceId()).orElseGet(() -> edge(authority.decide(b.request())));
+            }
             case REVOKE -> {
                 ApiBodies.RevokeBody b = ApiBodies.readRevoke(body);
                 int n = switch (b.scope()) {
@@ -379,7 +384,14 @@ public final class ApiServer implements AutoCloseable {
                     case SUBJECT -> administrator.revokeSubject(b.id(), actor, b.reason());
                     case DEVICE -> administrator.revokeDevice(b.id(), actor, b.reason());
                 };
-                yield new Answer(200, ApiBodies.revoked(n), "revoked " + n, Optional.of(b.id()), "", false);
+                if (b.scope() != ApiBodies.Scope.SUBJECT) {
+                    yield new Answer(200, ApiBodies.revoked(n), "revoked " + n, Optional.of(b.id()), "", false);
+                }
+                // Integration request R8: cutting a person off also ends their just-in-time admin rights,
+                // or a compromised admin would keep elevation that a new session could use at once.
+                int ended = pam.revokeSubject(b.id(), actor, b.reason());
+                JsonValue answer = JsonValue.object().put("revoked", JsonValue.num(n)).put("elevations", JsonValue.num(ended)).build();
+                yield new Answer(200, answer, "revoked " + n + ", elevations " + ended, Optional.of(b.id()), "", false);
             }
             case PAM_REQUEST -> {
                 ApiBodies.ElevationBody b = ApiBodies.readElevation(body);
@@ -400,6 +412,16 @@ public final class ApiServer implements AutoCloseable {
             }
             case HEALTH -> throw new IllegalStateException("health has no body");
         };
+    }
+
+    /**
+     * Integration request R7: an enforcement point asks only about the resources it fronts. Otherwise a
+     * compromised web gateway could open sessions for the wiki, or spend a wiki session it captured.
+     * Empty when in scope; otherwise the refusal.
+     */
+    private static Optional<Answer> inScope(Caller c, String resourceId) {
+        return c.mayAsk(resourceId) ? Optional.empty()
+                : Optional.of(Answer.refuse(403, "forbidden", "resource outside the caller's scope"));
     }
 
     private static Answer edge(EdgeResult r) {

@@ -148,6 +148,11 @@ public final class EdgeFixtures {
         private int ids;
 
         World(List<dev.dwarpal.risk.RiskScorer> scorers) {
+            this(scorers, false);
+        }
+
+        /** @param mfaAtOpen whether the PA requires verified MFA at open (the deployment default) */
+        World(List<dev.dwarpal.risk.RiskScorer> scorers, boolean mfaAtOpen) {
             try {
                 audit = new AuditLog(KeyGenerator.getInstance("HmacSHA256").generateKey(), sink);
             } catch (GeneralSecurityException e) {
@@ -162,8 +167,9 @@ public final class EdgeFixtures {
                     .aggregator(new BayesianRiskAggregator(0.001, Math.log(1000)))
                     .costModel(new CostModel(1000, 1, 20, 0.05)).build();
             DecisionPoint pdp = DecisionPipeline.continuous(engine, audit, clock);
-            administrator = PolicyAdministrator.builder(audit).opening(pdp).continuous(pdp).directory(directory)
-                    .keyRing(keys).clock(clock).build();
+            PolicyAdministrator.Builder pa = PolicyAdministrator.builder(audit).opening(pdp).continuous(pdp)
+                    .directory(directory).keyRing(keys).clock(clock);
+            administrator = (mfaAtOpen ? pa : pa.allowLoginWithoutMfa()).build();
             authority = new LocalSessionAuthority(administrator, pdp, directory, signals::get,
                     AssuranceSettings.defaults().challengeMethod(), clock);
         }
@@ -193,8 +199,14 @@ public final class EdgeFixtures {
         }
     }
 
+    /** The engine-path world: logins without MFA reach the engine (most contract tests need this). */
     public static World world() {
         return new World(List.of());
+    }
+
+    /** The deployment configuration: the PA opens sessions only on verified, single-use MFA. */
+    public static World strictWorld() {
+        return new World(List.of(), true);
     }
 
     public static World world(List<dev.dwarpal.risk.RiskScorer> scorers) {

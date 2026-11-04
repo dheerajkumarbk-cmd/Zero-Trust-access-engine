@@ -232,7 +232,7 @@ class EdgeContractTest {
         LocalSessionAuthority broken = new LocalSessionAuthority(w.administrator, (req, sig) -> {
             throw new IllegalStateException("engine down");
         }, w.directory, () -> null, AuthMethod.WEBAUTHN, w.clock);
-        assertEquals(EdgeResult.Status.DENIED, broken.decide(w.request().build()).status());
+        assertEquals(EdgeResult.Status.DENIED, broken.decide(w.request().resource("web:general").build()).status());
         assertEquals(EdgeResult.Status.DENIED, broken.open(w.request().build(), key.getPublic(), Optional.empty()).status());
         assertEquals(2, broken.internalFailures());
         assertTrue(Fixtures.KEYRING != null);

@@ -33,6 +33,8 @@ public final class EdgeHttp {
     public static final String REQUEST_ID = "Dwarpal-Request-Id";
     public static final String PROOF = "Dwarpal-Proof";
     public static final String PROOF_TIME = "Dwarpal-Proof-Time";
+    /** Client to enforcement point: posture and signed evidence for this request (see {@code gateway.ClientEvidence}). */
+    public static final String EVIDENCE = "Dwarpal-Evidence";
     /** Sent to the client with 401: which authenticator to use. */
     public static final String CHALLENGE = "WWW-Authenticate";
     /** Sent with an allowed read-only response. */
