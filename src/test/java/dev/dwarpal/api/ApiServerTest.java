@@ -203,17 +203,40 @@ class ApiServerTest {
     @Test
     void bodiesOver64KiBAreRefusedWhetherDeclaredOrChunked() throws Exception {
         byte[] big = ("{\"v\":1,\"request\":\"" + "a".repeat(70_000) + "\"}").getBytes();
+        // Refused before the body is read, so the client may see the 413 or a reset while still sending.
+        // Each attempt uses its own connection, and a reset must be backed by a 413 in the audit trail.
+        refusedAs413(raw -> raw.post("/v1/decisions", "application/json", big), 1);
+        refusedAs413(raw -> raw.postChunked("/v1/decisions", big), 2);
+        String good = JsonWriter.write(WireFormat.decide(new WireFormat.DecideBody(h.world.request().build())));
         try (ApiKit.Raw pep = h.raw("gateway")) {
-            // Refused before the body is read; the client may see the 413 or a reset while still sending.
-            try {
-                assertEquals(413, pep.post("/v1/decisions", "application/json", big).status());
-            } catch (java.io.IOException resetWhileSending) {
-                assertTrue(h.world.sink.snapshot().stream().anyMatch(r -> r.payloadJson().contains("\"status\":\"413\"")));
-            }
-            assertEquals(413, pep.postChunked("/v1/decisions", big).status());
-            String good = JsonWriter.write(WireFormat.decide(new WireFormat.DecideBody(h.world.request().build())));
             assertEquals(200, pep.postChunked("/v1/decisions", good.getBytes()).status());
         }
+    }
+
+    private interface Attempt {
+        ApiKit.Reply send(ApiKit.Raw raw) throws java.io.IOException, InterruptedException;
+    }
+
+    /** The oversized request ends in a 413 answer, or in a reset with the {@code expected}-th 413 audited. */
+    private void refusedAs413(Attempt attempt, int expected) throws Exception {
+        try (ApiKit.Raw pep = h.raw("gateway")) {
+            try {
+                assertEquals(413, attempt.send(pep).status());
+                return;
+            } catch (java.io.IOException resetWhileSending) {
+                // fall through to the audit check
+            }
+        }
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        long seen;
+        do {
+            seen = h.world.sink.snapshot().stream().filter(r -> r.payloadJson().contains("\"status\":\"413\"")).count();
+            if (seen >= expected) {
+                return;
+            }
+            Thread.sleep(20);
+        } while (System.nanoTime() < deadline);
+        assertTrue(seen >= expected, "a reset must be backed by an audited 413, saw " + seen);
     }
 
     // ---- fail-closed inside ----------------------------------------------------------------------------
