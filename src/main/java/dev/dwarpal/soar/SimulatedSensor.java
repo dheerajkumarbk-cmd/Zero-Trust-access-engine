@@ -35,56 +35,68 @@ public final class SimulatedSensor implements Sensor {
     private final Set<String> offline = new HashSet<>();
     private final ArrayDeque<SensorAck> outbox = new ArrayDeque<>();
     private final Clock clock;
+    /** A private lock: {@link #enrol} returns this object, so its own monitor is not used (SpotBugs USO). */
+    private final Object lock = new Object();
 
     public SimulatedSensor(Clock clock) {
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
     /** Enrols a device: its agent's key id and private key ({@code DEVICE_AGENT}, bound to the device). */
-    public synchronized SimulatedSensor enrol(String deviceId, String keyId, PrivateKey key) {
-        keys.put(Validate.id(deviceId, "deviceId"), new DeviceKey(Validate.id(keyId, "keyId"),
-                Objects.requireNonNull(key, "key")));
-        return this;
+    public SimulatedSensor enrol(String deviceId, String keyId, PrivateKey key) {
+        synchronized (lock) {
+            keys.put(Validate.id(deviceId, "deviceId"), new DeviceKey(Validate.id(keyId, "keyId"),
+                    Objects.requireNonNull(key, "key")));
+            return this;
+        }
     }
 
     /** Takes a device's sensor off line (commands to it are not delivered) or back on. */
-    public synchronized void offline(String deviceId, boolean off) {
-        if (off) {
-            offline.add(deviceId);
-        } else {
-            offline.remove(deviceId);
+    public void offline(String deviceId, boolean off) {
+        synchronized (lock) {
+            if (off) {
+                offline.add(deviceId);
+            } else {
+                offline.remove(deviceId);
+            }
         }
     }
 
     @Override
-    public synchronized boolean deliver(IsolationCommand command) {
-        DeviceKey k = keys.get(command.deviceId());
-        if (k == null || offline.contains(command.deviceId()) || outbox.size() >= MAX_QUEUED) {
-            return false;
+    public boolean deliver(IsolationCommand command) {
+        synchronized (lock) {
+            DeviceKey k = keys.get(command.deviceId());
+            if (k == null || offline.contains(command.deviceId()) || outbox.size() >= MAX_QUEUED) {
+                return false;
+            }
+            if (command.action() == IsolationCommand.Action.ISOLATE) {
+                isolated.add(command.deviceId());
+            } else {
+                isolated.remove(command.deviceId());
+            }
+            long batch = batches.merge(command.deviceId(), 1L, Long::sum);
+            var at = clock.instant();
+            String body = command.ackBody();
+            String sig = Ed25519.sign(k.key(), SignedMessages.endpointTelemetry(command.deviceId(), batch, at,
+                    Digests.sha256Hex(body)));
+            outbox.add(new SensorAck(command.deviceId(), k.keyId(), batch, at, body, sig));
+            return true;
         }
-        if (command.action() == IsolationCommand.Action.ISOLATE) {
-            isolated.add(command.deviceId());
-        } else {
-            isolated.remove(command.deviceId());
-        }
-        long batch = batches.merge(command.deviceId(), 1L, Long::sum);
-        var at = clock.instant();
-        String body = command.ackBody();
-        String sig = Ed25519.sign(k.key(), SignedMessages.endpointTelemetry(command.deviceId(), batch, at,
-                Digests.sha256Hex(body)));
-        outbox.add(new SensorAck(command.deviceId(), k.keyId(), batch, at, body, sig));
-        return true;
     }
 
     /** The acknowledgements sent since the last call, oldest first. */
-    public synchronized List<SensorAck> drain() {
-        List<SensorAck> out = new ArrayList<>(outbox);
-        outbox.clear();
-        return out;
+    public List<SensorAck> drain() {
+        synchronized (lock) {
+            List<SensorAck> out = new ArrayList<>(outbox);
+            outbox.clear();
+            return out;
+        }
     }
 
     /** Whether the simulated agent has cut this device off. */
-    public synchronized boolean isolated(String deviceId) {
-        return isolated.contains(deviceId);
+    public boolean isolated(String deviceId) {
+        synchronized (lock) {
+            return isolated.contains(deviceId);
+        }
     }
 }

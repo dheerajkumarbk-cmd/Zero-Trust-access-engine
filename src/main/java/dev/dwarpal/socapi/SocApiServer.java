@@ -156,7 +156,7 @@ public final class SocApiServer implements AutoCloseable {
         }
     }
 
-    private record Routed(Endpoint endpoint, List<String> params) {
+    record Routed(Endpoint endpoint, List<String> params) {
     }
 
     private record Answer(int status, JsonValue body, String result, String detail, boolean data) {

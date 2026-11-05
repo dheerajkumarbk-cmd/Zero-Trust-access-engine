@@ -127,12 +127,12 @@ public final class CaseManager implements AlertSink {
         if (opened) {
             e = new Entry(c.get().id(), r.priority(), now.plus(settings.sla(r.priority())));
             entries.put(e.id, e);
-            add(e, now, CaseView.TimelineEntry.Kind.OPENED, ACTOR, "opened by " + alert.id());
+            entry(e, now, CaseView.TimelineEntry.Kind.OPENED, ACTOR, "opened by " + alert.id());
         }
         e.alerts.put(alert.id(), r);
         rankedById.put(alert.id(), r);
         e.score = Math.max(e.score, r.score());
-        add(e, now, CaseView.TimelineEntry.Kind.ALERT, ACTOR, alert.id() + " " + alert.rule() + " "
+        entry(e, now, CaseView.TimelineEntry.Kind.ALERT, ACTOR, alert.id() + " " + alert.rule() + " "
                 + alert.severity() + " ranked " + r.priority() + (r.actionable() ? "" : " (collected evidence only)"));
         if (opened || r.priority().atLeast(e.priority) && r.priority() != e.priority) {
             Priority before = e.priority;
@@ -148,7 +148,7 @@ public final class CaseManager implements AlertSink {
             f.put("alert", alert.id());
             audited("CASE_PRIORITY", ACTOR, now, f);
             if (!opened) {
-                add(e, now, CaseView.TimelineEntry.Kind.PRIORITY, ACTOR, before + " to " + e.priority);
+                entry(e, now, CaseView.TimelineEntry.Kind.PRIORITY, ACTOR, before + " to " + e.priority);
             }
         }
         if (opened) {
@@ -187,9 +187,9 @@ public final class CaseManager implements AlertSink {
             f.put("linked", other.id);
             audited("CASE_LINKED", ACTOR, now, f);
             e.links.add(other.id);
-            add(e, now, CaseView.TimelineEntry.Kind.LINKED, ACTOR, LINK_PREFIX + other.id);
+            entry(e, now, CaseView.TimelineEntry.Kind.LINKED, ACTOR, LINK_PREFIX + other.id);
             if (other.links.size() < settings.maxLinks() && other.links.add(e.id)) {
-                add(other, now, CaseView.TimelineEntry.Kind.LINKED, ACTOR, LINK_PREFIX + e.id);
+                entry(other, now, CaseView.TimelineEntry.Kind.LINKED, ACTOR, LINK_PREFIX + e.id);
             }
         }
     }
@@ -231,7 +231,7 @@ public final class CaseManager implements AlertSink {
         }
         e.assignee = assignee.id();
         acknowledge(e, now);
-        add(e, now, CaseView.TimelineEntry.Kind.ASSIGNED, actor.id(), "assigned to " + assignee.id());
+        entry(e, now, CaseView.TimelineEntry.Kind.ASSIGNED, actor.id(), "assigned to " + assignee.id());
         return Outcome.OK;
     }
 
@@ -264,7 +264,7 @@ public final class CaseManager implements AlertSink {
         e.noteCount++;
         e.notes.add(new CaseView.Note(noteId, actor.id(), now, clean));
         acknowledge(e, now);
-        add(e, now, CaseView.TimelineEntry.Kind.NOTE, actor.id(), noteId);
+        entry(e, now, CaseView.TimelineEntry.Kind.NOTE, actor.id(), noteId);
         return Outcome.OK;
     }
 
@@ -280,7 +280,7 @@ public final class CaseManager implements AlertSink {
         if (kind == CaseView.TimelineEntry.Kind.VERDICT) {
             acknowledge(e, now);
         }
-        add(e, now, kind, actor, detail);
+        entry(e, now, kind, actor, detail);
     }
 
     synchronized void awaitingSecond(String caseId, boolean waiting) {
@@ -409,7 +409,7 @@ public final class CaseManager implements AlertSink {
         }
     }
 
-    private void add(Entry e, Instant now, CaseView.TimelineEntry.Kind kind, String actor, String detail) {
+    private void entry(Entry e, Instant now, CaseView.TimelineEntry.Kind kind, String actor, String detail) {
         if (e.timeline.size() >= settings.maxTimeline()) {
             e.timeline.remove(1);   // keep how the case opened
             e.dropped++;
