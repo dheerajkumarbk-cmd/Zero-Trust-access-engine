@@ -9,3 +9,9 @@ out/
 *.key
 *.p12
 *.jks
+
+# the lab directory holds certificates and secrets
+/lab/
+*.p12
+*.anchor
+pki.pass

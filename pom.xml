@@ -154,4 +154,54 @@
             </plugin>
         </plugins>
     </build>
+
+    <!-- One runnable jar for the lab: mvn -o -Plab-jar -DskipTests package  ->  target/dwarpal-lab.jar
+         Not part of the normal build or the quality gate. Main class is overridable with -Dlab.main=... -->
+    <profiles>
+        <profile>
+            <id>lab-jar</id>
+            <properties>
+                <lab.main>dev.dwarpal.lab.LabMain</lab.main>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-shade-plugin</artifactId>
+                        <version>3.5.3</version>
+                        <executions>
+                            <execution>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>shade</goal>
+                                </goals>
+                                <configuration>
+                                    <finalName>dwarpal-lab</finalName>
+                                    <createDependencyReducedPom>false</createDependencyReducedPom>
+                                    <transformers>
+                                        <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                            <mainClass>${lab.main}</mainClass>
+                                            <manifestEntries>
+                                                <Multi-Release>true</Multi-Release>
+                                            </manifestEntries>
+                                        </transformer>
+                                    </transformers>
+                                    <filters>
+                                        <filter>
+                                            <artifact>*:*</artifact>
+                                            <excludes>
+                                                <exclude>META-INF/*.SF</exclude>
+                                                <exclude>META-INF/*.DSA</exclude>
+                                                <exclude>META-INF/*.RSA</exclude>
+                                            </excludes>
+                                        </filter>
+                                    </filters>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
