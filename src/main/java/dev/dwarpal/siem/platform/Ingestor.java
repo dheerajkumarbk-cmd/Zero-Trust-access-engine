@@ -219,6 +219,11 @@ public final class Ingestor {
         if (e.provenance().compareTo(l.reg.maxProvenance()) < 0) {
             return new Check(e, "provenance-above-source", false);
         }
+        for (String f : e.fields().keySet()) {
+            if (f.startsWith("ingest.")) {
+                return new Check(e, "reserved-field", false);
+            }
+        }
         if (e.at().isAfter(now.plus(settings.maxFuture()))) {
             return new Check(e, "future-time", false);
         }

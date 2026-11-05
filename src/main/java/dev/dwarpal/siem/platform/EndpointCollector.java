@@ -23,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Collects endpoint telemetry: batches of JSON lines that a device agent signs with its own
@@ -84,6 +85,52 @@ public final class EndpointCollector extends CollectorBase {
             throw new IllegalArgumentException("at most " + MAX_DEVICES + " devices");
         }
         lastAccepted.forEach((d, n) -> lastBatch.merge(Validate.id(d, "device"), n, Math::max));
+    }
+
+    /**
+     * The last batch number used by each device, rebuilt from the verified audit trail (every event of an
+     * accepted batch carries its number), for {@link #resume} after a restart: without it a batch captured before
+     * the restart would be accepted again (red-team finding rD7).
+     *
+     * @param cursor     a keyed cursor from the start of the trail
+     * @param maxRecords how many records to read at most
+     * @throws IllegalStateException if the trail is broken or longer than {@code maxRecords}: the collector cannot
+     *                               know which batches were used, so it must not start
+     */
+    public static Map<String, Long> lastBatches(dev.dwarpal.audit.AuditCursor cursor, long maxRecords) {
+        Map<String, Long> last = new HashMap<>();
+        long read = 0;
+        while (true) {
+            dev.dwarpal.audit.AuditCursor.Batch b = cursor.next(dev.dwarpal.audit.AuditSource.MAX_BATCH);
+            if (b.problem().isPresent()) {
+                throw new IllegalStateException("audit trail broken: used batch numbers unknown");
+            }
+            if (b.events().isEmpty()) {
+                return Map.copyOf(last);
+            }
+            read += b.events().size();
+            if (read > maxRecords) {
+                throw new IllegalStateException("trail longer than " + maxRecords + " records");
+            }
+            for (dev.dwarpal.audit.AuditEvent a : b.events()) {
+                if (!a.type().equals(dev.dwarpal.soc.SecurityEvents.RECORD_TYPE)
+                        || !a.actor().equals(dev.dwarpal.soc.SecurityEvents.collectorActor(DATASET))) {
+                    continue;
+                }
+                SecurityEvent e;
+                try {
+                    e = dev.dwarpal.soc.SecurityEvents.fromAudit(a).event();
+                } catch (IllegalArgumentException malformed) {
+                    continue;
+                }
+                long n = e.provenance() == SecurityEvent.Provenance.SIGNED_SENSOR
+                        ? count(e.field("batch").orElse("")) : -1;
+                Optional<Entity> d = e.first(Entity.Kind.DEVICE);
+                if (n > 0 && d.isPresent() && (last.size() < MAX_DEVICES || last.containsKey(d.get().id()))) {
+                    last.merge(d.get().id(), n, Math::max);
+                }
+            }
+        }
     }
 
     /** The last accepted batch number of each device (save it to {@link #resume} after a restart). */
@@ -216,6 +263,9 @@ public final class EndpointCollector extends CollectorBase {
         fields.put("batch", Long.toString(b.number()));
         int extra = 0;
         for (Map.Entry<String, String> x : raw.entrySet()) {
+            if (reserved(x.getKey())) {
+                throw new FirewallCollector.Malformed("reserved key in line");
+            }
             if (!fieldName(x.getKey()) || fields.size() >= MAX_COPIED_FIELDS) {
                 extra++;
                 continue;

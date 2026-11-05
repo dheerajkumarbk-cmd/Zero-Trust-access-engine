@@ -137,6 +137,9 @@ public final class FirewallCollector extends CollectorBase {
             if (k.equals("action")) {
                 continue;
             }
+            if (reserved(k)) {
+                throw new Malformed("reserved key in message");
+            }
             if (k.equals("sport") || k.equals("dport")) {
                 long port = count(x.getValue());
                 if (port < 0 || port > 65_535) {

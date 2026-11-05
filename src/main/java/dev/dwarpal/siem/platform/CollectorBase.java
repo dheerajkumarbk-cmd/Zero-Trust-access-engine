@@ -208,6 +208,19 @@ abstract class CollectorBase implements EventSource {
         return v;
     }
 
+    /**
+     * Field names a collector or the ingestor sets itself. Raw input naming one is refused, never merged: a
+     * message could otherwise overwrite the host, the verdict or the batch number, or pre-set the ingestion's
+     * own flags (red-team finding rD1, rD2).
+     */
+    static boolean reserved(String name) {
+        return switch (name) {
+            case "host", "app", "severity", "verdict", "batch", "user", "extraFields", "reason", "length", "sha256",
+                 "claimedDevice", "lost", "missing" -> true;
+            default -> name.startsWith("ingest.") || name.startsWith("refused.");
+        };
+    }
+
     /** Whether a string is a valid event field name. */
     static boolean fieldName(String n) {
         try {

@@ -94,9 +94,12 @@ public final class CorrelationEngine {
     public record Report(int read, int alerts, Optional<String> problem) {
     }
 
-    /** One event as rules keep it. */
+    /**
+     * One event as rules keep it, or several merged ones: {@code weight} events whose numeric values add up to
+     * {@code amount}, dated at the newest of them.
+     */
     private record Entry(long atMillis, long sequence, Instant recordedAt, String value, boolean collected,
-                         List<Entity> entities) {
+                         List<Entity> entities, long weight, double amount) {
         static final Comparator<Entry> ORDER = Comparator.comparingLong(Entry::atMillis)
                 .thenComparingLong(Entry::sequence);
     }
@@ -121,7 +124,26 @@ public final class CorrelationEngine {
         this.sink = Objects.requireNonNull(sink, "sink");
         this.settings = Objects.requireNonNull(settings, "settings");
         for (RuleBook.Rule r : book.rules()) {
+            reachable(r, settings);
             states.add(new RuleState(r));
+        }
+    }
+
+    /**
+     * Refuses a rule that these limits would never let fire (red-team finding rD4): a distinct count or a sequence
+     * step needing more events than a key may hold. Counts and sums are safe: full state merges, never drops.
+     */
+    private static void reachable(RuleBook.Rule r, Settings s) {
+        if (r.kind() == RuleBook.Kind.THRESHOLD && r.measure() == RuleBook.Measure.DISTINCT
+                && r.amount() > s.maxEntriesPerKey()) {
+            throw new IllegalArgumentException("rule " + r.id() + " can never fire: it needs " + (long) r.amount()
+                    + " distinct values but a key holds at most " + s.maxEntriesPerKey() + " events");
+        }
+        for (RuleBook.Step st : r.steps()) {
+            if (st.min() > s.maxEntriesPerKey()) {
+                throw new IllegalArgumentException("rule " + r.id() + " can never fire: a step needs " + st.min()
+                        + " events but a key holds at most " + s.maxEntriesPerKey());
+            }
         }
     }
 
@@ -354,11 +376,18 @@ public final class CorrelationEngine {
                 k = new Key(kv, rule.steps().size());
                 keys.put(kv, k);
             }
+            long previous = k.newest;
             k.newest = Math.max(k.newest, at);
             switch (rule.kind()) {
                 case THRESHOLD -> threshold(k, c, at);
                 case SEQUENCE -> sequence(k, c, stepHits);
                 default -> {
+                    if (!k.absent && previous != Long.MIN_VALUE && at - previous > window) {
+                        // the key went quiet and came back before anything else moved the clock (rD3)
+                        fire(c.event().at(), k.values, List.of(k.entries.getLast(), entry(c, "")), 1,
+                                "nothing for " + Duration.ofMillis(at - previous).toMinutes()
+                                        + " min, then it came back");
+                    }
                     if (k.entries.isEmpty() || at >= k.entries.getLast().atMillis()) {
                         k.entries.clear();
                         k.entries.add(entry(c, ""));
@@ -382,18 +411,55 @@ public final class CorrelationEngine {
         }
 
         private Entry entry(ChainedEvent c, String value) {
+            double amount = rule.measure() == RuleBook.Measure.SUM ? Query.number(value).orElse(0.0) : 0.0;
             return new Entry(c.event().at().toEpochMilli(), c.sequence(), c.recordedAt(), value,
-                    !c.event().provenance().actionable(), c.event().entities());
+                    !c.event().provenance().actionable(), c.event().entities(), 1, amount);
         }
 
-        private void insert(List<Entry> list, Entry x) {
+        /** Inserts in time order; a full list drops its oldest entry (sequences: bounded per step). */
+        private void insert(List<Entry> list, Entry x, int cap) {
             int i = Collections.binarySearch(list, x, Entry.ORDER);
             if (i < 0) {
                 list.add(-i - 1, x);
             }
-            if (list.size() > settings.maxEntriesPerKey()) {
+            if (list.size() > cap) {
                 list.removeFirst();
             }
+        }
+
+        /**
+         * Inserts into a threshold's window. When the key is full nothing is forgotten that the measure needs
+         * (red-team finding rD5): counts and sums merge the two oldest entries (the merged one carries both
+         * weights and amounts at the later time, so a window can only over-count, never under-count); a distinct
+         * count drops the oldest entry whose value appears again later, keeping every distinct value.
+         */
+        private void insertThreshold(List<Entry> list, Entry x) {
+            int i = Collections.binarySearch(list, x, Entry.ORDER);
+            if (i >= 0) {
+                return;
+            }
+            list.add(-i - 1, x);
+            if (list.size() <= settings.maxEntriesPerKey()) {
+                return;
+            }
+            if (rule.measure() == RuleBook.Measure.DISTINCT) {
+                Map<String, Integer> seen = new HashMap<>();
+                for (Entry e : list) {
+                    seen.merge(e.value(), 1, Integer::sum);
+                }
+                for (int j = 0; j < list.size(); j++) {
+                    if (seen.get(list.get(j).value()) > 1) {
+                        list.remove(j);
+                        return;
+                    }
+                }
+                list.removeFirst();
+                return;
+            }
+            Entry a = list.removeFirst();
+            Entry b = list.removeFirst();
+            list.addFirst(new Entry(b.atMillis(), b.sequence(), b.recordedAt(), b.value(),
+                    a.collected() && b.collected(), b.entities(), a.weight() + b.weight(), a.amount() + b.amount()));
         }
 
         private void threshold(Key k, ChainedEvent c, long at) {
@@ -405,52 +471,58 @@ public final class CorrelationEngine {
             if (rule.measure() == RuleBook.Measure.SUM && Query.number(value).isEmpty()) {
                 return;
             }
-            insert(k.entries, entry(c, value));
-            // every window [s, s + within] whose start s is an entry in [at - within, at]
+            insertThreshold(k.entries, entry(c, value));
+            // every window [s, s + within] whose start s is an entry in [at - within, at], in one pass (rD6)
             List<Entry> es = k.entries;
-            for (int i = 0; i < es.size(); i++) {
-                long s = es.get(i).atMillis();
-                if (s < at - window) {
-                    continue;
+            int i = 0;
+            while (i < es.size() && es.get(i).atMillis() < at - window) {
+                i++;
+            }
+            int j = i;
+            long weight = 0;
+            double amount = 0;
+            Map<String, Integer> distinct = new HashMap<>();
+            for (; i < es.size() && es.get(i).atMillis() <= at; i++) {
+                long end = es.get(i).atMillis() + window;
+                while (j < es.size() && es.get(j).atMillis() <= end) {
+                    Entry x = es.get(j++);
+                    weight += x.weight();
+                    amount += x.amount();
+                    distinct.merge(x.value(), 1, Integer::sum);
                 }
-                if (s > at) {
-                    break;
-                }
-                List<Entry> inWindow = new ArrayList<>();
-                for (int j = i; j < es.size() && es.get(j).atMillis() <= s + window; j++) {
-                    inWindow.add(es.get(j));
-                }
-                double amount = measure(inWindow);
-                if (amount >= rule.amount()) {
+                double measured = switch (rule.measure()) {
+                    case COUNT -> weight;
+                    case DISTINCT -> distinct.size();
+                    case SUM -> amount;
+                };
+                if (measured >= rule.amount()) {
                     if (at < k.cooldownUntil) {
                         suppressed++;
                         return;
                     }
+                    List<Entry> inWindow = es.subList(i, j);
                     String what = switch (rule.measure()) {
-                        case COUNT -> inWindow.size() + " events";
-                        case DISTINCT -> (long) amount + " distinct " + rule.field();
+                        case COUNT -> weight + " events";
+                        case DISTINCT -> distinct.size() + " distinct " + rule.field();
                         case SUM -> String.format(java.util.Locale.ROOT, "%.0f %s", amount, rule.field());
                     };
-                    fire(c.event().at(), k.values, inWindow, inWindow.size(), what + " within " + rule.within());
+                    fire(c.event().at(), k.values, List.copyOf(inWindow), weight, what + " within " + rule.within());
                     k.cooldownUntil = inWindow.getLast().atMillis() + window;
-                    es.removeAll(inWindow);
+                    inWindow.clear();
                     return;
                 }
+                Entry gone = es.get(i);
+                weight -= gone.weight();
+                amount -= gone.amount();
+                distinct.computeIfPresent(gone.value(), (v, n) -> n == 1 ? null : n - 1);
             }
-        }
-
-        private double measure(List<Entry> es) {
-            return switch (rule.measure()) {
-                case COUNT -> es.size();
-                case DISTINCT -> es.stream().map(Entry::value).distinct().count();
-                case SUM -> es.stream().mapToDouble(x -> Query.number(x.value()).orElse(0.0)).sum();
-            };
         }
 
         private void sequence(Key k, ChainedEvent c, List<Integer> hits) {
             Entry x = entry(c, "");
             for (int i : hits) {
-                insert(k.steps.get(i), x);
+                int cap = Math.min(settings.maxEntriesPerKey(), Math.max(64, 4 * rule.steps().get(i).min()));
+                insert(k.steps.get(i), x, cap);
             }
             List<RuleBook.Step> steps = rule.steps();
             for (Entry start : k.steps.getFirst()) {
