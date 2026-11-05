@@ -174,6 +174,16 @@ public final class LabAdminServices implements AdminServices {
     }
 
     @Override
+    public boolean resetting() {
+        return session.resetting();
+    }
+
+    @Override
+    public void resetLab() throws IOException, InterruptedException {
+        session.reset();
+    }
+
+    @Override
     public List<Revoked> revocations() {
         List<Revoked> out = new ArrayList<>();
         for (LabWorld.Revocation r : world().revocations) {

@@ -91,6 +91,17 @@ class AdminModuleTest {
         assertEquals(0, fx.installer.currentSequence());
     }
 
+    @Test
+    void anAdministratorCanResetTheLabButOnlyWithAFreshSecondFactor() {
+        assertEquals(Role.ADMIN, routes.route("POST", "lab/reset").minimum());
+        assertTrue(routes.route("POST", "lab/reset").stepUp());
+        assertEquals(403, routes.call("POST", "lab/reset", ANALYST, "").status());
+        assertEquals(403, routes.call("POST", "lab/reset", ADA_STALE, "").status());
+        assertFalse(fx.resetCalled);
+        assertEquals(200, routes.call("POST", "lab/reset", ADA, "").status());
+        assertTrue(fx.resetCalled);
+    }
+
     // ---- the policy, in words -------------------------------------------------------------------------
 
     @Test

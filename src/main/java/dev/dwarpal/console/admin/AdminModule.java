@@ -57,6 +57,7 @@ import java.util.Set;
  *   POST pam/approve/{id}                ADMIN, step-up
  *   POST pam/revoke/{id}                 ADMIN, step-up  {"reason"}
  *   POST pam/review/{id}                 ADMIN, step-up  {"verdict": "justified"|"misuse"}
+ *   POST lab/reset                       ADMIN, step-up  the lab back to day zero
  *   GET  sessions, devices               ADMIN  who was decided about, from where, on what, and isolations
  *   GET  decisions/{reference}           ADMIN  one decision with the engine's full reasoning
  * </pre>
@@ -117,6 +118,7 @@ public final class AdminModule implements ConsoleModule {
         routes.post("pam/revoke/{}", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN, this::pamRevoke));
         routes.post("pam/review/{}", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN, this::pamReview));
 
+        routes.post("lab/reset", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN, this::resetLab));
         routes.get("sessions", Role.ADMIN, ModuleKit.guard(Role.ADMIN, this::sessions));
         routes.get("devices", Role.ADMIN, ModuleKit.guard(Role.ADMIN, this::devices));
         routes.get("decisions/{}", Role.ADMIN, ModuleKit.guard(Role.ADMIN, this::decision));
@@ -353,6 +355,17 @@ public final class AdminModule implements ConsoleModule {
         SignatureProof proof = new SignatureProof(services.keyId(r.who().id(), KeyPurpose.ELEVATION_APPROVER), now,
                 Ed25519.sign(key.getPrivate(), SignedMessages.breakGlassReview(id, verdict, now)));
         return ModuleKit.json(services.pam().review(id, r.who().id(), verdict, proof));
+    }
+
+    /** An administrator is not an analyst in the console, so the lab's reset is also reachable from here. */
+    private Response resetLab(Request r, List<String> p) throws java.io.IOException, InterruptedException {
+        fresh(r);
+        ModuleKit.body(r, Set.of());
+        if (services.resetting()) {
+            throw new ModuleKit.Refusal(409, "the lab is already being reset");
+        }
+        services.resetLab();
+        return ModuleKit.json(Map.of("reset", true));
     }
 
     // ---- sessions, devices, decisions -----------------------------------------------------------------

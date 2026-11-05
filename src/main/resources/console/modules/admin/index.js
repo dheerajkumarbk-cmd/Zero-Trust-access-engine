@@ -218,6 +218,16 @@ function view(root, shell) {
         [x.device, x.managed ? 'yes' : 'no', x.verifiedLastTime ? 'yes' : 'no', x.lastSeen, x.lastBy, x.isolation])));
   }
 
+  function labBox(box) {
+    box.append(el('p', {}, 'Put the lab back at day zero. All cases, risk and launched scenarios are forgotten.'),
+      button('Reset the lab', async () => {
+        if (!window.confirm('Reset the lab?')) return;
+        say('Resetting; this takes a few seconds...');
+        const r = await privileged('lab/reset');
+        if (r) say('The lab is back at day zero.');
+      }));
+  }
+
   // ---- shell --------------------------------------------------------------------------------------
   function refresh() {
     const current = [...pages.keys()].find((k) => tabs.querySelector('[data-open="true"]') === pages.get(k).tab);
@@ -248,6 +258,7 @@ function view(root, shell) {
       addTab('playbooks', 'Playbooks', playbooks);
       addTab('pam', 'Privileged access', pam);
       addTab('sessions', 'Sessions and devices', sessions);
+      addTab('lab', 'Lab', labBox);
     }
     open('denied');
   })();

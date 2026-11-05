@@ -73,6 +73,12 @@ public interface AdminServices {
     /** What the SOC's playbooks revoked or denied, newest last. */
     List<Revoked> revocations();
 
+    /** True while the lab is being rebuilt by a reset. */
+    boolean resetting();
+
+    /** Puts the lab back to day zero (takes seconds). */
+    void resetLab() throws java.io.IOException, InterruptedException;
+
     /** One revocation. */
     record Revoked(String kind, String id, String actor, Instant at) {
     }

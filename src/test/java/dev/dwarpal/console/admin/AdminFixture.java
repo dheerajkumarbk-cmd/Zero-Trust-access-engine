@@ -180,6 +180,18 @@ final class AdminFixture implements AdminServices {
         return revoked;
     }
 
+    boolean resetCalled;
+
+    @Override
+    public boolean resetting() {
+        return false;
+    }
+
+    @Override
+    public void resetLab() {
+        resetCalled = true;
+    }
+
     /** The default policy text with its version replaced. */
     String policyWithVersion(String version) {
         try (var in = SimRequests.class.getResourceAsStream("/policies/default-policy.yaml")) {
