@@ -1,4 +1,4 @@
-# Dwarpal threat model (STRIDE), v1.4
+# Dwarpal threat model (STRIDE), v1.5
 
 Scope: the Policy Engine core (v0.1 to v0.6) and the Policy Administrator: sessions (v0.7, v0.8) and
 privileged access (v0.8). The PEP
@@ -545,6 +545,219 @@ with cloud logs, faking the sensor's acknowledgement, backdating, a playbook fil
 real breaches (5.2I-1 and 5.2I-2), both fixed with a regression test. Slow baseline poisoning is part E's
 (E-R1) and was not repeated here.
 
+## v1.5 Layer 6 (the lab: launcher, console, scenario lab, admin views)
+
+Ids are prefixed by part: 6G (console server), 6H (analyst console, the front end), 6I (admin and user views), 6J (scenario lab and guide); `6X` is the cross-part integration. The control baseline each row is checked against is `docs/layer-6/standards.md` (OWASP ASVS L2/L3, NIST SP 800-53 and 800-207, SOC 2, ISO 27001, CIS, MITRE). Details are in `docs/layer-6/part-g.md` to `part-j.md`; the rows keep each part's own ids.
+
+### 6G Console server
+
+#### STRIDE and ASVS
+
+| # | Threat (STRIDE) | Control | ASVS 4.0.3 | Evidence |
+|---|---|---|---|---|
+| S1 | **Spoofing**: guessing or brute-forcing a login | PBKDF2 password + key PIN through the IdP; generic answer; per account+address exponential lockout, per address cap; throttle also on step-up | V2.1.1, V2.2.1, V2.2.2, V2.5.4, V2.8.x | `ConsoleThrottleTest`, `ConsoleSessionTest` |
+| S2 | Spoofing: fixation or stolen cookie | New id at login and step-up; 256-bit ids; address+agent binding ends the session; duplicate/malformed cookie ignored | V3.2.1, V3.2.3, V3.3.1 | `ConsoleSessionTest`, red team a3 |
+| S3 | Spoofing: another origin's page acting as the user (CSRF) | Strict cookie + token + Origin + Sec-Fetch-Site + JSON | V4.2.2, V13.2.3 | `ConsoleRequestGuardTest`, a2 |
+| S4 | Spoofing: DNS rebinding | `Host` must be one of the server's names | V14.5.x | `aForeignHostHeaderIsRefused` |
+| T1 | **Tampering**: changing who acts, or smuggling fields | Person from session only; exact-field bodies; SOC body rebuilt; delegation signed per call | V4.1.2, V5.1.5, V13.2.x | `ConsoleAccessTest.theBrowserNeverNamesWho...`, a4 |
+| T2 | Tampering: path traversal, request smuggling, odd encodings | Allow-list by exact name; strict raw path; JDK server handles framing; header size cap | V12.3.x, V14.5.x | `ConsoleStaticTest`, a7, a8 |
+| T3 | Tampering: forged or injected audit lines | All values sanitised and JSON-escaped, flat map, actor validated | V7.3.1 | `ConsoleAuditTest.whatTheBrowserSendsCannotForgeARecord` |
+| R1 | **Repudiation**: a person denies an action | Intent + result for each write, reads of sensitive objects, login/step-up/logout, under the person's id with a hashed session tag; chain is keyed and anchored, verifiable in the page | V7.1.x, V7.2.x | `ConsoleAuditTest` |
+| I1 | **Information disclosure**: errors, caching, side channels | Four error shapes, no reasons, `no-store`, uniform login answers; unknown users cost the same hashing | V7.4.1, V8.2.1, V2.2.x | a9, headers tests |
+| I2 | Disclosure: records about colleagues through the audit explorer | Analysts get headers only for records outside the console's/SOC API's own types; the SOC API enforces the case/risk/search rules | V4.2.1 | `anAnalystSeesTheConsolesRecordsInFull...` |
+| I3 | Disclosure: SSE events | Events carry no ids, names or text; each follow-up request is checked | V13.x | `ConsoleStreamTest` |
+| D1 | **Denial of service**: floods, slow clients, large inputs | Per-person and per-address rates; worker pool + semaphore + deadline; 16 KiB bodies; 16 KiB headers; stream cap; login-id cap; throttle table bound | V11.1.x, V13.x | a6, a8, a13, `ConsoleStreamTest` |
+| E1 | **Elevation of privilege**: reaching a route above one's role | Role check on every route in the host, module routes included; module files gated by role | V4.1.1, V4.1.3 | `ConsoleAccessTest` |
+| E2 | Elevation: a stolen session making a privileged write | Step-up (password + PIN) for verdicts and any module route that asks for it; signing only for the session's own person | V2.8, V4.3.x | `aVerdictNeedsAFreshStepUp...`, a4, a12 |
+| E3 | Elevation: the console used to reach the SOC API as someone else | Console cert + one-use 60 s delegation per call, only for analysts; server pinned to `CN=soc-api` | V9.2.x | a10, a11 |
+
+#### Red-team findings
+
+Each attack was written as a probe and run against the build (`ConsoleRedTeamTest` and the other classes).
+
+| ID | Attack | Result | Fix and regression test |
+|---|---|---|---|
+| **F-G1** | A 200 KB request header value | **Succeeded**: the JDK server limits the number of headers but not their size, and answered 200 | Header bytes counted in the pipeline, over 16 KiB is 431. `ConsoleRedTeamTest.a8` (also a 3 MB header: refused) |
+| **F-G2** | Open four sessions for one person in the same instant | **Succeeded (a bug, found by the test of the session limit)**: "oldest" was chosen by random id when creation times were equal, so a new session could be the one ended | Sessions carry a creation counter; step-up keeps it. `ConsoleSessionTest.aPersonHasAtMostThreeSessions...` |
+| F-G3 | Builder setters kept references to mutable objects (SpotBugs EI_EXPOSE_REP2); an unchecked queue offer (RV_RETURN_VALUE_IGNORED) | Found by the gate | Holders and a loop; no suppression |
+| a1 | Stored XSS through a note | Failed: the API only returns `application/json` with `nosniff` and the strict CSP; the text comes back verbatim (escaping on output is part H, with its source test) | `a1_scriptInANoteComesBackAsJsonTextOnly` |
+| a2 | One session's CSRF token in another session | Failed (403) | kept |
+| a3 | Session id in query or `Authorization` | Failed (401) | kept |
+| a4 | Step-up or login naming another person; using ben's secrets in ana's session | Failed (400, 401, still stale) | kept |
+| a5 | One login id used by eight threads at once | Failed: exactly one session | kept |
+| a6 | Flood of unfinished logins from one address | Bounded at 20 per address (see open issue 1) | kept |
+| a7 | Content-Length plus Transfer-Encoding smuggling | Failed: no hidden request ran | kept |
+| a8 | Twelve stalled request bodies (more than the 8 workers) | Bounded: a normal request was answered within the 5 s deadline plus margin | kept |
+| a9 | 12 malformed requests looking for a stack trace, class name or path in an answer | Failed: only the four short shapes | kept |
+| a10 | Asking for people without standing; pointing the channel at a server that is not the SOC API | Failed (empty / 503) | kept |
+| a11 | A copied delegation header without the console's certificate | Failed: the TLS handshake is refused | kept |
+| a12 | Signing for a lead or an administrator | Failed (no key) | kept |
+| a13 | 300 parallel calls from 24 threads | Only 200/429/503, no hang | kept |
+| (guard tests) | Path traversal forms (22 of them), foreign Host, cross-site fetch, text/plain and form posts, `OPTIONS` preflight | Failed | `ConsoleStaticTest`, `ConsoleRequestGuardTest` |
+
+##### Open issues (not fixed, named)
+
+1. **Login flood on a shared address.** On the loopback every browser shares one source address, so someone who can reach the
+   port can fill the 20 pending-login slots of that address for two minutes and make logins on it fail. A real deployment
+   puts the console behind the gateway, where the source differs per user. Accepted for the lab; named in the report.
+2. **A stalled body holds a worker up to the request deadline (5 s).** Eight workers means a determined local client can slow
+   everyone. The anonymous limit (120 per minute per address) and the deadline bound it; a separate short read timeout for
+   unauthenticated bodies would need a change in how the JDK server hands out the stream.
+3. **Sessions are in memory.** A console restart logs everybody out (safe direction).
+4. **The JDK server's header read time** (`sun.net.httpserver.maxReqTime`) is read once, when the server class first loads;
+   `ConsoleMain` sets it to 30 s before anything else, but a test harness that loaded the server earlier keeps the default.
+
+### 6H Analyst console (front end)
+
+#### Standards lines for the front end, and their tests
+
+| Standards line (section 3, "Output and input", "Secrets", "Static files") | How | Test |
+|---|---|---|
+| No `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, `eval`, `new Function`, string `setTimeout`, inline handlers | Not present; `dom.js` is the only way elements are made | `ConsoleSourceTest.noScriptCanTurnText...` (19 patterns, comments stripped), `noPageHasInlineScriptStyleOrHandlers`, and `theGateCatchesWhatItIsMeantToCatch` proves each pattern matches its attack |
+| Strict CSP with Trusted Types works | No inline script/style, no `.style` writes, no `javascript:` URLs, no foreign addresses | `ConsoleSourceTest` (the same patterns) |
+| One place talks to the server | `api.js` | `ConsoleSourceTest.onlyApiJsTalksToTheServer` |
+| Only a harmless preference in `localStorage`, guarded | `prefs.js` | `ConsoleSourceTest.storageIsOnlyInThePreferencesFile...` |
+| Nothing secret in the page | The session cookie is HttpOnly; the CSRF token is in a JS variable only; passwords are cleared from the form after use | `ConsoleSourceTest` (no `sessionStorage`, `indexedDB`, `document.cookie`) |
+| Every file the page needs is served, every import resolves | | `ConsoleShellTest` |
+| Fail closed: an error is shown as "Unavailable", never as an empty list | `DwView.fail`, `unavailable()`; the ATT&CK view says "Incomplete" when cases could not be read | exercised in the live run below |
+
+##### What was and was not checked in a browser (honest account)
+
+The built-in browser refuses the lab's own certificate authority (`ERR_CERT_AUTHORITY_INVALID`), and trusting a CA or turning
+certificate checks off is the user's decision, not mine; the owner chose to **skip the browser check**. So **nothing was
+looked at with eyes**: layout, colours, dark/light, focus rings, dialogs and the keyboard shortcuts are untested in a real
+browser. What was done instead:
+
+* Every script passes `node --check` (syntax).
+* A scratch harness (not in the repository) ran the real `api.js` and every view against a **running `ConsoleMain`**
+  (`NODE_EXTRA_CA_CERTS` pointed at the lab CA for that Node process only) with a small stand-in DOM, as cleo and as ana, and
+  printed what each view rendered: overview, queue, cases, case, entity (landing and one entity), hunt, response, audit
+  (list and one record), ATT&CK. All rendered real data from the SOC API with no "Unavailable".
+* The same harness added a note containing `<img onerror>`, `<script>` and `<svg onload>` to a case and rendered the case:
+  no `img`, `script`, `svg` or `iframe` element appeared in the tree, no `on*` attribute and no non-route `href`; the text
+  was in the page as text.
+* Server side, everything the views call is covered by part G's tests.
+
+The owner should open `https://localhost:8443/` once (`ConsoleMain` prints the logins) and look.
+
+#### Red-team notes for part H
+
+| ID | Attack | Result |
+|---|---|---|
+| H1 | Stored XSS in a note, an alert text, a host name, a user agent: markup in every free-text field the SOC API returns | Failed. All text enters through `h()` text nodes; the harness above proved it for a note; the source test fails the build on any markup sink |
+| H2 | A link in data that goes elsewhere (`javascript:`, another origin) | Failed. `h()` writes an `href` only if it matches `#/...`; a test pattern in `ConsoleSourceTest` also forbids `javascript:` in any file |
+| H3 | A query in the hunt box that breaks the page when echoed (`"` and `\` in an entity id) | Failed. The entity page escapes only for the query language and inserts everything else as text; the hunt link goes through `encodeURIComponent` and the route allow-list for hrefs |
+| H4 | Another module (parts I, J) with `innerHTML` or a script from a CDN | Would fail the build: the scan includes `modules/**` |
+| **H5** | `encodeURIComponent` leaves `! ' ( ) *` unescaped, and the first version of the href allow-list did not accept them, so a hunt link for a query containing them silently lost its `href` (found while reading the code, not an attack) | Fixed in `dom.js` (the characters are allowed in the fragment); every link goes through the same function |
+| H6 | The page keeps a session alive by polling | Refreshes triggered by the live feed or timers send `X-Dwarpal-Background: 1`, which the server does not count as activity (tested server side) |
+
+Open points: no browser check (above); the ATT&CK view shows detections only because the SOC API does not expose rule
+coverage; the entity page cannot show half-lives because the risk JSON gives the current (decayed) weight only.
+
+### 6I Admin and user views
+
+#### Threat model: STRIDE with ASVS / Top 10
+
+| # | Threat | Control | Test | Reference |
+|---|---|---|---|---|
+| S1 | A person signs as another administrator | the signing key is looked up by the logged-in person's id; a person without a key (any other id) gets 403 | `AdminModuleTest.aPersonWithoutASigningKey...` | ASVS V2, V4; A01 |
+| S2 | A stale session approves or installs | host step-up plus a second check in every privileged handler | `privilegedWritesAlsoRefuseAStaleSecondFactor...` | ASVS V2.8 |
+| T1 | One administrator approves twice, or alone | the installer counts distinct signers; the test signs twice and installs: refused | `aPolicyNeedsTwoDifferentAdministrators...` | CM-5, SOC 2 CC8.1 |
+| T2 | An old sequence replayed, or an approved file edited | approvals sign the exact text and sequence (a proposal cannot be edited, only withdrawn); the installer refuses rollback | `anOldSequenceIsRefusedByTheInstaller...` | ASVS V13 |
+| T3 | A hostile policy or playbook file (tags, aliases, nesting, duplicate keys, control characters, unknown rules, destructive default, secret) | the real safe loaders and linters; a refused file is shown with findings but never kept; its text is not echoed back | `LabAdminModuleTest.hostileFiles...`, `AdminModuleTest` | ASVS V5; A03, A08 |
+| T4 | Elevation without a second person | PAM refuses own approval, ineligible people and roles, short reasons, long windows | `anElevationNeedsADifferentApprover...`, `...Ineligible...` | AC-5, AC-6 |
+| R1 | Who changed what | every install, grant and revoke is an audit record written by the component under the administrator's id; the history page reads them | `LabAdminModuleTest.anInstalledPolicy...` | AU-2, AU-10 |
+| I1 | "Why was I denied" teaches an attacker | only the engine's requester message, the reference, time, resource, action and generic next steps: no policy, score, signal, address, device or threshold | `theRequestersPageUsesTheEnginesOwnWords...` | ASVS V7.4, V8; A04 |
+| I2 | Reading another person's decision by guessing a reference | a reference that is not yours answers exactly like one that does not exist (same status and body) | `anotherPersonsReferenceLooksExactlyLike...` | ASVS V4.2; API1 |
+| I3 | Stored XSS through policy descriptions or justifications | text goes in only with `textContent`; JSON stays valid whatever the text holds; the source test covers the admin pages | `textFromTheFileComesBackAsData...`, `FrontEndRulesTest` | ASVS V5.3 |
+| D1 | Proposal flood | at most 10 open, 64 KiB each, one hour; PAM's own rate limits | `proposalsAreBoundedAndLapse` | ASVS V11 |
+| D2 | What-if too large | at most 20,000 recent requests, the replay's own 200,000 cap | `whatIfReplays...` | |
+| E1 | An analyst or ordinary person reaches admin data | role in registration and in every handler | `handlersRefuseTheWrongRoleEvenWithoutTheHostsCheck` | ASVS V4.1 |
+
+#### Red-team pass
+
+| Probe | First result | Now |
+|---|---|---|
+| Refused proposal file echoed back to the browser in the answer | **Leak of the submitted text** (found by the hostile-file test: an object tag came back in the response) | A refused file's text is not returned |
+| Same administrator signs twice then installs | Held (installer: "1 distinct") | Regression test |
+| Person with ADMIN role but no signing key approves | Held (403) | Regression test |
+| Stale second factor on approve, install, request | Held (403) | Regression test |
+| Install the same proposal twice; install an older sequence after a newer one | Held (404; "rollback") | Regression tests |
+| Someone else's decision reference, a made-up one, and `../..` | Held (identical 404; 400) | Regression tests |
+| Decision details page as an ordinary person | Held (403) | Regression test |
+| Elevation: own approval, ineligible role, stranger, 1-character reason, 600 minutes | Held (PAM refuses each) | Regression tests |
+| 11th proposal; proposal after the hour | Held (429; lapses) | Regression test |
+| Object tag, alias, 5,000-deep nesting, duplicate keys, control character in policy and playbook files | Held; no stack trace | Regression test |
+| Word "factor" in the requester's page | Test too strict, not a leak: the generic advice says "second factor" | Test now looks for risk, score, policy names |
+
+### 6J Scenario lab and guide
+
+#### Threat model: STRIDE with ASVS / Top 10
+
+| # | Threat | Control | Test | Reference |
+|---|---|---|---|---|
+| S1 | A non-admin resets the lab | role in route registration and again in the handler; reset also needs `stepUpFresh` | `LabModuleTest` (3 tests) | ASVS V4.1, V4.2; A01 |
+| S2 | A stale session performs a privileged write | host step-up and a second check inside the handler | `LabModuleTest.resetNeedsAFreshSecondFactor...` | ASVS V2.8, V4.3 |
+| T1 | A learner's rule or playbook escapes the sandbox (object tags, aliases, bombs, deep nesting, giant files) | safe YAML loaders (no objects, no aliases, no duplicate keys), 16 KiB limit, 20 rules, linter refuses rules that can never fire | `ScenarioToolsTest.yamlTagsAliasesAndBombs...`, `...aRuleWithTooMany...` | ASVS V5.1, V5.5; A03, A08 |
+| T2 | A learner's rule affects the live SOC | the rule runs in a private engine over a private copy of the records; alerts go to a list; test compares cases, raised alerts and chain head before and after | `ScenarioToolsTest.aGoodRuleRunsOnRecordedEvents...` | ASVS V1.4, V13.1 |
+| T3 | A playbook acts on forgeable evidence | the real `PlaybookCompiler` refuses destructive steps on collected-only rules; sandbox never installs | `ScenarioToolsTest.aPlaybookOnForgeableEvidence...`, `ExamplesTest` | ASVS V11 |
+| R1 | Who launched what | every write is audited by the host under the person; the journal keeps `by`, scenario, time | `LabModuleTest` | ASVS V7.1 |
+| I1 | The export leaks a key, a hash, the lab directory, the host's names or real people | pseudonyms, field allow-list, key-like runs removed, final scan fails the export | `ScenarioToolsTest.theExportHolds...`, `...lastLineOfDefence...` | ASVS V8.3, V9; A02 |
+| I2 | Error text echoes the submitted rule | findings name places and rule ids only | `ScenarioToolsTest.lintingNeverEchoes...` | ASVS V7.4 |
+| I3 | Stored XSS through rule titles, findings, alert text, guide text | the pages insert text only with `textContent`; attributes from an allow-list; link targets restricted; a source test forbids `innerHTML`, `eval`, inline handlers and style | `FrontEndRulesTest` | ASVS V5.3; A03 |
+| D1 | A scenario button held down | one launch per second, 12 per person per five minutes, a scenario cannot be launched again while it plays, world refuses more than 50,000 waiting items, past-dated items and unknown types | `LabModuleTest.aScenarioButtonHeldDown...`, `ScenarioToolsTest` (3 tests) | ASVS V11.1, V13.2; API4 |
+| D2 | Expensive sandbox runs | one run at a time, one per person per 2 s, 100,000 records, 8 s budget, engine's own state limits | `ScenarioToolsTest.oneRunAtATime...` | ASVS V11.1 |
+| D3 | Fast-forward or reset used to freeze the lab | one heavy operation at a time (429), fast-forward in 10-minute steps so the SOC API answers between steps | `LabModuleTest` | |
+| E1 | Path parameters used for traversal or injection | identifier-only path parameters (letters, digits, `-`, `_`, 64 characters) | `LabModuleTest.badLaunches...` | ASVS V5.1.3, V12.3 |
+
+ASVS levels touched: V4 (access control), V5 (validation and encoding), V7 (error handling), V8, V11 (business logic),
+V13 (API), V14 (configuration; no new dependency).
+
+#### Red-team pass
+
+Each probe is a working test. The first column says what happened on the first build.
+
+| Probe | First result | Now |
+|---|---|---|
+| First launch of any lab | **Breach of the lab's own limit: refused.** The rate limiter's "never launched" marker was `Long.MIN_VALUE`; subtracting it overflowed, so the gap check refused the very first launch (found by the first probe run) | Fixed (marker is half of it); every test launches |
+| Injecting an endpoint batch with the next number | Design finding: a collector refuses numbers that go backwards, so an injected batch would have made every later scripted batch of that device "replayed" | `LabWorld` numbers and signs every batch with the device key when it runs |
+| Export of a lab with the A9 alert | **Would have refused every export:** the "base64-like" scan matched the 39-character rule name `cloud-bulk-download-then-external-share` and the alert id built from it (found while writing the export tests, before any export ran) | The scan needs upper case, lower case and digits and excludes `-`; the test keeps the rule name as a negative case |
+| Command line with a PEM header in an event that is cited as evidence | **Self-inflicted denial:** the last-line scan refuses the whole export | PEM markers are removed from values first; the scan still refuses if one gets through |
+| Launch or fast-forward during a reset | Launch went into the old, closed world and was lost | Refused with 409 while resetting; a second reset is refused with 429 |
+| A6 as first built | Fidelity: the login at the launch hour was STEP_UP, not the simulation's ALLOW | The thief has the owner's security key; the test pins ALLOW |
+| Reset by an analyst, a lead, and an administrator with a stale second factor | Held (403) | Regression tests |
+| Object tag, alias bomb, 5,000-deep nesting, duplicate keys, oversize, control characters, empty, in a rule file | Held; no stack trace, no echo | Regression tests |
+| Playbook with a destructive default, a 400-day deny, an unknown rule, an unknown step, an extra key, a secret in the version | Held | Regression tests |
+| Rule that matches every event | Held: sample capped, records capped, engine's flood limits | Regression test |
+| 20,000 junk lines three times over | Held: the world refuses after 50,000 waiting items; past-dated and non-item objects refused | Regression test |
+| Scenario button pressed 60 times; 15 launches by one person | Held: one accepted; at most twelve in five minutes | Regression tests |
+| Path parameter with `../`, `%00`, `;` | Held (400/404, not echoed) | Regression test |
+| An analyst reads the export | Held (403; leads only) | Regression test |
+
+### 6X Integration (cross-part)
+
+Run over HTTPS against the real launcher (`ConsoleMain`: lab session, console server, lab, guide and admin
+modules, SOC API, audit chain): tests `LabConsoleEndToEndTest` and `LabConsoleRedTeamTest`. Earlier in 0b the
+integration session also found and fixed two leaks while building the shared pieces (6X-1, 6X-2). A probe that
+succeeded would be a breach; none of the eight cross-part probes succeeded.
+
+| # | STRIDE | Threat or breach | Mitigation in code | Test |
+|---|---|---|---|---|
+| 6X-1 | Information disclosure (F) | A `count by` over all events would show an analyst how active a colleague is (grouped counts and totals) | Counts are taken over only the events the caller may see, per event, exactly as for search | `SocApiRedTeamTest.countByDoesNotRevealColleaguesGroupsOrTotals` |
+| 6X-2 | Tampering (F) | The anchor check passed a chain whose history had been rewritten and then extended past the anchor | `LabAudit.verify` also compares the record at the anchored sequence number | `LabAuditTest.aChainCutShortRewrittenAndExtendedOrAlteredIsCaught` |
+| 6X-3 | Spoofing / elevation | The console, if compromised or confused, acts as any analyst | The console's certificate alone is nobody; every call needs a per-call assertion signed with a key the ring trusts only for this, bound to method, path and body, one use, 60 seconds | `ConsoleDelegationTest` |
+| 6X-4 | Elevation (CSRF) | A page on another site, or a script with a stolen cookie, makes a write | Token header, same-origin `Origin`, JSON content type, no CORS | `LabConsoleRedTeamTest.aWriteWithTheCookieButWithoutTheTokenOrFromAnotherOriginIsRefused` |
+| 6X-5 | Tampering (XSS) | Hostile text in a note, alert or host name runs in an analyst's browser | Every API answer is JSON with `nosniff` and the strict CSP; the front end inserts text only with `textContent` (source test forbids `innerHTML`, `eval`, inline script) | `LabConsoleRedTeamTest.hostileTextComesBackAsJsonTextOnly...`, `ConsoleSourceTest`, `FrontEndRulesTest` |
+| 6X-6 | Repudiation / spoofing | A verdict names someone else, or is signed without a fresh second factor | The signer is the session's person, never a field; step-up no older than five minutes | `LabConsoleRedTeamTest.aVerdictCannotNameAnotherAnalystAndNeedsAFreshStepUp` |
+| 6X-7 | Elevation | Escalation across modules: an analyst resets the lab or installs policy; an administrator signs a verdict or launches an attack; a user reads policy | Role checked in the host (hierarchical, ANALYST < LEAD < ADMIN, USER separate) and again in each module; administrators are not analysts | `LabConsoleRedTeamTest.roleEscalationAcrossTheModulesFails`, `LabConsoleEndToEndTest` |
+| 6X-8 | Information disclosure | The run export or a crafted URL gives away key store passwords, demo logins, certificates or the lab path | Export is sanitised and for leads only; static files are served only from a fixed in-jar allow-list by exact name | `LabConsoleRedTeamTest.theRunExportCarriesNoKey...`, `...filesOutsideTheStaticAllowListAreNotServed...` |
+| 6X-9 | Denial of service / integrity | A reset of the lab leaves the console with a stale SOC address, a dead channel or a broken audit chain | The console reads the lab through one handle on every call; the new chain starts anchored; analysts' sessions keep working | `LabConsoleRedTeamTest.anAdministratorResetsTheLab...` |
+| 6X-10 | Repudiation | The console's own actions are not on the trail | Login, step-up, writes and sensitive reads are audited under the person's name | `LabConsoleRedTeamTest.whatTheConsoleDid...`, `ConsoleAuditTest` |
+| 6X-11 | Elevation (functional) | The host reserved the module id `lab` for its own status route, so the lab module could not load and the launcher stopped at start-up | `lab` freed; routes do not collide (different path lengths) | `LabConsoleEndToEndTest` |
+
+Cross-part red-team pass: eight probes, none succeeded. Open items named by the parts are in the residual risks
+below.
+
 ## Residual risks (accepted for this layer, scheduled)
 
 | Risk | Why accepted now | Planned in |
@@ -599,3 +812,9 @@ real breaches (5.2I-1 and 5.2I-2), both fixed with a regression test. Slow basel
 | Isolation commands to the sensor are not signed by Dwarpal (the simulated sensor trusts its channel) | A real sensor needs a signed command | Key purpose and `SignedMessages.isolationCommand` with a real sensor |
 | Cases, isolation state, protected-device waits and the collected-watch budget live in memory | No database yet | Persistent store |
 | `count by` queries are answered by the event store but not yet exposed through the SOC API's search | `EventSearch` returns events only | Add a `counts` method to `EventSearch` |
+| The lab starts from day zero on every restart: cases, risk and isolations live in memory (certificates and demo logins are kept) | Rebuilding six components from the trail is large | Persistent state with the store, after the submission |
+| `sensor-heartbeat-missing` is still silent: the simulated sensors seal telemetry hourly and send no heartbeats | Needs the simulator to seal every 10 minutes | After the submission |
+| The console's screens were tested against the real scripts in a simulated page and over HTTPS, but not looked at in a real browser by the build sessions (the built-in browser refuses the lab's CA) | Layout, themes and shortcuts are unverified by eye | The owner looks once with the lab CA trusted (runbook) |
+| Login flood on the loopback address: all local browsers share one source address, so pending logins can be exhausted for two minutes | Behind the gateway the source differs per person | Accepted for the lab (6G open issue 1) |
+| Verdicts are signed on the console server with the lab's analyst key after a fresh step-up, not in the analyst's browser or hardware key | The seam is `VerdictSigner` | WebAuthn or WebCrypto signing |
+| The console is a trusted proxy: it holds the delegation key that lets it speak for any configured analyst, though each call is signed and audited | An identity provider would issue the tokens in a company | Token issuance by the identity provider |

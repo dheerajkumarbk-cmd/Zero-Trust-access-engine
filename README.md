@@ -84,6 +84,14 @@ device's own signed acknowledgement confirms; and the SOC API (`socapi`) serves 
 reports over mutual TLS. Evidence that anybody on the network could have forged may be watched and ranked, but never
 triggers a destructive action. See the [Layer 5.2 report](docs/layer-5-2-report.md).
 
+## The lab (Layer 6)
+
+`bin\lab.cmd` (or `bin/lab.sh`) starts Dwarpal on a simulated organisation with a browser console: alert queue,
+cases with signed verdicts, hunt, entity risk, an audit explorer that verifies the chain, a scenario lab that launches
+the attacks on demand with a guide, and administrator pages for two-person policy changes and privileged access. It is
+built to a stated baseline (OWASP ASVS, NIST SP 800-53 and 800-207, SOC 2, ISO 27001) and costs nothing to run. See the
+[Layer 6 report](docs/layer-6-report.md) and the [runbook](docs/runbooks/lab.md).
+
 ## The maths
 
 - **M3, Bayes with base rate** (Axelsson 2000): `logit P(attack|x) = logit P(attack) + Σ ln LR_k`
@@ -98,7 +106,7 @@ triggers a destructive action. See the [Layer 5.2 report](docs/layer-5-2-report.
 - **Failure bursts:** Poisson likelihood ratio for brute force, password spray and org-wide surges, clamped at zero.
 
 Reports: [Layer 1](docs/layer-1-report.md), [Layer 2](docs/layer-2-report.md), [Layer 3](docs/layer-3-report.md),
-[Layer 4](docs/layer-4-report.md), [Layer 5](docs/layer-5-report.md), [Layer 5.2](docs/layer-5-2-report.md),
+[Layer 4](docs/layer-4-report.md), [Layer 5](docs/layer-5-report.md), [Layer 5.2](docs/layer-5-2-report.md), [Layer 6](docs/layer-6-report.md),
 and the full [project state](docs/project-state.md).
 
 ## Build

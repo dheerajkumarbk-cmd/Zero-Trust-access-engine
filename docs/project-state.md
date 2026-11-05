@@ -3,12 +3,12 @@
 | | |
 |---|---|
 | Document | Project state and progress log |
-| State as of | 2026-11-05 (Layer 5.2 integrated on a local branch, not yet pushed) |
+| State as of | 2026-11-06 (Layer 6 integrated on a local branch, not yet pushed; Layer 5.2 is on GitHub) |
 | Repository | https://github.com/dheerajkumarbk-cmd/Zero-Trust-access-engine (public) |
 | Platform | Java 25 LTS (Temurin 25.0.5), Maven 3.9, no Docker, runs on an 8 GB laptop |
-| Size | 267 main classes (34,459 lines), 132 test files (26,337 lines), 974 tests |
+| Size | 318 main classes (43,688 lines), 163 test files (31,043 lines), 1174 tests |
 | Layers complete | Layer 1 (core decision engine), Layer 2 (behavioural risk scorers), Layer 3 (Policy Administrator: A sessions, B privileged access), Layer 4 (enforcement points: engine API, ZTNA gateway, web gateway, SaaS data guard), Layer 5 (SOC loop: first round, encrypted audit store and detection, case and response loop, analytics; second round, the SOC platform: SIEM platform, UEBA and prioritisation, SOAR with device isolation, SOC API) |
-| Next | Layer 6 (console, demo, hosting) when requested; then hybrid post-quantum signatures after the submission |
+| Next | Hybrid post-quantum signatures after the submission; persistence of lab state, sensor heartbeats, container file and a static replay site (see the Layer 6 report, section 7) |
 
 The name: a *dvārapāla* (Sanskrit, "door guardian") is the guardian figure at a temple gate who
 decides who may pass. Dwarpal does the same for every access request.
@@ -202,7 +202,10 @@ Mapping to the CISA Zero Trust Maturity Model (v2.0) pillars:
 | 5.2 | `ueba` | 14 | 2,617 | Baselines, explainable detectors, peer groups, entity risk with half-lives, alert ranking, triage queue, MITRE coverage, daily SOC report |
 | 5.2 | `soar` | 18 | 2,786 | Playbooks as data with two-person install, case management, SOAR, device isolation with signed acknowledgements, file connectors |
 | 5.2 | `socapi` | 5 | 1,205 | The SOC API over mutual TLS: queue, cases, risk, search, reports, notes, assignment, signed verdicts |
-| | **Total** | **267** | **34,459** | Layers 1 to 3: 7,168 lines. Layer 4: 9,769 lines. Layer 5: about 6,000 lines. Layer 5.2: about 10,300 lines plus the part 0 contracts |
+| 6 | `lab`, `lab.scenarios`, `sim` | 18 | 3,796 | The lab: simulated organisation, the whole SOC running behind the SOC API, scenario clock, certificate authority kept between runs, audit view, attack runner and guide, reset session, launcher |
+| 6 | `console`, `console.lab`, `console.admin` | 31 | 4,944 | The console server (TLS 1.3, sessions, CSRF, step-up, security headers, signed delegation to the SOC API, audit, event stream) and the lab, guide and admin modules |
+| 6 | `src/main/resources/console` | 29 files | 2,584 | The analyst console: plain HTML, CSS and JavaScript, no framework and no external file |
+| | **Total** | **318** | **43,688** | Layers 1 to 3: 7,168 lines. Layer 4: 9,769 lines. Layer 5: about 6,000 lines. Layer 5.2: about 10,300 lines plus the part 0 contracts. Layer 6: about 8,800 lines of Java plus 2,600 lines of front end |
 
 ### 4.2 The full request path
 
@@ -687,6 +690,24 @@ The rule that holds it together is provenance: an alert that rests only on forge
 export) may be shown, ranked and may open a case, but never triggers a destructive action. The collector, the
 ranker, the playbook linter and the SOAR each enforce it, and an end-to-end test checks that they agree on every
 alert raised in the simulated organisation.
+
+### 7.6 Layer 6: the lab
+
+Layer 6 makes Dwarpal something a person can run and use: `bin\lab.cmd` builds one jar and starts the simulated
+organisation, the whole SOC and a browser console on `https://localhost:8443`. Full report:
+[layer-6-report.md](layer-6-report.md); runbook: [runbooks/lab.md](runbooks/lab.md).
+
+| Part | Design |
+|---|---|
+| Lab core | The simulation and a private certificate authority live in the main code; `LabWorld` is the composition root of all SOC parts behind the SOC API; a scenario clock streams events through the real collectors; `LabSession` can reset to day zero |
+| Console server | TLS 1.3, login through the identity provider with a second factor, `__Host-` cookie, CSRF, five-minute step-up, throttling, exact security headers, audit of every action, and one signed assertion per call when it acts for an analyst |
+| Analyst console | Queue, case workspace with signed verdicts, hunt, entity risk with half-lives, audit explorer that verifies the chain, ATT&CK grid; no front-end packages and no `innerHTML` (a test enforces it) |
+| Scenario lab and guide | Launch any of the nine scenarios now, controls, a guide per attack, a rule and playbook sandbox, a sanitised run export |
+| Admin and user views | Two-person policy and playbook install, what-if replay, privileged access, "why was I denied", reset |
+
+The rule that holds it together is the control baseline in `docs/layer-6/standards.md`: administrators are not
+analysts, the console is never trusted on its own certificate, every action is evidence on the trail, and a screen
+shows only what its role may see.
 
 ---
 
@@ -1311,7 +1332,7 @@ Stated openly, each with where it will be addressed:
 | **Audit key in process memory** | Protected by the operating system, not an HSM | Deployment: KMS or HSM |
 | **Ed25519 is not quantum-safe** | Long-term forgery risk after about 2030 | Hybrid Ed25519 + ML-DSA (JDK 25 ready) |
 | **In-memory stores** | Behaviour history, sessions and grants are lost on restart | Layer 4/5: persistent stores (tokens stay hashed) |
-| **No runnable demo yet** | The engine is exercised through tests only | Next step |
+| **Lab state is not kept across restarts** | The lab starts from day zero each run (certificates, logins and seed are kept) | After the submission |
 
 ---
 
@@ -1367,7 +1388,7 @@ Stated openly, each with where it will be addressed:
 | `SECURITY.md` | Vulnerability reporting, built-in safeguards |
 | `docs/threat-model.md` | STRIDE threat model, attack cases, residual risks |
 | `docs/security-architecture.md` | Defence in depth, IAM and PAM, encryption, ASVS mapping, post-quantum readiness |
-| `docs/layer-1-report.md` to `docs/layer-5-report.md`, `docs/layer-5-2-report.md` | Per-layer reports; `docs/layer-5-2/part-d.md`, `part-e.md`, `part-f.md` hold each SOC platform part's design, STRIDE table and red-team findings |
+| `docs/layer-1-report.md` to `docs/layer-5-report.md`, `docs/layer-5-2-report.md`, `docs/layer-6-report.md` | Per-layer reports; `docs/layer-5-2/part-d.md`, `part-e.md`, `part-f.md` hold each SOC platform part's design, STRIDE table and red-team findings |
 | `docs/report-layers-1-2.md` | Consolidated report |
 | `docs/project-state.md` | This document |
 
@@ -1385,7 +1406,7 @@ The whole project has six layers:
 | 4 | Enforcement and SASE edge | The gateway in front of applications (ZTNA proxy, web gateway, SaaS/DLP controls) calling Layers 1 to 3 over an mTLS API; what the demo talks to | Done |
 | 5 | SOC loop and analytics | First round: encrypted audit store, anchoring, export, detection; cases, verdicts and playbooks with decaying signals (M5); What-If replay (M8), calibration, sensitivity and accuracy | Done |
 | 5.2 | SOC platform | SIEM platform (collectors, common event format, analyst rule language, search), UEBA and risk-based prioritisation (MITRE ATT&CK tags, reports), SOAR and XDR-lite (playbooks as data, full cases, simulated endpoint sensors, device isolation), SOC API for the dashboard | Built and integrated; push waits for approval |
-| 6 | Console, demo and deployment | Web front end for users, admins and analysts; demo deployment (for example Vercel) | When requested |
+| 6 | Console, demo and deployment | Launcher, browser console for analysts and administrators, scenario lab and guide, packaging | Built and integrated; push waits for approval. Container file, remote access and static replay site are after the submission |
 | Cross-cutting | Post-quantum | Hybrid Ed25519 + ML-DSA signatures on every proof (signature field grows from 256 characters to about 4.5 KB) | After submission |
 
 ---
