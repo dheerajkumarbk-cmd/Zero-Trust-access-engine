@@ -49,7 +49,7 @@ public final class FirewallCollector extends CollectorBase {
      * @param leases internal address to device id (DHCP leases); at most {@link #MAX_LEASES}
      */
     public FirewallCollector(String runId, Map<String, String> leases) {
-        super(DATASET, "fw", runId);
+        super(DATASET, "fw", runId(runId));
         Objects.requireNonNull(leases, "leases");
         if (leases.size() > MAX_LEASES) {
             throw new IllegalArgumentException("at most " + MAX_LEASES + " leases");

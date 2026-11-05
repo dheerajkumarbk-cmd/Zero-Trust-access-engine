@@ -209,6 +209,14 @@ public final class Ingestor {
         return new Report(done, late, refused, problem);
     }
 
+    private synchronized long nextNumber() {
+        return written + 1;
+    }
+
+    private synchronized void countWritten() {
+        written++;
+    }
+
     private record Check(SecurityEvent event, String reason, boolean late) {
     }
 
@@ -296,7 +304,7 @@ public final class Ingestor {
             }
             Map<String, String> f = new LinkedHashMap<>();
             unreported.forEach((reason, n) -> f.put("refused." + reason.replace('-', '_'), Long.toString(n)));
-            SecurityEvent summary = new SecurityEvent("ingest-" + reg.source().name() + "-" + (written + 1) + "-"
+            SecurityEvent summary = new SecurityEvent("ingest-" + reg.source().name() + "-" + nextNumber() + "-"
                     + now.toEpochMilli(), now, reg.source().name(), SecurityEvent.Category.SYSTEM, REFUSED_ACTION,
                     SecurityEvent.EventOutcome.FAILURE, SecurityEvent.Provenance.COLLECTED, List.of(), f);
             try {
@@ -306,7 +314,7 @@ public final class Ingestor {
                 return Optional.of("audit write failed (" + failed.getClass().getSimpleName()
                         + "): refusal summary kept for the next pump");
             }
-            written++;
+            countWritten();
             unreported.clear();
             return Optional.empty();
         }

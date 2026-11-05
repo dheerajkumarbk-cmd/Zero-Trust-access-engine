@@ -240,7 +240,7 @@ public final class CorrelationEngine {
     public synchronized Map<String, long[]> statistics() {
         Map<String, long[]> out = new LinkedHashMap<>();
         for (RuleState s : states) {
-            out.put(s.rule.id(), new long[]{s.matches, s.fired, s.suppressed, s.refusedKeys});
+            out.put(s.rule.id(), new long[]{s.matches, s.fired, s.suppressed.get(), s.refusedKeys});
         }
         return out;
     }
@@ -273,7 +273,7 @@ public final class CorrelationEngine {
         }
     }
 
-    private void emit(Alert a, List<Technique> techniques, boolean actionable) {
+    private synchronized void emit(Alert a, List<Technique> techniques, boolean actionable) {
         raised++;
         recent.add(new Raised(a, techniques, actionable));
         if (recent.size() > MAX_RECENT) {
@@ -325,7 +325,7 @@ public final class CorrelationEngine {
         final Set<Long> fullHours = new HashSet<>();
         long matches;
         long fired;
-        long suppressed;
+        final java.util.concurrent.atomic.AtomicLong suppressed = new java.util.concurrent.atomic.AtomicLong();
         long refusedKeys;
         long lastSweep = Long.MIN_VALUE;
 
@@ -497,7 +497,7 @@ public final class CorrelationEngine {
                 };
                 if (measured >= rule.amount()) {
                     if (at < k.cooldownUntil) {
-                        suppressed++;
+                        suppressed.incrementAndGet();
                         return;
                     }
                     List<Entry> inWindow = es.subList(i, j);
@@ -529,7 +529,7 @@ public final class CorrelationEngine {
                 List<Entry> chain = chain(k, start, steps);
                 if (chain != null) {
                     if (start.atMillis() < k.cooldownUntil) {
-                        suppressed++;
+                        suppressed.incrementAndGet();
                         return;
                     }
                     fire(c.event().at(), k.values, chain, chain.size(), steps.size() + " steps within "
@@ -616,7 +616,7 @@ public final class CorrelationEngine {
             }
             Instant raisedAt = evidence.stream().map(Entry::recordedAt).max(Comparator.naturalOrder()).orElseThrow();
             if (n > settings.maxAlertsPerHour()) {
-                suppressed++;
+                suppressed.incrementAndGet();
                 if (floodHours.add(hour)) {
                     emit(new Alert("al-" + FLOOD_RULE + "-" + rule.id() + "-" + seqs.getLast(), FLOOD_RULE,
                             Severity.HIGH, raisedAt, List.of(new Entity(Entity.Kind.RESOURCE, "rule:" + rule.id())),

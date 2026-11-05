@@ -38,13 +38,20 @@ abstract class CollectorBase implements EventSource {
     private long overflowReported;
     private long accepted;
 
+    /** Arguments are checked by {@link #runId} before this constructor runs, so it never throws. */
     CollectorBase(String dataset, String prefix, String runId) {
-        this.dataset = Validate.id(dataset, "dataset");
-        this.prefix = Validate.id(prefix, "prefix");
-        this.runId = Validate.id(runId, "runId");
+        this.dataset = dataset;
+        this.prefix = prefix;
+        this.runId = runId;
+    }
+
+    /** Checks a run id (call it in the subclass's {@code super(...)} arguments). */
+    static String runId(String runId) {
+        Validate.id(runId, "runId");
         if (runId.length() > 24) {
             throw new IllegalArgumentException("runId: at most 24 characters");
         }
+        return runId;
     }
 
     @Override

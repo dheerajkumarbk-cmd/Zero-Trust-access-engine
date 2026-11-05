@@ -39,7 +39,7 @@ public final class CloudCollector extends CollectorBase {
     private final Map<String, String> leases;
 
     public CloudCollector(String runId, Map<String, String> leases) {
-        super(DATASET, "cl", runId);
+        super(DATASET, "cl", runId(runId));
         Objects.requireNonNull(leases, "leases");
         if (leases.size() > FirewallCollector.MAX_LEASES) {
             throw new IllegalArgumentException("at most " + FirewallCollector.MAX_LEASES + " leases");

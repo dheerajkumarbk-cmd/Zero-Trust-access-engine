@@ -72,7 +72,7 @@ public final class EndpointCollector extends CollectorBase {
     private final Map<String, Long> lastBatch = new HashMap<>();
 
     public EndpointCollector(String runId, KeyRing keys) {
-        super(DATASET, "ep", runId);
+        super(DATASET, "ep", runId(runId));
         this.keys = Objects.requireNonNull(keys, "keys");
     }
 
