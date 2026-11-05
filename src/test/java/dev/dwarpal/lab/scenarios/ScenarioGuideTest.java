@@ -100,6 +100,63 @@ class ScenarioGuideTest {
         assertTrue(REPORTS.get("A6").alerts().stream().anyMatch(a -> a.actionable() && a.priority().equals("P1")));
     }
 
+    private static ScenarioRunner.Decision decision(String id, int n) {
+        return REPORTS.get(id).decisions().get(n);
+    }
+
+    @Test
+    void theReasonsTheWalkthroughsNameAreTheReasonsTheEngineGave() {
+        double p = Double.parseDouble(decision("A1", 0).pAttack());
+        assertTrue(p > 0.7 && p < 0.9, "A1 'about 80 per cent': " + p);
+        assertTrue(decision("A1", 0).signals().contains("network-novelty")
+                && decision("A1", 0).signals().contains("device-novelty"));
+        assertTrue(decision("A2", 0).signals().contains("ip-reputation"));
+        assertTrue(decision("A3", 0).reasons().contains("challenge required"));
+        double a3 = Double.parseDouble(decision("A3", 0).pAttack());
+        assertTrue(a3 > 0.001 && a3 < 0.05, "A3 'about one per cent': " + a3);
+        assertTrue(decision("A4", 1).signals().contains("impossible-travel"));
+        assertTrue(decision("A4", 1).reasons().length() > 0);
+        assertTrue(decision("A5", 0).signals().contains("ip-reputation"));
+        assertTrue(decision("A6", 0).reasons().contains("step-up satisfied"), "the thief's security key");
+        assertTrue(decision("A7", 0).signals().contains("password-spray"));
+    }
+
+    private static long matched(String query) {
+        return world.store.search(query, world.scriptStart, world.now().plusSeconds(1), 1).matched();
+    }
+
+    @Test
+    void theHuntsTheWalkthroughsSuggestFindWhatTheyPromise() {
+        assertEquals(1, matched("ip = 198.51.100.66"), "A7: one request from the spray address");
+        assertEquals(1, matched("dataset = cloud and share = partner-mail.example"), "A9: the external share");
+        assertTrue(matched("dataset = endpoint and process = powershell.exe and signer = corp-it") > 0, "L6");
+        assertEquals(0, matched("dataset = endpoint and process = powershell.exe and cmd ~ \" -enc\" and signer = corp-it"),
+                "A6's encoded PowerShell has no signer");
+        String laptop = REPORTS.get("A8").launch().devices().get(0);
+        var counts = world.store.counts("dataset = firewall and dst = 203.0.113.66 | count by device",
+                world.scriptStart, world.now().plusSeconds(1));
+        assertTrue(counts.groups().stream().anyMatch(g -> g.values().equals(List.of(laptop)) && g.count() == 120),
+                "A8: 120 flows from the launched laptop: " + counts);
+    }
+
+    @Test
+    void decidingTheStolenLaptopCaseDoesWhatTheWalkthroughSays() {
+        ScenarioRunner.Seen p1 = REPORTS.get("A6").alerts().stream().filter(a -> a.rule().equals("stolen-laptop-collection"))
+                .findFirst().orElseThrow();
+        String device = REPORTS.get("A6").launch().devices().get(0);
+        var verdict = world.signVerdict("ana", p1.alertId(), dev.dwarpal.soc.Verdict.Outcome.TRUE_POSITIVE);
+        var result = world.soar.handle(verdict);
+        assertEquals(dev.dwarpal.response.Playbooks.Status.APPLIED, result.status(), result.message());
+        assertTrue(result.isolated().contains(device), "the playbook isolates the laptop");
+        assertEquals(dev.dwarpal.soar.DeviceIsolation.State.PENDING_ACK, world.isolation.of(device).orElseThrow().state(),
+                "pending until the device's own key acknowledges");
+        world.advanceTo(world.now().plusSeconds(60));
+        assertEquals(dev.dwarpal.soar.DeviceIsolation.State.ISOLATED, world.isolation.of(device).orElseThrow().state(),
+                "the simulated sensor answers with a batch signed by the device's key");
+        var again = world.soar.handle(verdict);
+        assertEquals(dev.dwarpal.response.Playbooks.Status.REFUSED, again.status(), "a verdict is single use");
+    }
+
     @Test
     void eachLaunchNamesWhoItIsAboutAndWhenItRuns() {
         for (Scenario s : ScenarioCatalog.all()) {
