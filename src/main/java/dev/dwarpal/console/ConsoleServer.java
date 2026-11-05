@@ -296,6 +296,21 @@ public final class ConsoleServer implements AutoCloseable {
         return modules;
     }
 
+    /**
+     * The meaning of a module's {@code minimum}: hierarchical, ANALYST below LEAD below ADMIN, and USER (any signed-in
+     * person) separate and lowest. Built-in SOC and audit routes use {@link #satisfies} instead, which keeps an
+     * administrator out of SOC data.
+     */
+    static boolean satisfiesModule(Set<ConsoleModule.Role> roles, ConsoleModule.Role minimum) {
+        return switch (minimum) {
+            case USER -> !roles.isEmpty();
+            case ANALYST -> roles.contains(ConsoleModule.Role.ANALYST) || roles.contains(ConsoleModule.Role.LEAD)
+                    || roles.contains(ConsoleModule.Role.ADMIN);
+            case LEAD -> roles.contains(ConsoleModule.Role.LEAD) || roles.contains(ConsoleModule.Role.ADMIN);
+            case ADMIN -> roles.contains(ConsoleModule.Role.ADMIN);
+        };
+    }
+
     /** A role is met by itself; a lead is also an analyst; an administrator and every other person are users. */
     static boolean satisfies(Set<ConsoleModule.Role> roles, ConsoleModule.Role minimum) {
         return switch (minimum) {
@@ -401,7 +416,7 @@ public final class ConsoleServer implements AutoCloseable {
                 return Reply.error(404, "not found");
             }
             ConsoleSessions.Found f = sessions.find(cookie(ex), source, agent);
-            if (f.lookup() != ConsoleSessions.Lookup.OK || !satisfies(f.session().person.roles(), m.get().minimum())) {
+            if (f.lookup() != ConsoleSessions.Lookup.OK || !satisfiesModule(f.session().person.roles(), m.get().minimum())) {
                 return Reply.error(f.lookup() == ConsoleSessions.Lookup.OK ? 403 : 401,
                         f.lookup() == ConsoleSessions.Lookup.OK ? "forbidden" : "login required");
             }
@@ -503,7 +518,8 @@ public final class ConsoleServer implements AutoCloseable {
                 return audited403(session, "csrf", route, "anti-forgery token missing or wrong");
             }
         }
-        if (route.minimum() != null && !satisfies(session.person.roles(), route.minimum())) {
+        if (route.minimum() != null && !(route.moduleId() != null ? satisfiesModule(session.person.roles(), route.minimum())
+                : satisfies(session.person.roles(), route.minimum()))) {
             return audited403(session, "role", route, "needs " + route.minimum());
         }
         if (route.stepUp() && !sessions.stepUpFresh(session)) {

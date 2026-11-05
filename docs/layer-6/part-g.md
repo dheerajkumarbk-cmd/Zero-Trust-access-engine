@@ -41,8 +41,10 @@ the certificate authority file the browser must trust, and the demo logins.
   all give the same `login failed`. Step 1 (`login`) always answers with a login id, also for unknown users.
 * **Login counts as a step-up.** Both factors were just proved, so a session starts with five minutes of freshness. A later
   step-up (`session/stepup`: password and PIN again) issues a **new session id and token**; the old identifier is dead.
-* **Roles.** `satisfies(roles, minimum)`: `USER` is any signed-in person; `ANALYST` is analyst or lead; `LEAD` is lead; `ADMIN`
-  is administrator. An administrator is not an analyst (segregation of duties): no SOC route, no audit explorer.
+* **Roles.** A module's `minimum` is hierarchical (as the lab and admin modules assume): ANALYST < LEAD < ADMIN, and `USER` (any
+  signed-in person) is separate and lowest (`satisfiesModule`, used for module routes, the module list and module files). The
+  built-in `soc/**` and `audit/**` routes use the strict rule (`satisfies`): analyst or lead only. An administrator is not an
+  analyst (segregation of duties), so Dana reaches admin modules but no SOC data and no audit explorer.
 * **Every body is rebuilt.** The browser sends typed fields (`{"text"}`, `{"assignee"}`, `{"alertId","outcome"}`, ...), unknown
   fields are an error, and `DelegatedSocChannel` builds the SOC API body itself. Nothing in a request names who is acting.
 * **Audit design.** A write records intent (`CONSOLE_WRITE phase=attempt`) before it runs and the result after; if the
@@ -162,8 +164,7 @@ Each attack was written as a probe and run against the build (`ConsoleRedTeamTes
    suppliers for the SOC API address and the delegation issuer. `ConsoleMain` is mine; tell me, or change those three lines.
 3. **Modules of parts I and J** are loaded by `ServiceLoader<ConsoleModuleProvider>`: a provider returns
    `List<ConsoleModule>` for a running lab. List it in `META-INF/services/dev.dwarpal.console.ConsoleModuleProvider`.
-4. **`ConsoleModule.Role` ordering** is not defined in the interface; the host uses the rule in section 1 ("Roles"). If you
-   want a different meaning of `minimum`, say so in `ConsoleModule.java`.
+4. **`ConsoleModule.Role` ordering:** the host treats a module's `minimum` as hierarchical (section 1, "Roles"), as you asked.
 5. **Ports.** The console listens on 8443 by default (`--port`); the SOC API on a free port (`--soc-port`, default 0), since only
    the console calls it. `LabMain` still defaults the SOC API to 8443.
 6. **Anchor state for the explorer** is whatever `LabAudit.verify()` says (`anchoredSeq`, `anchorAgrees`); no extra entry

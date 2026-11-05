@@ -235,7 +235,7 @@ final class ConsoleRoutes {
             }
         }
         for (ConsoleModule m : s.modules()) {
-            if (ConsoleServer.satisfies(roles, m.minimum())) {
+            if (ConsoleServer.satisfiesModule(roles, m.minimum())) {
                 out.add(JsonValue.object().put("id", m.id()).put("title", m.title()).put("requires", m.minimum().name())
                         .put("kind", "module").build());
             }

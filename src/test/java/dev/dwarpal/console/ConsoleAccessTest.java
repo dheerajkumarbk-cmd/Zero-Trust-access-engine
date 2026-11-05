@@ -251,4 +251,19 @@ class ConsoleAccessTest {
                     ConsoleSettings.defaults().fastHashing()), id);
         }
     }
+
+    @Test
+    void aModulesMinimumIsHierarchicalButTheBuiltInSocRoutesStayWithAnalystsAndLeads() throws Exception {
+        Sess dana = f.login("dana");
+        assertEquals(200, f.get("/console/api/probe/ping", dana).status(), "an administrator is above ANALYST for a module");
+        assertEquals(200, f.get("/console/api/probe/admin-only", dana).status());
+        assertTrue(f.get("/console/api/modules", dana).body().contains("\"id\":\"probe\""));
+        assertEquals(200, f.get("/console/modules/probe/index.js", dana).status());
+        assertEquals(403, f.get("/console/api/soc/queue", dana).status(), "but not SOC data: no segregation of duties without this");
+        assertEquals(403, f.get("/console/api/audit/head", dana).status());
+        Sess cleo = f.login("cleo");
+        assertEquals(200, f.get("/console/api/probe/ping", cleo).status(), "a lead is above ANALYST");
+        assertEquals(403, f.get("/console/api/probe/admin-only", cleo).status(), "a lead is below ADMIN");
+        assertEquals(403, f.get("/console/api/probe/ping", f.login("uma")).status());
+    }
 }
