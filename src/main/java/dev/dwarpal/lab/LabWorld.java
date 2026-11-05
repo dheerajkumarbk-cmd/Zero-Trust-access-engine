@@ -1,6 +1,8 @@
 package dev.dwarpal.lab;
 
+import dev.dwarpal.admin.PolicyInstaller;
 import dev.dwarpal.analytics.DataSource;
+import dev.dwarpal.analytics.RequestRecorder;
 import dev.dwarpal.audit.AuditCursor;
 import dev.dwarpal.audit.AuditLog;
 import dev.dwarpal.decision.CostModel;
@@ -37,7 +39,10 @@ import dev.dwarpal.soar.CaseSettings;
 import dev.dwarpal.soar.Connector;
 import dev.dwarpal.soar.DeviceIsolation;
 import dev.dwarpal.soar.FileConnector;
+import dev.dwarpal.pam.PamSettings;
+import dev.dwarpal.pam.PrivilegedAccessManager;
 import dev.dwarpal.soar.PlaybookCompiler;
+import dev.dwarpal.soar.PlaybookInstaller;
 import dev.dwarpal.soar.RuleCatalogue;
 import dev.dwarpal.soar.SimulatedSensor;
 import dev.dwarpal.soar.Soar;
@@ -116,6 +121,8 @@ public final class LabWorld implements AutoCloseable {
     public static final Analyst BEN = new Analyst("ben", Analyst.Role.ANALYST);
     public static final Analyst CLEO = new Analyst("cleo", Analyst.Role.LEAD);
     public static final List<Analyst> ANALYSTS = List.of(ANA, BEN, CLEO);
+    /** The lab's administrators (policy and playbook approvers, privileged-access approvers). */
+    public static final List<String> ADMINS = List.of("ada", "ray");
 
     /** Certificates the lab makes: the SOC API, the console server, and one per analyst. */
     public static final List<String> CERTIFICATES = List.of("soc-api", "console", "ana", "ben", "cleo");
@@ -143,6 +150,12 @@ public final class LabWorld implements AutoCloseable {
     public final DeviceIsolation isolation;
     public final Soar soar;
     public final PolicyEngine engine;
+    public final PolicyInstaller policies;
+    public final PlaybookInstaller playbooks;
+    public final PrivilegedAccessManager pam;
+    public final RequestRecorder recorder;
+    /** Break-glass pages the privileged-access manager raised (the lab's stand-in for the SOC pager). */
+    public final List<String> pages = new CopyOnWriteArrayList<>();
     public final DecisionPoint pdp;
     public final InMemoryAssetCatalog assets;
     public final DevPki pki;
@@ -230,7 +243,12 @@ public final class LabWorld implements AutoCloseable {
                 .scorers(withWatchlist(org))
                 .aggregator(new BayesianRiskAggregator(0.001, Math.log(1000)))
                 .costModel(new CostModel(1000, 1, 20, 0.05)).build();
-        pdp = org.pipeline(engine);
+        policies = new PolicyInstaller(engine, 0, org.keys, 2, org.audit, org.clock);
+        recorder = new RequestRecorder(org.pipeline(policies), 20_000, 500);
+        pdp = recorder;
+        pam = new PrivilegedAccessManager(org.keys,
+                java.util.Map.of("ada", Set.of("prod-admin"), "ray", Set.of("prod-admin"), "u3", Set.of("db-reader")),
+                java.util.Map.of("bg-root", Set.of("prod-admin")), PamSettings.defaults(), org.audit, org.clock, pages::add);
         book = new CaseBook(settings, org.audit, org.clock);
         cases = new CaseManager(book, ueba, org.audit, org.clock, CaseSettings.defaults(), ANALYSTS);
         gate = new VerdictGate(org.keys, org.clock);
@@ -250,6 +268,8 @@ public final class LabWorld implements AutoCloseable {
                 .connectors(List.of(new FileConnector("ticket", Connector.Kind.TICKET, connectors, 1_000, org.clock),
                         new FileConnector("chat", Connector.Kind.CHAT, connectors, 1_000, org.clock)))
                 .playbooks(c.set().get()).assets(assets).build();
+        playbooks = new PlaybookInstaller(new PlaybookCompiler(RuleCatalogue.reference(), settings,
+                Set.of("ticket", "chat"), true), org.keys, 2, 0, org.audit, org.clock, soar::activate);
 
         // ---- the engines that read the chain, kept between calls so each one reads only what is new
         detection = new DetectionEngine(org.sink, org.auditKey, a -> pending.add(new Raised(a, "A")), Optional::empty,

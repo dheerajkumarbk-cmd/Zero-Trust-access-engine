@@ -75,6 +75,11 @@ public final class SimOrganisation {
     public static final String CLOUD_ASN = "AS16509";
     public static final String SPRAY_IP = "198.51.100.66";
     public static final KeyPair ANALYST_ANA = Ed25519.generateKeyPair();
+    /** The lab's two administrators: they sign policy and playbook changes and approve privileged access. */
+    public static final KeyPair ADMIN_ADA = Ed25519.generateKeyPair();
+    public static final KeyPair ADMIN_RAY = Ed25519.generateKeyPair();
+    /** The sealed break-glass credential of account {@code bg-root} (in a company it sits in a safe, not in code). */
+    public static final KeyPair BREAK_GLASS_ROOT = Ed25519.generateKeyPair();
     public static final KeyPair ANALYST_BEN = Ed25519.generateKeyPair();
 
     private static final String[][] CITIES = {   // name, lat, lon
@@ -191,6 +196,11 @@ public final class SimOrganisation {
         ks.add(new TrustedKey(SimRequests.IDP_KEY_ID, KeyPurpose.IDENTITY_PROVIDER, "corp-idp", SimRequests.IDP.getPublic(),
                 from, to));
         ks.add(new TrustedKey(CONSOLE_KEY_ID, KeyPurpose.CONSOLE_DELEGATE, "console", consoleKey.getPublic(), from, to));
+        ks.add(new TrustedKey("pol-ada", KeyPurpose.POLICY_SIGNER, "ada", ADMIN_ADA.getPublic(), from, to));
+        ks.add(new TrustedKey("pol-ray", KeyPurpose.POLICY_SIGNER, "ray", ADMIN_RAY.getPublic(), from, to));
+        ks.add(new TrustedKey("elev-ada", KeyPurpose.ELEVATION_APPROVER, "ada", ADMIN_ADA.getPublic(), from, to));
+        ks.add(new TrustedKey("elev-ray", KeyPurpose.ELEVATION_APPROVER, "ray", ADMIN_RAY.getPublic(), from, to));
+        ks.add(new TrustedKey("bg-root", KeyPurpose.BREAK_GLASS, "bg-root", BREAK_GLASS_ROOT.getPublic(), from, to));
         ks.add(new TrustedKey("soc-ana", KeyPurpose.SOC_ANALYST, "ana", ANALYST_ANA.getPublic(), from, to));
         ks.add(new TrustedKey("soc-ben", KeyPurpose.SOC_ANALYST, "ben", ANALYST_BEN.getPublic(), from, to));
         this.users = List.copyOf(us);
@@ -230,7 +240,7 @@ public final class SimOrganisation {
     }
 
     /** The full live pipeline: learning, audit (into {@link #sink}), engine. */
-    public DecisionPoint pipeline(PolicyEngine engine) {
+    public DecisionPoint pipeline(DecisionPoint engine) {
         return DecisionPipeline.standard(engine, audit, history, trust, clock);
     }
 
