@@ -1,0 +1,63 @@
+# Dwarpal reference playbooks (Layer 5.2 part F).
+# Part B's reference plays written as data, plus device isolation for a touched honeytoken.
+# Installing a change needs two administrators' signatures (PlaybookInstaller); the linter refuses
+# anything beyond the guard rails. Durations are ISO-8601 (PT4H = 4 hours, P1D = 1 day).
+version: "reference-2026-11-05"
+playbooks:
+  - rule: honeytoken-touched
+    description: Nobody has a reason to touch a honeytoken; cut the person and the device off
+    steps:
+      - revoke: subject
+      - deny: {target: subject, for: P1D}
+      - deny: {target: ip, for: P1D}
+      - isolate: device
+  - rule: stolen-token-revoked
+    description: A session token was used by another person or device
+    steps:
+      - revoke: session
+      - revoke: subject
+      - watch: {target: subject, ratio: 100, halfLife: P1D}
+  - rule: break-glass-used
+    description: An emergency account was opened
+    steps:
+      - revoke: subject
+      - deny: {target: subject, for: P1D}
+  - rule: break-glass-refused
+    steps:
+      - watch: {target: subject, ratio: 10, halfLife: P1D}
+  - rule: deny-storm-ip
+    description: The person named is the target; block the address, watch the person
+    steps:
+      - deny: {target: ip, for: PT4H}
+      - watch: {target: subject, ratio: 10, halfLife: P1D}
+  - rule: deny-storm-subject
+    description: The person named is the target; block the address, watch the person
+    steps:
+      - deny: {target: ip, for: PT4H}
+      - watch: {target: subject, ratio: 10, halfLife: P1D}
+  - rule: mfa-fatigue
+    description: End the sessions the pushes are aimed at, watch the person
+    steps:
+      - revoke: subject
+      - watch: {target: subject, ratio: 100, halfLife: P2D}
+  - rule: impossible-travel-allow
+    steps:
+      - revoke: subject
+      - watch: {target: subject, ratio: 100, halfLife: P1D}
+  - rule: dlp-block-spike
+    steps:
+      - watch: {target: subject, ratio: 100, halfLife: P7D}
+  - rule: pam-refused
+    steps:
+      - watch: {target: subject, ratio: 10, halfLife: P1D}
+  - rule: audit-chain-break
+    description: For people, not for automatic action
+    steps: []
+  - rule: audit-anchor-mismatch
+    steps: []
+  - rule: alert-flood
+    steps: []
+  - rule: detection-state-full
+    steps: []
+default:
+  - watch: {target: subject, ratio: 10, halfLife: P1D}
