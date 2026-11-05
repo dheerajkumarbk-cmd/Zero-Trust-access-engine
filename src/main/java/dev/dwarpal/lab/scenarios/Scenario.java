@@ -14,10 +14,12 @@ import java.util.Objects;
  * @param attacker   what the attacker (or the harmless user) does, in plain words; shown before the run
  * @param defender   what the defender should see afterwards
  * @param minutes    how much scenario time the scenario takes to play out
- * @param expects    what the lab really produces (verified by tests)
+ * @param decisions  what the access engine decides for the scenario's login requests, in order (verified by tests)
+ * @param ceiling    the most urgent priority any alert about the cast may reach (P1 to P4); verified by tests
+ * @param expects    what the SOC really produces (verified by tests); empty when the queue stays quiet
  */
 public record Scenario(String id, Kind kind, String title, List<String> techniques, String attacker, String defender,
-                       int minutes, List<Expect> expects) {
+                       int minutes, List<String> decisions, String ceiling, List<Expect> expects) {
 
     public enum Kind { ATTACK, LOOK_ALIKE, BASELINE }
 
@@ -41,6 +43,7 @@ public record Scenario(String id, Kind kind, String title, List<String> techniqu
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(kind, "kind");
         techniques = List.copyOf(techniques);
+        decisions = List.copyOf(decisions);
         expects = List.copyOf(expects);
     }
 }

@@ -35,7 +35,7 @@ final class Plans {
 
     /** Who launches what, when, with which randomness. */
     record Context(LabWorld world, Instant start, long launch, Random rnd, SimOrganisation.User target,
-                   int targetIndex) {
+                   int targetIndex, java.util.Set<String> keepOut) {
     }
 
     private static final String[][] CITIES = {
@@ -127,7 +127,9 @@ final class Plans {
         ep.add(login.plus(Duration.ofMinutes(9)), "process.start", "process", "7z.exe", "parent", "powershell.exe",
                 "cmd", "7z.exe a e:/f.7z //fs01/finance");
         List<Object> items = new ArrayList<>();
-        items.add(request(c, "a6", login(c, u, login, "a6")));
+        // the thief also has the owner's security key (it was in the laptop bag), so the second factor is satisfied
+        items.add(request(c, "a6", login(c, u, login, "a6")
+                .authenticated(dev.dwarpal.domain.AuthMethod.WEBAUTHN, Duration.ofSeconds(30))));
         items.addAll(ep.batches());
         return plan(c, items, List.of(u.laptop()));
     }
@@ -184,14 +186,16 @@ final class Plans {
         return plan(c, new ArrayList<>(ep.batches()), List.of(u.laptop()));
     }
 
-    /** A quiet day, compressed into six hours: every person logs in, works, browses and downloads a little. */
+    /** A quiet day, compressed into six hours: people who carry no earlier suspicion work, browse and download a little. */
     static Plan quiet(Context c) {
         List<Object> items = new ArrayList<>();
         List<SimOrganisation.User> users = c.world().org.users;
         for (int i = 0; i < users.size(); i++) {
             SimOrganisation.User u = users.get(i);
-            Context cu = new Context(c.world(), c.start(), c.launch(), c.rnd(), u, i);
-            items.add(request(cu, "q", login(cu, u, c.start().plus(Duration.ofMinutes(5 + c.rnd().nextInt(60))), "q")));
+            if (c.keepOut().contains(u.id())) {
+                continue;
+            }
+            Context cu = new Context(c.world(), c.start(), c.launch(), c.rnd(), u, i, c.keepOut());
             Endpoint ep = new Endpoint(cu, u);
             for (int k = 0; k < 5; k++) {
                 String app = APPS[c.rnd().nextInt(APPS.length)];
@@ -302,13 +306,11 @@ final class Plans {
      * device's own agent key when it runs.
      */
     private static final class Endpoint {
-        private final Context c;
         private final SimOrganisation.User u;
         private final TreeMap<Instant, String> lines = new TreeMap<>();
         private int serial;
 
         Endpoint(Context c, SimOrganisation.User u) {
-            this.c = c;
             this.u = u;
         }
 
