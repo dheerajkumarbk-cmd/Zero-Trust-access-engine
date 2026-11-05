@@ -88,6 +88,27 @@ final class SocApiKit implements AutoCloseable {
             return new Result(out, events.size(), events.size() > limit, Optional.empty());
         }
 
+        @Override
+        public Counts counts(String query, Instant from, Instant to, java.util.function.Predicate<ChainedEvent> visible) {
+            if (down.get()) {
+                throw new IllegalStateException("index unavailable");
+            }
+            lastQuery.set(query);
+            if (problem.get() != null) {
+                return Counts.refused(problem.get());
+            }
+            java.util.Map<String, Long> by = new java.util.LinkedHashMap<>();
+            long matched = 0;
+            for (ChainedEvent c : events) {
+                if (visible.test(c)) {
+                    matched++;
+                    by.merge(c.event().entities().getFirst().id(), 1L, Long::sum);
+                }
+            }
+            return new Counts(by.entrySet().stream().map(e -> new Group(List.of(e.getKey()), e.getValue())).toList(),
+                    matched, false, Optional.empty());
+        }
+
         void add(long seq, Instant at, Entity... entities) {
             events.add(new ChainedEvent(seq, at, new SecurityEvent("ev-" + seq, at, "endpoint",
                     SecurityEvent.Category.PROCESS, "process.start", SecurityEvent.EventOutcome.SUCCESS,

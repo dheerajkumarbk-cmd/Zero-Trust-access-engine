@@ -104,6 +104,7 @@ public final class SocApiServer implements AutoCloseable {
         RISK_TOP("GET", "/v1/risk/top", Kind.READ),
         RISK("GET", "/v1/risk/{}/{}", Kind.READ),
         SEARCH("POST", "/v1/search", Kind.SEARCH),
+        COUNTS("POST", "/v1/counts", Kind.SEARCH),
         ISOLATIONS("GET", "/v1/isolations", Kind.READ),
         METRICS("GET", "/v1/metrics", Kind.READ),
         REPORT("GET", "/v1/reports/{}", Kind.READ);
@@ -390,6 +391,7 @@ public final class SocApiServer implements AutoCloseable {
             case RISK_TOP -> riskTop(who, now);
             case RISK -> riskOf(who, p.get(0), p.get(1), now);
             case SEARCH -> search(who, SocJson.readSearch(body));
+            case COUNTS -> counts(who, SocJson.readCounts(body));
             case ISOLATIONS -> isolations(who);
             case METRICS -> metrics();
             case REPORT -> report(who, p.getFirst(), now);
@@ -537,6 +539,45 @@ public final class SocApiServer implements AutoCloseable {
         JsonValue answer = JsonValue.object().put("events", new JsonValue.JArray(events))
                 .put("matched", JsonValue.num(matched)).put("truncated", JsonValue.bool(truncated)).build();
         return Answer.ok(answer, "search: " + events.size() + " shown, " + hidden + " hidden, query sha256 "
+                + dev.dwarpal.crypto.Digests.sha256Hex(s.query()).substring(0, 16));
+    }
+
+    /** {@code count by}: the same window, the same per-event visibility as search, and no total beyond what is shown. */
+    private Answer counts(Analyst who, SocJson.Search s) {
+        if (!s.to().isAfter(s.from()) || Duration.between(s.from(), s.to()).compareTo(settings.maxSearchWindow()) > 0) {
+            return Answer.refuse(400, "invalid request", "counts window empty or too long");
+        }
+        EventSearch.Counts r;
+        try {
+            r = search.counts(s.query(), s.from(), s.to(),
+                    c -> c.event().entities().stream().allMatch(en -> mayReadAbout(who, en)));
+        } catch (IllegalArgumentException ex) {
+            return Answer.refuse(400, "invalid request", "counts refused the arguments");
+        } catch (RuntimeException ex) {
+            return Answer.refuse(503, "unavailable", "counts failed: " + ex.getClass().getSimpleName());
+        }
+        if (r == null) {
+            return Answer.refuse(503, "unavailable", "counts answered nothing");
+        }
+        if (r.problem().isPresent()) {
+            return new Answer(200, JsonValue.object().put("problem", Sanitize.text(r.problem().get(), 200)).build(),
+                    "counts problem", "", false);
+        }
+        List<JsonValue> groups = new ArrayList<>();
+        for (EventSearch.Group g : r.groups()) {
+            if (groups.size() >= 1_000) {
+                break;
+            }
+            List<JsonValue> values = new ArrayList<>();
+            for (String v : g.values()) {
+                values.add(JsonValue.str(Sanitize.text(v, 200)));
+            }
+            groups.add(JsonValue.object().put("values", new JsonValue.JArray(values))
+                    .put("count", JsonValue.num(g.count())).build());
+        }
+        JsonValue answer = JsonValue.object().put("groups", new JsonValue.JArray(groups))
+                .put("matched", JsonValue.num(r.matched())).put("truncated", JsonValue.bool(r.truncated())).build();
+        return Answer.ok(answer, "counts: " + groups.size() + " groups, query sha256 "
                 + dev.dwarpal.crypto.Digests.sha256Hex(s.query()).substring(0, 16));
     }
 

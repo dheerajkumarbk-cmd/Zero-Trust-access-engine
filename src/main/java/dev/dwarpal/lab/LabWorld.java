@@ -2,6 +2,7 @@ package dev.dwarpal.lab;
 
 import dev.dwarpal.analytics.DataSource;
 import dev.dwarpal.audit.AuditCursor;
+import dev.dwarpal.audit.AuditLog;
 import dev.dwarpal.decision.CostModel;
 import dev.dwarpal.edge.DevPki;
 import dev.dwarpal.edge.TlsContexts;
@@ -19,6 +20,7 @@ import dev.dwarpal.risk.BayesianRiskAggregator;
 import dev.dwarpal.risk.RiskScorer;
 import dev.dwarpal.risk.scorers.StandardScorers;
 import dev.dwarpal.siem.DetectionEngine;
+import dev.dwarpal.siem.HeadAnchor;
 import dev.dwarpal.siem.platform.CloudCollector;
 import dev.dwarpal.siem.platform.CorrelationEngine;
 import dev.dwarpal.siem.platform.EndpointCollector;
@@ -117,7 +119,10 @@ public final class LabWorld implements AutoCloseable {
     /** Certificates the lab makes: the SOC API, the console server, and one per analyst. */
     public static final List<String> CERTIFICATES = List.of("soc-api", "console", "ana", "ben", "cleo");
 
-    private record Timed(Instant at, Object item) {
+    private record Timed(Instant at, Object item, boolean injected) {
+        Timed(Instant at, Object item) {
+            this(at, item, false);
+        }
     }
 
     public final LabConfig config;
@@ -140,6 +145,8 @@ public final class LabWorld implements AutoCloseable {
     public final DecisionPoint pdp;
     public final InMemoryAssetCatalog assets;
     public final DevPki pki;
+    public final HeadAnchor anchor;
+    public final LabAudit auditView;
     public final SocApiServer socApi;
     public final String ceo;
     public final Instant scriptStart;
@@ -161,12 +168,20 @@ public final class LabWorld implements AutoCloseable {
     private final Object lock = new Object();
     private int next;
     private boolean flushed;
+    private final Map<String, Long> batchNumbers = new java.util.HashMap<>();
+    private int injectedPending;
+    private long anchored;
 
     private LabWorld(LabConfig config, DevPki pki) throws IOException {
         this.config = config;
         this.pki = pki;
         Files.createDirectories(config.dir().resolve("connectors"));
         org = SimOrganisation.create(config.seed(), config.users());
+        // the chain starts again with every lab (state is not persisted yet), so the anchor of an earlier run goes
+        Path anchorFile = config.dir().resolve("audit.anchor");
+        Files.deleteIfExists(anchorFile);
+        anchor = new HeadAnchor(anchorFile, org.auditKey, org.clock);
+        auditView = new LabAudit(org.sink, org.auditKey, anchor);
         traffic = org.traffic();
         telemetry = SimTelemetry.of(org, traffic);
 
@@ -331,7 +346,11 @@ public final class LabWorld implements AutoCloseable {
     private Progress advance(Instant target) {
         int run = 0;
         while (next < script.size() && !script.get(next).at().isAfter(target)) {
-            runItem(script.get(next++));
+            Timed t = script.get(next++);
+            if (t.injected()) {
+                injectedPending--;
+            }
+            runItem(t);
             run++;
         }
         if (target.isAfter(org.clock.instant())) {
@@ -340,7 +359,48 @@ public final class LabWorld implements AutoCloseable {
         boolean ended = next >= script.size();
         int alerts = run > 0 || (ended && !flushed) ? detectAndTriage(ended) : 0;
         processSensor();
+        anchorHead();
         return new Progress(org.clock.instant(), run, script.size() - next, alerts, next >= script.size());
+    }
+
+    /** Most injected items (see {@link #inject}) that may wait to run at once. */
+    public static final int MAX_INJECTED_PENDING = 50_000;
+    public static final int MAX_INJECTED_PER_CALL = 20_000;
+
+    /**
+     * Adds scripted items to run at their own time (not before {@link #now()}), merged into the script in time order:
+     * the scenario lab's way to start an attack "now" through the real collectors.
+     */
+    public int inject(List<Object> items) {
+        if (items.isEmpty() || items.size() > MAX_INJECTED_PER_CALL) {
+            throw new IllegalArgumentException("1 to " + MAX_INJECTED_PER_CALL + " items");
+        }
+        synchronized (lock) {
+            List<Timed> add = new ArrayList<>(items.size());
+            Instant now = org.clock.instant();
+            for (Object o : items) {
+                Instant at = switch (o) {
+                    case SimOrganisation.Step s -> s.at();
+                    case SimTelemetry.Item i -> i.at();
+                    default -> throw new IllegalArgumentException("not a scripted item");
+                };
+                if (at.isBefore(now)) {
+                    throw new IllegalArgumentException("an item dated before the scenario's current time");
+                }
+                add.add(new Timed(at, o, true));
+            }
+            if (injectedPending + add.size() > MAX_INJECTED_PENDING) {
+                throw new IllegalStateException("too many injected items are still waiting to run");
+            }
+            injectedPending += add.size();
+            List<Timed> tail = new ArrayList<>(script.subList(next, script.size()));
+            tail.addAll(add);
+            tail.sort(Comparator.comparing(Timed::at));
+            script.subList(next, script.size()).clear();
+            script.addAll(tail);
+            flushed = false;
+            return add.size();
+        }
     }
 
     /** Runs the first {@code days} simulated days of the script at once (the warm-up before going live). */
@@ -364,12 +424,22 @@ public final class LabWorld implements AutoCloseable {
             }
             case SimTelemetry.EndpointBatch b -> {
                 org.clock.set(t.at());
-                endpoint.offer(new EndpointCollector.Batch(b.deviceId(), b.keyId(), b.batch(), b.at(), b.body(),
-                        b.signature()), b.at());
+                endpoint.offer(renumbered(b), b.at());
                 pump(t.at());
             }
             default -> throw new IllegalStateException("unknown script item");
         }
+    }
+
+    /** The batch with the next number for its device, signed by that device's agent key (see {@link #inject}). */
+    private EndpointCollector.Batch renumbered(SimTelemetry.EndpointBatch b) {
+        SimOrganisation.User u = org.users.stream().filter(x -> x.laptop().equals(b.deviceId())).findFirst()
+                .orElseThrow(() -> new IllegalStateException("endpoint batch for an unknown device"));
+        long number = batchNumbers.merge(b.deviceId(), 1L, Long::sum);
+        byte[] msg = dev.dwarpal.crypto.SignedMessages.endpointTelemetry(b.deviceId(), number, b.at(),
+                dev.dwarpal.crypto.Digests.sha256Hex(b.body()));
+        return new EndpointCollector.Batch(b.deviceId(), b.keyId(), number, b.at(), b.body(),
+                dev.dwarpal.crypto.Ed25519.sign(u.laptopKey().getPrivate(), msg));
     }
 
     private void pump(Instant at) {
@@ -416,6 +486,15 @@ public final class LabWorld implements AutoCloseable {
             raised.add(r);
         }
         return fresh.size();
+    }
+
+    /** The chain's head is written to the anchor whenever it moves; a reader compares the chain with it. */
+    private void anchorHead() {
+        AuditLog.Head head = org.audit.head();
+        if (head.sequence() > anchored) {
+            anchor.anchor(head);
+            anchored = head.sequence();
+        }
     }
 
     /** The simulated sensor's signed acknowledgements go back to the isolation tracker; unacknowledged commands are resent. */

@@ -55,6 +55,39 @@ class SocApiRedTeamTest {
     }
 
     /**
+     * F-R5 (found building the console's hunt page, before count-by was exposed): a count-by that grouped over every
+     * event would show "ben: 3" to ana. The counts are taken over only the events the caller may see, so neither a
+     * group nor the total gives a colleague's activity away.
+     */
+    @Test
+    void countByDoesNotRevealColleaguesGroupsOrTotals() throws Exception {
+        for (int i = 1; i <= 3; i++) {
+            kit.search.add(i, w.now(), Entity.subject("ben"));
+        }
+        kit.search.add(4, w.now(), Entity.subject("alice"));
+        kit.search.add(5, w.now(), Entity.subject("alice"));
+        String q = "{\"v\":1,\"query\":\"dataset = endpoint | count by subject\",\"from\":\"" + w.now().minus(Duration.ofHours(1))
+                + "\",\"to\":\"" + w.now().plusSeconds(1) + "\"}";
+        try (SocApiKit.Client ana = kit.as("ana"); SocApiKit.Client cleo = kit.as("cleo")) {
+            SocApiKit.Reply r = ana.post("/v1/counts", q);
+            assertEquals(200, r.status(), r.body());
+            assertFalse(r.body().contains("ben"), r.body());
+            assertTrue(r.body().contains("\"alice\"") && r.body().contains("\"count\":2"), r.body());
+            assertTrue(r.body().contains("\"matched\":2"), "the total leaves the hidden events out too: " + r.body());
+            String lead = cleo.post("/v1/counts", q).body();
+            assertTrue(lead.contains("\"matched\":5") && lead.contains("ben"), "a lead sees them all: " + lead);
+            assertEquals(400, ana.post("/v1/counts", q.replace("\"v\":1", "\"v\":1,\"limit\":5")).status(),
+                    "unknown fields are refused");
+            kit.search.problem.set("add '| count by <field>'");
+            assertTrue(ana.post("/v1/counts", q).body().contains("problem"));
+            kit.search.problem.set(null);
+            kit.search.down.set(true);
+            assertEquals(503, ana.post("/v1/counts", q).status());
+            kit.search.down.set(false);
+        }
+    }
+
+    /**
      * F-R4 (leak in the first version): a case's links listed every case about the same entities, including cases
      * the reader may not see (a case about her colleague ben that shares an address), so their ids leaked. Fix: links
      * are filtered by the reader's visibility.

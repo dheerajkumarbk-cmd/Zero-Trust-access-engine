@@ -90,6 +90,15 @@ Each session finishes its parts to `docs/layer-6/standards.md` section 5. In add
   findings, requests to integration, differences from enterprise products.
 * **Free only.** No paid service, library with a fee, or account. Prefer the JDK and the code in this repository.
 
+## 5a. Landed after part 0 (0b)
+
+* `POST /v1/counts` on the SOC API: body `{"v":1,"query":"... | count by <fields>","from":"...","to":"..."}`; answer
+  `{groups:[{values:[...],count:n}], matched, truncated}` or `{problem}`. Counts are taken over only the events the
+  caller may see, so neither a group nor the total reveals a colleague's activity (regression test F-R5).
+* `LabWorld.auditView` (`dev.dwarpal.lab.LabAudit`): `page(after, limit, type)`, `record(seq)`, `verify()`. Verify
+  re-computes the whole chain and compares it with the anchored head, including the record at the anchored
+  sequence number. The head is anchored to `<lab>/audit.anchor` whenever it moves (`LabWorld.anchor`).
+
 ## 6. What the integration session does while the parts build (0b)
 
 1. State rebuilt from the chain after a restart (cases, notes, assignments, isolation, verdict gate).
