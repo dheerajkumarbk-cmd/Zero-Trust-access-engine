@@ -1,12 +1,18 @@
 package dev.dwarpal.ueba;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 
+import dev.dwarpal.audit.AuditCursor;
 import dev.dwarpal.response.VerdictGate;
 import dev.dwarpal.soc.Alert;
+import dev.dwarpal.soc.AlertRanker;
 import dev.dwarpal.soc.AlertSink;
 import dev.dwarpal.soc.AssetCatalog;
+import dev.dwarpal.soc.Entity;
+import dev.dwarpal.soc.EntityRisk;
+import dev.dwarpal.soc.RankedAlert;
 import dev.dwarpal.soc.Verdict;
 
 /**
@@ -17,8 +23,10 @@ import dev.dwarpal.soc.Verdict;
  *   other rules' alerts -> alerted(alert): risk + kept out of the baselines
  *   ranker.rank(alert, now) -> RankedAlert             (AlertRanker)
  * </pre>
+ * Part F reads it as {@link EntityRisk} and {@link AlertRanker}; the alert pipeline sends every other rule's alert to
+ * it as an {@link AlertSink}.
  */
-public final class Ueba {
+public final class Ueba implements EntityRisk, AlertRanker, AlertSink {
 
     private final EvidenceIndex index;
     private final UebaRisk risk;
@@ -66,11 +74,52 @@ public final class Ueba {
         return true;
     }
 
-    public UebaEngine engine() {
+    /** Reads and judges up to {@code max} records of the chain; see {@link UebaEngine#poll}. */
+    public int poll(AuditCursor cursor, int max) {
+        return engine.poll(cursor, max);
+    }
+
+    public UebaEngine.Stats stats() {
+        return engine.stats();
+    }
+
+    /** The anomalies behind a UEBA alert, for the analyst's view of it. */
+    public List<Anomaly> anomaliesOf(String alertId) {
+        return engine.anomaliesOf(alertId);
+    }
+
+    /** Every contribution of an entity now, not cut at {@link RiskView#MAX_CONTRIBUTIONS}. */
+    public List<Contribution> contributions(Entity entity, Instant now) {
+        return risk.contributions(entity, now);
+    }
+
+    @Override
+    public RiskView view(Entity entity, Instant now) {
+        return risk.view(entity, now);
+    }
+
+    @Override
+    public List<RiskView> top(int n, Instant now) {
+        return risk.top(n, now);
+    }
+
+    @Override
+    public RankedAlert rank(Alert alert, Instant now) {
+        return ranker.rank(alert, now);
+    }
+
+    /** Same as {@link #alerted}; lets part E sit behind the shared alert sink. */
+    @Override
+    public boolean raise(Alert alert) {
+        alerted(alert);
+        return true;
+    }
+
+    UebaEngine engine() {
         return engine;
     }
 
-    public UebaRisk risk() {
+    UebaRisk risk() {
         return risk;
     }
 
@@ -82,7 +131,7 @@ public final class Ueba {
         return techniques;
     }
 
-    public EvidenceIndex evidence() {
+    EvidenceIndex evidence() {
         return index;
     }
 }

@@ -28,7 +28,7 @@ import dev.dwarpal.soc.Verdict;
  *
  * <p><b>The arithmetic</b>, all of it checkable by hand:
  * <ol>
- *   <li>Every contribution has a weight w₀ in log-odds and a half-life T (M5): {@code w(t) = w₀ · 0.5^(age/T)}.
+ *   <li>Every contribution has a weight w0 in log-odds and a half-life T (M5): {@code w(t) = w0 * 0.5^(age/T)}.
  *       Contributions dated after {@code now} do not count yet (replays give the same answer).</li>
  *   <li>Contributions of one <i>group</i> are one piece of evidence: only the strongest counts (the event count
  *       and the bytes of one burst are not two independent facts; ten copies of one alert are not ten).</li>
@@ -36,9 +36,9 @@ import dev.dwarpal.soc.Verdict;
  *   <li>Groups backed only by {@code COLLECTED} events together count for at most {@link Settings#collectedCap}
  *       (ln 1000, a score of at most 50, MEDIUM), scaled down proportionally: forged syslog lines alone cannot make
  *       anyone high risk.</li>
- *   <li>Σ of the counted weights goes through Bayes with the base rate (M3):
- *       {@code p = σ(logit(prior) + Σ)}, shown as {@code score = 100 · (p − prior) / (1 − prior)}, so nothing
- *       known is exactly 0 and Σ = ln 1000 with prior 0.001 is about 50.</li>
+ *   <li>S of the counted weights goes through Bayes with the base rate (M3):
+ *       {@code p = sigmoid(logit(prior) + S)}, shown as {@code score = 100 * (p - prior) / (1 - prior)}, so an entity
+ *       with no contribution is exactly 0, and S = ln 1000 with prior 0.001 gives 49.975.</li>
  * </ol>
  * Risk goes down only by time (the decay) or by a signed false-positive verdict through
  * {@link #falsePositive}; nothing an entity does can lower it, because no input subtracts.

@@ -56,11 +56,11 @@ class UebaSimulationTest {
         assets = catalog(trail);
         ueba = Ueba.reference(PeerGroups.of(trail.telemetry.departments(), assets), assets, a -> alerts.add(a));
         var cursor = trail.cursor();
-        while (ueba.engine().poll(cursor, 5_000) > 0) {
+        while (ueba.poll(cursor, 5_000) > 0) {
             // read the whole chain
         }
         for (Alert a : alerts) {
-            ranked.add(ueba.ranker().rank(a, a.raisedAt()));
+            ranked.add(ueba.rank(a, a.raisedAt()));
         }
     }
 
@@ -93,7 +93,7 @@ class UebaSimulationTest {
 
     @Test
     void theChainWasReadWholeAndNothingWasGuessed() {
-        var s = ueba.engine().stats();
+        var s = ueba.stats();
         assertTrue(s.chainProblem().isEmpty());
         assertEquals(0, s.malformed());
         assertEquals(trail.labels.size(), s.events());
@@ -141,7 +141,18 @@ class UebaSimulationTest {
         Map<Boolean, Integer> actionable = new HashMap<>();
         ranked.forEach(r -> actionable.merge(r.actionable(), 1, Integer::sum));
         System.out.println("UEBA simulation alerts by label and priority: " + table + "; actionable " + actionable
-                + "; " + ueba.engine().stats());
+                + "; " + ueba.stats());
+        // Every alert's entity risk is explained contribution by contribution.
+        for (RankedAlert r : ranked) {
+            Entity e = r.alert().entities().get(0);
+            double sum = ueba.contributions(e, r.alert().raisedAt()).stream()
+                    .mapToDouble(dev.dwarpal.soc.EntityRisk.Contribution::weight).sum();
+            double z = Math.log(0.001 / 0.999) + sum;
+            double score = Math.max(0, 100 * (1 / (1 + Math.exp(-z)) - 0.001) / 0.999);
+            assertEquals(score, ueba.view(e, r.alert().raisedAt()).score(), 1e-6);
+            assertFalse(ueba.anomaliesOf(r.alert().id()).isEmpty());
+        }
+        assertEquals(10, ueba.top(10, trail.end()).size());
         assertFalse(ranked.isEmpty());
     }
 }

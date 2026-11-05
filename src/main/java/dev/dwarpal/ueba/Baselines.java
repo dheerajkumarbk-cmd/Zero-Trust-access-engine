@@ -23,7 +23,6 @@ final class Baselines {
     static final class Lru<K, V> extends LinkedHashMap<K, V> {
         private static final long serialVersionUID = 1L;
         private final int max;
-        long evicted;
 
         Lru(int max) {
             super(16, 0.75f, true);
@@ -32,11 +31,7 @@ final class Baselines {
 
         @Override
         protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
-            boolean evict = size() > max;
-            if (evict) {
-                evicted++;
-            }
-            return evict;
+            return size() > max;
         }
     }
 
