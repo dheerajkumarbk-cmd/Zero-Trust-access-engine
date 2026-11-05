@@ -35,6 +35,9 @@ public final class DevPki {
     }
 
     private static final String PASS_ENV = "DWARPAL_DEV_PKI_PASS";
+    private static final SecureRandom RANDOM = new SecureRandom();
+    /** Names go into key store aliases, subject names and file names: letters, digits and dashes only. */
+    private static final java.util.regex.Pattern NAME = java.util.regex.Pattern.compile("[A-Za-z0-9][A-Za-z0-9 -]{0,63}");
 
     private final Path dir;
     private final char[] password;
@@ -55,9 +58,17 @@ public final class DevPki {
                 throw new IllegalArgumentException("leaf names must differ in more than case, and not be ca or trust");
             }
         }
+        if (!NAME.matcher(caName).matches()) {
+            throw new IllegalArgumentException("certificate authority name: letters, digits, spaces and dashes");
+        }
+        for (Leaf leaf : leaves) {
+            if (!NAME.matcher(leaf.name()).matches() || leaf.name().contains(" ")) {
+                throw new IllegalArgumentException("leaf names: letters, digits and dashes");
+            }
+        }
         Files.createDirectories(dir);
         byte[] random = new byte[18];
-        new SecureRandom().nextBytes(random);
+        RANDOM.nextBytes(random);
         DevPki pki = new DevPki(dir, Base64.getUrlEncoder().withoutPadding().encodeToString(random).toCharArray());
         pki.keytool("-genkeypair", "-alias", "ca", "-keyalg", "EC", "-groupname", "secp384r1", "-dname", "CN=" + caName,
                 "-ext", "bc:c", "-validity", "30", "-keystore", pki.path("ca.p12"), "-storetype", "PKCS12");
@@ -81,6 +92,25 @@ public final class DevPki {
             pki.keytool("-importcert", "-noprompt", "-alias", "ca", "-file", pki.path("ca.pem"), "-keystore", ks);
             pki.keytool("-importcert", "-alias", leaf.name(), "-file", pki.path(leaf.name() + ".pem"), "-keystore", ks);
             pki.keyStores.put(leaf.name(), dir.resolve(leaf.name() + ".p12"));
+        }
+        return pki;
+    }
+
+    /**
+     * Opens a PKI made earlier by {@link #create} in {@code dir}, with its store password; no certificate is
+     * made. Every named leaf must already have its key store.
+     */
+    public static DevPki open(Path dir, char[] password, List<String> leaves) {
+        DevPki pki = new DevPki(dir, password.clone());
+        for (String leaf : leaves) {
+            Path ks = dir.resolve(leaf + ".p12");
+            if (!Files.isRegularFile(ks)) {
+                throw new IllegalArgumentException("no key store for " + leaf);
+            }
+            pki.keyStores.put(leaf, ks);
+        }
+        if (!Files.isRegularFile(dir.resolve("trust.p12"))) {
+            throw new IllegalArgumentException("no trust store");
         }
         return pki;
     }

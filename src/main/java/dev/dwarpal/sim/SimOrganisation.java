@@ -1,6 +1,5 @@
 package dev.dwarpal.sim;
 
-import dev.dwarpal.Fixtures;
 import dev.dwarpal.audit.AuditLog;
 import dev.dwarpal.audit.InMemoryAuditSink;
 import dev.dwarpal.behavior.FailureLog;
@@ -27,7 +26,6 @@ import dev.dwarpal.engine.DecisionPoint;
 import dev.dwarpal.engine.DenyListGate;
 import dev.dwarpal.engine.HoneytokenGate;
 import dev.dwarpal.engine.PolicyEngine;
-import dev.dwarpal.engine.PolicyEngineTest;
 import dev.dwarpal.pip.InMemoryDirectory;
 import dev.dwarpal.pip.SignalFeed;
 import dev.dwarpal.pip.ThreatIntel;
@@ -187,7 +185,7 @@ public final class SimOrganisation {
             managed.add(u.laptop());
             managed.add(u.laptop2());
         }
-        ks.add(new TrustedKey(Fixtures.IDP_KEY_ID, KeyPurpose.IDENTITY_PROVIDER, "corp-idp", Fixtures.IDP.getPublic(),
+        ks.add(new TrustedKey(SimRequests.IDP_KEY_ID, KeyPurpose.IDENTITY_PROVIDER, "corp-idp", SimRequests.IDP.getPublic(),
                 from, to));
         ks.add(new TrustedKey("soc-ana", KeyPurpose.SOC_ANALYST, "ana", ANALYST_ANA.getPublic(), from, to));
         ks.add(new TrustedKey("soc-ben", KeyPurpose.SOC_ANALYST, "ben", ANALYST_BEN.getPublic(), from, to));
@@ -224,7 +222,7 @@ public final class SimOrganisation {
 
     /** The reference engine with the reference policy. */
     public PolicyEngine engine() {
-        return engine(PolicyEngineTest.POLICIES);
+        return engine(SimRequests.defaultPolicies());
     }
 
     /** The full live pipeline: learning, audit (into {@link #sink}), engine. */
@@ -300,8 +298,8 @@ public final class SimOrganisation {
         }
     }
 
-    private Fixtures.RequestBuilder login(User u, Instant t, String id) {
-        return Fixtures.request().id(id).at(t).subject(u.id()).device(u.laptop())
+    private SimRequests.Builder login(User u, Instant t, String id) {
+        return SimRequests.request().id(id).at(t).subject(u.id()).device(u.laptop())
                 .postureSignedBy(u.laptopKey(), "agent-" + u.laptop())
                 .network(u.kind() == Kind.ROAMER ? "100.100.7." + Math.floorMod(id.hashCode(), 250)
                                 : "100.64." + u.id().substring(1) + ".10",
@@ -346,7 +344,7 @@ public final class SimOrganisation {
         return s;
     }
 
-    private static void add(List<Step> s, User u, Scenario c, Fixtures.RequestBuilder b) {
+    private static void add(List<Step> s, User u, Scenario c, SimRequests.Builder b) {
         s.add(new RequestStep(new Labelled(b.build(), c, u.id())));
     }
 }

@@ -23,4 +23,26 @@
             <Class name="dev.dwarpal.pip.ThreatIntel"/>
         </Or>
     </Match>
+    <!--
+      PREDICTABLE_RANDOM in the simulation: the organisation, its traffic and its attacks are generated from a
+      seed so that the same seed gives the same lab, which is what lets tests and walkthroughs repeat. Nothing
+      generated here is a secret: the simulation's keys come from the JDK's key generators, not from this Random.
+    -->
+    <Match>
+        <Bug pattern="PREDICTABLE_RANDOM"/>
+        <Or>
+            <Class name="dev.dwarpal.sim.SimOrganisation"/>
+            <Class name="dev.dwarpal.sim.SimTelemetry"/>
+        </Or>
+    </Match>
+    <!--
+      COMMAND_INJECTION in DevPki: the program is the JDK's own keytool (a path built from java.home), the
+      options are constants, and the only variable parts are certificate and file names, which are checked
+      against a strict pattern before use (DevPkiNameTest). The store password goes in through an environment
+      variable, never on the command line.
+    -->
+    <Match>
+        <Bug pattern="COMMAND_INJECTION"/>
+        <Class name="dev.dwarpal.edge.DevPki"/>
+    </Match>
 </FindBugsFilter>
