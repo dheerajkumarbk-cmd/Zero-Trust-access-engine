@@ -102,7 +102,7 @@ public final class LabModule implements ConsoleModule {
         routes.post("control/fastforward", Role.LEAD, false, ModuleKit.guard(Role.LEAD, this::fastForward));
         routes.post("control/reset", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN, this::reset));
         routes.get("sandbox/examples", Role.ANALYST, ModuleKit.guard(Role.ANALYST, (r, p) ->
-                ModuleKit.json(Examples.all())));
+                ModuleKit.json(Map.of("examples", Examples.all()))));
         routes.post("sandbox/rule", Role.ANALYST, false, ModuleKit.guard(Role.ANALYST, this::sandboxRule));
         routes.post("sandbox/playbook", Role.ANALYST, false, ModuleKit.guard(Role.ANALYST, this::sandboxPlaybook));
         routes.get("export", Role.LEAD, ModuleKit.guard(Role.LEAD, this::export));
@@ -113,6 +113,7 @@ public final class LabModule implements ConsoleModule {
     private Response launch(Request request, List<String> params) {
         String id = ModuleKit.id(params.get(0));
         ModuleKit.body(request, Set.of());
+        notResetting();
         LabRunner runner = session.runner();
         if (runner.state() == LabRunner.State.FAILED) {
             throw new ModuleKit.Refusal(409, "the scenario clock stopped after an error; reset the lab");
@@ -167,6 +168,7 @@ public final class LabModule implements ConsoleModule {
         if (m < 1 || m > MAX_FAST_FORWARD_MINUTES) {
             throw new ModuleKit.Refusal(400, "minutes is 1 to " + MAX_FAST_FORWARD_MINUTES);
         }
+        notResetting();
         if (!heavy.tryLock()) {
             throw new ModuleKit.Refusal(429, "the lab is busy; try again in a moment");
         }
@@ -192,6 +194,12 @@ public final class LabModule implements ConsoleModule {
             heavy.unlock();
         }
         return ModuleKit.json(status());
+    }
+
+    private void notResetting() {
+        if (session.resetting()) {
+            throw new ModuleKit.Refusal(409, "the lab is being reset; try again in a few seconds");
+        }
     }
 
     private Response sandboxRule(Request request, List<String> params) {
@@ -221,6 +229,9 @@ public final class LabModule implements ConsoleModule {
     public record Status(String state, double speed, Instant now, Instant scriptStart, Instant scriptEnd,
                          boolean scriptFinished, long generation, long requestsDecided, int alertsRaised,
                          Map<String, Integer> openByPriority, Optional<String> problem) {
+        public Status {
+            openByPriority = Map.copyOf(openByPriority);
+        }
     }
 
     private Status status() {

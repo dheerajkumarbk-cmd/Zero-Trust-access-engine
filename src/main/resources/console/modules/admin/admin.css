@@ -1,0 +1,11 @@
+.adm-tabs { display: flex; flex-wrap: wrap; gap: 0.25rem; margin: 0.75rem 0; }
+.adm-tabs button[aria-selected="true"] { font-weight: 700; border-bottom: 3px solid currentColor; }
+.adm-table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
+.adm-table th, .adm-table td { border: 1px solid var(--border, #8886); padding: 0.25rem 0.5rem; text-align: left; vertical-align: top; }
+.adm-msg { min-height: 1.5rem; }
+.adm-bad { color: var(--bad, #c0392b); font-weight: 600; }
+.adm-good { color: var(--good, #1e8449); font-weight: 600; }
+.adm-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0; align-items: center; }
+.adm-yaml { width: 100%; max-width: 60rem; font-family: ui-monospace, monospace; }
+.adm-card { border: 1px solid var(--border, #8886); border-radius: 6px; padding: 0.5rem 1rem; margin: 0.5rem 0; }
+.adm-ref { font-family: ui-monospace, monospace; }

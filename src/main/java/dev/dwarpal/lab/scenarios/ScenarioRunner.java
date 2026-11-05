@@ -14,7 +14,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Random;
+import java.util.SplittableRandom;
 import java.util.Set;
 import java.util.function.LongSupplier;
 
@@ -42,6 +42,9 @@ public final class ScenarioRunner {
     /** What a launch did, for the screen and for the journal. */
     public record Launch(long number, String scenario, String by, String person, List<String> devices, Instant startsAt,
                          Instant endsAt, int items, boolean clockRunning) {
+        public Launch {
+            devices = List.copyOf(devices);
+        }
     }
 
     /** A launch that was refused, with a reason fit for the screen. */
@@ -109,7 +112,7 @@ public final class ScenarioRunner {
         Set<String> keepOut = new HashSet<>(castBefore);
         keepOut.add(world.ceo);
         world.telemetry.cast().values().forEach(keepOut::addAll);
-        Context ctx = new Context(world, start, number, new Random(world.config.seed() * 131 + number), target, index,
+        Context ctx = new Context(world, start, number, new SplittableRandom(world.config.seed() * 131 + number), target, index,
                 keepOut);
         Plan plan = def.build().apply(ctx);
         try {
@@ -142,10 +145,17 @@ public final class ScenarioRunner {
     /** One alert the SOC raised about the scenario's person or device, as the queue ranks it. */
     public record Seen(String alertId, String rule, String engine, String priority, boolean actionable, double score,
                        String summary, Instant raisedAt, List<String> reasons) {
+        public Seen {
+            reasons = List.copyOf(reasons);
+        }
     }
 
     /** What a launch has produced so far: the engine's decisions and the SOC's alerts. */
     public record Report(Launch launch, List<Decision> decisions, List<Seen> alerts) {
+        public Report {
+            decisions = List.copyOf(decisions);
+            alerts = List.copyOf(alerts);
+        }
     }
 
     private static final dev.dwarpal.wire.JsonReader PAYLOAD = new dev.dwarpal.wire.JsonReader(

@@ -242,7 +242,33 @@ class LabModuleTest {
     void resetGoesBackToDayZeroAndForgetsTheLaunches() throws Exception {
         long gen = session.generation();
         Instant scriptStart = session.world().scriptStart;
+        // while the reset rebuilds the world, launches and fast-forwards are refused, not lost in the old world
+        java.util.concurrent.atomic.AtomicInteger during = new java.util.concurrent.atomic.AtomicInteger();
+        Thread watcher = new Thread(() -> {
+            long end = System.currentTimeMillis() + 60_000;
+            while (System.currentTimeMillis() < end && during.get() == 0) {
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                if (session.resetting() && during.get() == 0) {
+                    Response l = routes.call("POST", "launch/A5", ANALYST, "");
+                    Response f = routes.call("POST", "control/fastforward", LEAD, "{\"minutes\":5}");
+                    if (l.status() == 409 && f.status() == 409) {
+                        during.set(1);
+                    }
+                    Response again = routes.call("POST", "control/reset", ADMIN, "");
+                    if (again.status() != 429 && again.status() != 409) {
+                        during.set(-1);
+                    }
+                }
+            }
+        });
+        watcher.start();
         Response r = routes.call("POST", "control/reset", ADMIN, "");
+        watcher.join();
+        assertEquals(1, during.get(), "launch and fast-forward refused with 409 during a reset; a second reset is refused");
         assertEquals(200, r.status(), r.body());
         assertEquals(gen + 1, session.generation());
         assertTrue(session.world().now().isBefore(scriptStart.plusSeconds(4 * 86_400L)), "back at the end of the warm-up");

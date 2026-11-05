@@ -178,6 +178,17 @@ public final class Walkthroughs {
         return ALL.stream().filter(w -> w.scenario().equals(id)).findFirst();
     }
 
+    /** The index page of the guide folder. */
+    public static String index() {
+        StringBuilder b = new StringBuilder("# Layer 6 guide: walkthroughs\n\n"
+                + "*Generated from `Walkthroughs`; do not edit by hand. Each walkthrough was run against a real lab by "
+                + "`ScenarioGuideTest`.*\n\nLaunch a scenario in the console under Lab, Scenarios, then follow its path.\n\n"
+                + "| Scenario | What it is |\n|---|---|\n");
+        ALL.forEach(w -> b.append("| [").append(w.scenario()).append("](").append(w.scenario()).append(".md) | ")
+                .append(w.title().substring(w.title().indexOf(' ') + 1)).append(" |\n"));
+        return b.toString();
+    }
+
     /** One walkthrough as Markdown, with the scenario's own texts (the files under {@code docs/layer-6/guide}). */
     public static String markdown(Walkthrough w) {
         Scenario s = ScenarioCatalog.byId(w.scenario()).orElseThrow();

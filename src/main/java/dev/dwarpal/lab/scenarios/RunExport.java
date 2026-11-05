@@ -63,6 +63,7 @@ public final class RunExport {
     private static final Pattern HEX = Pattern.compile("[0-9a-fA-F]{32,}");
     private static final Pattern BASE64 = Pattern.compile("(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[a-z])(?=[A-Za-z0-9+/]*[0-9])[A-Za-z0-9+/]{32,}={0,2}");
     private static final Pattern PEM = Pattern.compile("-----BEGIN");
+    private static final Pattern PEM_BLOCK = Pattern.compile("-----(BEGIN|END)[ A-Z]*-----");
     private static final Pattern IPV4 = Pattern.compile("\\b(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\b");
 
     private final Set<String> hostNames;
@@ -246,7 +247,8 @@ public final class RunExport {
                     : names.of(Entity.Kind.IP, ip)));
         }
         m.appendTail(sb);
-        t = HEX.matcher(sb.toString()).replaceAll("[removed]");
+        t = PEM_BLOCK.matcher(sb.toString()).replaceAll("[removed]");
+        t = HEX.matcher(t).replaceAll("[removed]");
         t = BASE64.matcher(t).replaceAll("[removed]");
         for (String h : hostNames) {
             t = t.replace(h, "[removed]");
@@ -255,7 +257,7 @@ public final class RunExport {
     }
 
     /** The last line of defence: whatever got this far must hold nothing that looks like key material or this host. */
-    private void guard(String text) {
+    void guard(String text) {
         if (PEM.matcher(text).find() || HEX.matcher(text).find() || BASE64.matcher(text).find()) {
             throw new Refused("the export would carry key-like material and was refused");
         }

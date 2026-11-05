@@ -181,6 +181,9 @@ public final class ModuleKit {
             case Enum<?> e -> {
                 return JsonValue.str(e.name());
             }
+            case java.time.Duration d -> {
+                return JsonValue.str(d.toString());
+            }
             case java.time.temporal.TemporalAccessor t -> {
                 return JsonValue.str(t.toString());
             }
@@ -204,12 +207,14 @@ public final class ModuleKit {
                 JsonValue.JObject.Builder b = JsonValue.object();
                 for (RecordComponent rc : o.getClass().getRecordComponents()) {
                     try {
-                        Object v = rc.getAccessor().invoke(o);
+                        java.lang.reflect.Method accessor = rc.getAccessor();
+                        accessor.setAccessible(true);
+                        Object v = accessor.invoke(o);
                         if (v instanceof Optional<?> opt && opt.isEmpty()) {
                             continue;
                         }
                         b.put(rc.getName(), toJson(v));
-                    } catch (IllegalAccessException | InvocationTargetException e) {
+                    } catch (IllegalAccessException | InvocationTargetException | RuntimeException e) {
                         throw new IllegalStateException("cannot read a record component", e);
                     }
                 }

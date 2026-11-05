@@ -64,22 +64,39 @@ public final class RuleSandbox {
     /** An alert the learner's rule would have raised (never raised for real). */
     public record Sample(String rule, String severity, Instant at, List<String> entities, List<Long> evidence,
                          String summary) {
+        public Sample {
+            entities = List.copyOf(entities);
+            evidence = List.copyOf(evidence);
+        }
     }
 
     /** The outcome of a rule submission. */
     public record RuleResult(boolean accepted, List<Finding> findings, int rules, boolean ran, long eventsRead,
                              long alerts, List<RuleStat> stats, List<Sample> sample, List<String> silent, String note) {
+        public RuleResult {
+            findings = List.copyOf(findings);
+            stats = List.copyOf(stats);
+            sample = List.copyOf(sample);
+            silent = List.copyOf(silent);
+        }
     }
 
     /** What a playbook step would do, in plain words, for a rule of the learner's file. */
     public record Plan(String rule, List<String> steps) {
+        public Plan {
+            steps = List.copyOf(steps);
+        }
     }
 
     /** The outcome of a playbook submission. */
     public record PlaybookResult(boolean accepted, List<Finding> findings, List<Plan> plans, String note) {
+        public PlaybookResult {
+            findings = List.copyOf(findings);
+            plans = List.copyOf(plans);
+        }
     }
 
-    private final Semaphore running = new Semaphore(1);
+    final Semaphore running = new Semaphore(1);
     private final LongSupplier wall;
     private final Map<String, Long> lastRun = new HashMap<>();
 

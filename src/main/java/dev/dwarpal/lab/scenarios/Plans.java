@@ -11,7 +11,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.TreeMap;
 
 /**
@@ -34,7 +33,7 @@ final class Plans {
     }
 
     /** Who launches what, when, with which randomness. */
-    record Context(LabWorld world, Instant start, long launch, Random rnd, SimOrganisation.User target,
+    record Context(LabWorld world, Instant start, long launch, java.util.random.RandomGenerator rnd, SimOrganisation.User target,
                    int targetIndex, java.util.Set<String> keepOut) {
     }
 

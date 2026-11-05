@@ -1,0 +1,19 @@
+/* Scenario lab. Colours follow the shell's tokens when present and fall back to readable defaults.
+   A priority or a result is never shown by colour alone: there is always a text label too. */
+.lab-status { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; padding: 0.5rem 0; }
+.lab-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; }
+.lab-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; }
+.lab-card { border: 1px solid var(--border, #8886); border-radius: 6px; padding: 0.75rem 1rem; }
+.lab-card h3 { margin: 0 0 0.25rem; }
+.lab-card h4 { margin: 0.5rem 0 0.1rem; font-size: 0.9rem; }
+.lab-kind { font-weight: 600; margin: 0; }
+.lab-tech { font-family: ui-monospace, monospace; font-size: 0.85rem; }
+.lab-table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
+.lab-table th, .lab-table td { border: 1px solid var(--border, #8886); padding: 0.25rem 0.5rem; text-align: left; vertical-align: top; }
+.lab-message { min-height: 1.5rem; }
+.lab-bad { color: var(--bad, #c0392b); font-weight: 600; }
+.lab-good { color: var(--good, #1e8449); font-weight: 600; }
+.lab-danger { border-color: var(--bad, #c0392b); }
+.lab-row { display: flex; gap: 0.5rem; margin: 0.5rem 0; }
+.lab-sandbox textarea { width: 100%; max-width: 60rem; font-family: ui-monospace, monospace; }
+.lab-out { margin-bottom: 1rem; }

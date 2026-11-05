@@ -20,18 +20,19 @@ public final class LabSession implements AutoCloseable {
 
     private final LabConfig config;
     private final Object lock = new Object();
-    private final ScenarioRunner scenarios;
+    private final java.util.concurrent.atomic.AtomicReference<ScenarioRunner> scenarios;
     private volatile LabWorld world;
-    private volatile LabRunner runner;
-    private volatile long generation;
+    private final java.util.concurrent.atomic.AtomicReference<LabRunner> runner;
+    private final java.util.concurrent.atomic.AtomicLong generation = new java.util.concurrent.atomic.AtomicLong();
+    private volatile boolean resetting;
     private Consumer<LabSession> afterReset = s -> { };
     private boolean closed;
 
     private LabSession(LabConfig config, LabWorld world, LabRunner runner, ScenarioRunner scenarios) {
         this.config = config;
         this.world = world;
-        this.runner = runner;
-        this.scenarios = scenarios;
+        this.runner = new java.util.concurrent.atomic.AtomicReference<>(runner);
+        this.scenarios = new java.util.concurrent.atomic.AtomicReference<>(scenarios);
     }
 
     /** Builds the lab, runs the warm-up days and starts the scenario clock. */
@@ -57,16 +58,16 @@ public final class LabSession implements AutoCloseable {
     }
 
     public LabRunner runner() {
-        return runner;
+        return runner.get();
     }
 
     public ScenarioRunner scenarios() {
-        return scenarios;
+        return scenarios.get();
     }
 
     /** Counts resets: 0 for the lab as started. */
     public long generation() {
-        return generation;
+        return generation.get();
     }
 
     /** The host's hook for rebuilding what hangs off the world (for example the SOC API address). */
@@ -85,22 +86,36 @@ public final class LabSession implements AutoCloseable {
             if (closed) {
                 throw new IllegalStateException("the lab is closed");
             }
-            boolean wasRunning = runner.state() == LabRunner.State.RUNNING;
-            double speed = runner.speed();
-            runner.close();
-            world.close();
-            LabWorld fresh = LabWorld.create(config);
-            fresh.warmUp(config.warmupDays());
-            LabRunner r = new LabRunner(fresh, speed).start();
-            if (!wasRunning) {
-                r.pause();
+            resetting = true;
+            try {
+                rebuild();
+            } finally {
+                resetting = false;
             }
-            world = fresh;
-            runner = r;
-            generation++;
-            scenarios.clear();
-            afterReset.accept(this);
         }
+    }
+
+    /** True while a reset is rebuilding the world; launches and fast-forwards are refused meanwhile. */
+    public boolean resetting() {
+        return resetting;
+    }
+
+    private void rebuild() throws IOException, InterruptedException {
+        boolean wasRunning = runner.get().state() == LabRunner.State.RUNNING;
+        double speed = runner.get().speed();
+        runner.get().close();
+        world.close();
+        LabWorld fresh = LabWorld.create(config);
+        fresh.warmUp(config.warmupDays());
+        LabRunner r = new LabRunner(fresh, speed).start();
+        if (!wasRunning) {
+            r.pause();
+        }
+        world = fresh;
+        runner.set(r);
+        generation.incrementAndGet();
+        scenarios.get().clear();
+        afterReset.accept(this);
     }
 
     /**
@@ -124,7 +139,7 @@ public final class LabSession implements AutoCloseable {
     public void close() {
         synchronized (lock) {
             closed = true;
-            runner.close();
+            runner.get().close();
             world.close();
         }
     }
