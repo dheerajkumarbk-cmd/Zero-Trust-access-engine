@@ -11,24 +11,34 @@ bin/lab.sh                   (macOS, Linux)
 ```
 
 The first start builds `target/dwarpal-lab.jar` (the profile `lab-jar`: one jar with the one dependency inside)
-and makes the lab's certificates under `lab/pki`. Later starts reuse both. Options, all optional:
+and makes the lab's certificates under `lab/pki`. Later starts reuse both. The program prints the console address
+(`https://localhost:8443`) and the demo logins: `ana` and `ben` (analysts), `cleo` (SOC lead), `dana` (administrator)
+and `uma` (an ordinary user), each with a password and a security-key PIN.
+
+**Trust the lab's certificate authority once** so your browser opens the console without a warning: import
+`lab/pki/ca.pem` as a trusted authority for your own user. Do this only for the lab; remove it when you delete the lab.
+
+Options, all optional:
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--dir` | `lab` | The lab directory: certificates, secrets, connector files, audit anchor |
+| `--dir` | `lab` | The lab directory: certificates, secrets, demo logins, connector files, audit anchor |
 | `--seed` | `7` | The simulated organisation; the same seed gives the same people and the same attacks |
 | `--users` | `60` | People in the organisation (6 to 10,000) |
 | `--speed` | `60` | Simulated seconds per real second (60 = a simulated minute each second; the whole 8-day script takes about 3 hours) |
 | `--warmup-days` | `3` | Simulated days run at once at start, so the baselines exist before the first live minute |
-| `--port` | `8443` | The SOC API port (`0` picks a free one) |
+| `--port` | `8443` | The console's port (`0` picks a free one) |
+| `--soc-port` | `0` | The SOC API's port; only the console calls it |
 
-## What you get today
+## What you get
 
-* The whole SOC running on the simulated organisation, with the SOC API over mutual TLS.
-* A scenario clock that streams events through the real collectors.
-
-The browser console, the attack buttons and the guide arrive with the other Layer 6 parts; this runbook is
-extended when they land.
+* The whole SOC on the simulated organisation, with the SOC API over mutual TLS, behind a browser console:
+  alert queue, cases with signed verdicts, hunt, entity risk, audit explorer with chain verification.
+* The **Lab** pages (analysts): launch any of the attack scenarios now, pause, change speed, fast-forward, and the
+  guide that walks through each attack and what a commercial product would show.
+* The **Admin** pages (administrators): the policy and the two-person install, playbook install, what-if replay,
+  privileged access, and reset to day zero. Ordinary users see the "why was I denied" page.
+* Administrators are not analysts: `dana` cannot open the SOC queue, by design (separation of duties).
 
 ## Things to know
 

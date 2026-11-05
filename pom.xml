@@ -161,7 +161,7 @@
         <profile>
             <id>lab-jar</id>
             <properties>
-                <lab.main>dev.dwarpal.lab.LabMain</lab.main>
+                <lab.main>dev.dwarpal.console.ConsoleMain</lab.main>
             </properties>
             <build>
                 <plugins>

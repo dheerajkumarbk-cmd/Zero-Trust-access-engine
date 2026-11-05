@@ -85,7 +85,7 @@ public final class ConsoleServer implements AutoCloseable {
 
     /** The JDK server limits the number of request headers but not their size; this is the console's own bound. */
     static final int MAX_HEADER_BYTES = 16 * 1024;
-    private static final Set<String> RESERVED = Set.of("session", "me", "modules", "lab", "stream", "soc", "audit");
+    private static final Set<String> RESERVED = Set.of("session", "me", "modules", "stream", "soc", "audit");
 
     final LabHandle lab;
     final SocChannel channel;

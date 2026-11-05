@@ -67,14 +67,24 @@ public final class ConsoleMain {
                 + " users, seed " + config.seed() + ")...");
         List<ConsoleAuth.Enrolment> people = DemoPeople.loadOrCreate(config.dir());
         ConsoleSettings settings = ConsoleSettings.defaults();
-        try (LabWorld world = LabWorld.create(config); LabRunner runner = new LabRunner(world, config.speed())) {
-            LabWorld.Progress warm = world.warmUp(config.warmupDays());
-            out.println("Warm-up done: " + warm.itemsRun() + " events to " + warm.now() + ", " + world.rankedNow().size()
-                    + " alerts already ranked.");
+        // the session owns the world and the scenario clock and can rebuild both (reset to day zero)
+        try (dev.dwarpal.lab.scenarios.LabSession session = dev.dwarpal.lab.scenarios.LabSession.open(config)) {
+            LabWorld world = session.world();
+            out.println("Warm-up done to " + world.now() + ", " + world.rankedNow().size() + " alerts already ranked.");
             DevPki pki = world.pki;
             SSLContext tls = TlsContexts.create(pki.keyStore("console"), pki.password(), pki.trustStore(), pki.password());
             Set<String> analysts = LabWorld.ANALYSTS.stream().map(Analyst::id).collect(Collectors.toSet());
-            LabHandle lab = LabHandle.of(world, runner);
+            LabHandle lab = new LabHandle() {
+                @Override
+                public LabWorld world() {
+                    return session.world();
+                }
+
+                @Override
+                public LabRunner runner() {
+                    return session.runner();
+                }
+            };
             SocChannel channel = new DelegatedSocChannel(pki, () -> lab.world().socApiUrl(),
                     () -> lab.world().delegationIssuer(), analysts, Duration.ofSeconds(10));
             ConsoleAuth auth = new ConsoleAuth(people, Clock.systemUTC(), settings.passwordIterations(),
@@ -82,11 +92,10 @@ public final class ConsoleMain {
             ConsoleServer.Builder b = ConsoleServer.builder(lab, channel, new LabVerdictSigner(lab), auth, tls)
                     .settings(settings)
                     .address(new InetSocketAddress(InetAddress.getLoopbackAddress(), consolePort));
-            for (ConsoleModuleProvider p : ServiceLoader.load(ConsoleModuleProvider.class)) {
-                p.modules(world, runner).forEach(b::module);
-            }
+            b.module(new dev.dwarpal.console.lab.LabModule(session));
+            b.module(new dev.dwarpal.console.lab.GuideModule());
+            b.module(new dev.dwarpal.console.admin.AdminModule(new dev.dwarpal.console.admin.LabAdminServices(session)));
             try (ConsoleServer server = b.build().start()) {
-                runner.start();
                 out.println();
                 out.println("Console: " + server.url() + "   (loopback only)");
                 out.println("Your browser must trust the lab's certificate authority: "
@@ -103,7 +112,7 @@ public final class ConsoleMain {
                 try {
                     while (true) {
                         Thread.sleep(Duration.ofSeconds(10));
-                        runner.failure().ifPresent(f -> out.println("The scenario clock stopped: " + f));
+                        session.runner().failure().ifPresent(f -> out.println("The scenario clock stopped: " + f));
                     }
                 } catch (InterruptedException e) {
                     out.println("Stopping.");
