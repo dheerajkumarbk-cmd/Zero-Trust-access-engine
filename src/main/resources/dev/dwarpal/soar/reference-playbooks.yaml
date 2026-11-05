@@ -1,5 +1,6 @@
 # Dwarpal reference playbooks (Layer 5.2 part F).
-# Part B's reference plays written as data, plus device isolation for a touched honeytoken.
+# Part B's reference plays written as data, plus device isolation for a touched honeytoken, and plays for part
+# D's correlation rules and part E's anomaly alerts (Layer 5.2 integration).
 # Installing a change needs two administrators' signatures (PlaybookInstaller); the linter refuses
 # anything beyond the guard rails. Durations are ISO-8601 (PT4H = 4 hours, P1D = 1 day).
 version: "reference-2026-11-05"
@@ -59,5 +60,52 @@ playbooks:
     steps: []
   - rule: detection-state-full
     steps: []
+  # ---- part D's correlation rules -------------------------------------------------------------------------
+  - rule: stolen-laptop-access
+    description: A laptop ran an encoded command and was then let in; cut off the person and isolate the laptop
+    steps:
+      - revoke: subject
+      - isolate: device
+      - watch: {target: subject, ratio: 100, halfLife: P2D}
+  - rule: stolen-laptop-collection
+    description: Encoded command, USB drive and bulk reads on one laptop; isolate it
+    steps:
+      - isolate: device
+      - watch: {target: subject, ratio: 100, halfLife: P2D}
+  - rule: encoded-powershell
+    steps:
+      - watch: {target: device, ratio: 10, halfLife: P1D}
+      - watch: {target: subject, ratio: 10, halfLife: P1D}
+  - rule: beacon-from-document-process
+    description: Malware calling home, seen by the signed endpoint sensor and the firewall
+    steps:
+      - isolate: device
+      - watch: {target: subject, ratio: 10, halfLife: P1D}
+  - rule: beacon-regular-destination
+    description: Firewall lines only (collected); watch, never isolate
+    steps:
+      - watch: {target: device, ratio: 10, halfLife: P1D}
+  - rule: cloud-download-volume
+    steps:
+      - watch: {target: subject, ratio: 10, halfLife: P1D}
+  - rule: cloud-bulk-download-then-external-share
+    description: Cloud logs only (collected); a strong watch, the analyst decides anything more
+    steps:
+      - watch: {target: subject, ratio: 100, halfLife: P2D}
+  - rule: telemetry-refused
+    steps: []
+  - rule: telemetry-gap
+    steps: []
+  - rule: collector-flooded
+    steps: []
+  - rule: sensor-heartbeat-missing
+    steps: []
+  - rule: correlation-flood
+    steps: []
+  # ---- part E's anomaly alerts ----------------------------------------------------------------------------
+  - rule: ueba-anomaly
+    steps:
+      - watch: {target: subject, ratio: 10, halfLife: P1D}
+      - watch: {target: device, ratio: 10, halfLife: P1D}
 default:
   - watch: {target: subject, ratio: 10, halfLife: P1D}

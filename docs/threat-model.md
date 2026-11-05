@@ -1,4 +1,4 @@
-# Dwarpal threat model (STRIDE), v1.3
+# Dwarpal threat model (STRIDE), v1.4
 
 Scope: the Policy Engine core (v0.1 to v0.6) and the Policy Administrator: sessions (v0.7, v0.8) and
 privileged access (v0.8). The PEP
@@ -394,6 +394,157 @@ character written into a test file, which the source hygiene check forbids) and 
 belong to the collectors (single-use batch numbers, event time against collection time, per-source quotas) are
 part D's and must be reproduced there.
 
+## v1.4 Layer 5.2 (SOC platform: SIEM platform, UEBA, SOAR and SOC API)
+
+Ids are prefixed by part: 5D (SIEM platform), 5E (UEBA and prioritisation), 5F (SOAR, cases and SOC API); `R`
+marks a breach found by that part's red-team pass, reproduced as a working probe before the fix. Details are in
+`docs/layer-5-2/part-d.md`, `part-e.md` and `part-f.md`. The rows keep each part's own ids (D, E, F).
+
+### 5D SIEM platform
+
+#### Threats
+
+| # | STRIDE | Threat | Mitigation in code | Test |
+|---|---|---|---|---|
+| D1 | Spoofing | A forged, edited, moved or replayed endpoint batch is taken as the device's own telemetry | Signature by the device's own `DEVICE_AGENT` key over device, number, time and body hash; age and future checks; numbers single use and in order; lines must name the batch's device | `forgedEditedMovedOrMisusedBatchesAreRefused`, `batchNumbersAreSingleUseInOrderAndGapsAreReported`, `badLinesInASignedBatchAreRefusedOneByOne` |
+| D2 | Spoofing / elevation | Syslog or a cloud export poses as signed telemetry or as Dwarpal's own record | Source registered with a maximum provenance; dataset fixed per source; `VERIFIED_AUDIT` never | `aSourceCannotWriteAnotherDatasetOrClaimMoreTrustThanItHas` |
+| D3 | Elevation (framing) | Forged syslog naming the CEO's laptop leads to a destructive playbook | Alerts on `COLLECTED` evidence alone say so and are `actionable = false` | `forgedSyslogNamingTheCeoLaptopNeverYieldsAnActionableAlert`, `collectedOnlyAlertsSaySoAndAreNotActionable` |
+| D4 | Tampering | Malformed input guessed into an event (duplicate keys, bad numbers, nested JSON, smuggled fields) | Strict hand parsers; each key once; refused, never guessed | `firewallRefusesWhatItCannotParse...`, `cloudLinesAreStrict`, `rD1`, `rD2` |
+| D5 | Repudiation / info loss | Input dropped silently (unparseable, refused, overflow) | Every refusal is an event in the chain; overflow counted and reported | `aFloodFillsOnlyTheCollectorsOwnQueueAndTheLossIsReported`, `futureAndAncientEventsAreRefusedAndLateOnesFlagged` |
+| D6 | Info disclosure | Raw lines (which can carry secrets) copied into failure events or errors | Failure events keep reason, length and a SHA-256 prefix only; query and YAML errors quote nothing | `firewallRefusesWhatItCannotParseAndKeepsATraceWithoutTheText`, `unsafeYamlIsRefusedWithoutEchoingIt` |
+| D7 | Denial of service (SOC) | One noisy source starves the others | Token bucket per source, sources in turn, bounded collector queues | `aFloodingSourceCannotStarveTheOthers` |
+| D8 | Tampering / evasion | Backdated events placed into closed windows; future-dated events closing everyone's windows | Ingestion refuses > 5 min ahead and > 7 days behind, flags > 1 h late; the engine ignores events ahead of their record and counts too-late ones | `futureAndAncientEventsAreRefusedAndLateOnesFlagged`, `aFutureDatedEventCannotMoveTheClock...`, `backdatedEventsAreTooLateToCount` |
+| D9 | Tampering | Collected events edited after ingestion; forged records in the store | Written into the keyed chain first; store and engine read only through the keyed cursor and stop at a break | `aRecordForgedWithAnotherKeyAndEverythingAfterItIsNeverSearchable`, `theEngineStopsForGoodAtABreakInTheChain` |
+| D10 | Denial of service | A query exhausts memory or time | Parse limits; examined-events limit; groups limit; bounded store with eviction reported | `malformedAndOversizedQueriesAreErrorsNeverEmptyResults`, `parsingIsLinearEvenOnHostileInput`, `aBroadQueryOverAHugeStoreStopsAtItsCostLimitAndSaysSo`, `theStoreIsBoundedAndSaysWhatItNoLongerHas` |
+| D11 | Denial of service / evasion | Correlation state flooded with invented keys, or an alert flood | Key limit per rule (live keys kept, refusals alerted), hourly cap with one flood alert, merge on full | `floodingAStateWithInventedKeys...`, `anAlertFloodIsCappedPerRuleAndReportedOnce`, `rD5`, `rD6` |
+| D12 | Elevation | A rule file builds objects (CVE-2022-1471), expands aliases, hides a second key | `SafeConstructor`, no aliases, no duplicate keys, size limit, strict schema | `unsafeYamlIsRefusedWithoutEchoingIt` |
+| D13 | Evasion | A rule that can never fire (typo in a dataset, impossible combination, beyond state limits) gives false comfort | Lint ERRORs; engine refuses unreachable rules; `silentRules()` lists rules that matched nothing | `rulesThatCanNeverFireAreRefused`, `rD4`, `noRuleFiresOnEverydayActivity` |
+| D14 | Repudiation | Alerts lost when the case book refuses or throws | Kept (1,000) and retried in order; beyond that counted as lost | `alertsTheSinkRefusesAreKeptAndOfferedAgainInOrder` |
+| D15 | Evasion | A sensor silenced to hide activity | `telemetry.gap` on skipped numbers; `absence` rule on heartbeats, also when the key comes back | `batchNumbersAreSingleUse...`, `absenceFiresOnce...`, `rD3` |
+
+#### Red-team findings
+
+Each was first written as a working probe in `RedTeamTest` and run against the code as it was: all seven
+probes failed (the attack worked), with the output kept by the session; then the code was fixed and the probe
+kept as a regression test.
+
+| # | STRIDE | Breach (before the fix) | Root cause | Fix | Test |
+|---|---|---|---|---|---|
+| rD1 | Tampering | A syslog line with `verdict=deny host=fw-trusted` overwrote the collector's own `verdict` and `host` fields | Message pairs were merged into the event's fields after the collector's own | Reserved field names (`host`, `app`, `verdict`, `batch`, `user`, `ingest.*`, ...) refuse the line | `rD1_aSyslogMessageCannotOverwriteTheCollectorsOwnFields` |
+| rD2 | Tampering | A line in a signed batch set `"batch":"999"`, replacing the real batch number, and could pre-set `ingest.late` | As rD1, in the endpoint collector; the ingestor did not check its own flags | Reserved names refused per line; the ingestor refuses any event that already carries `ingest.*` | `rD2_anEndpointLineCannotForgeTheBatchNumberOrTheIngestionFlags` |
+| rD3 | Evasion | A sensor silent for 4 h 40 min and then back was never reported, because nothing else moved the clock in between | Absence was only checked when the clock passed the deadline | A key that comes back after more than the window raises the absence alert ("nothing for N min, then it came back") | `rD3_aSensorThatWentQuietAndCameBackIsStillReported` |
+| rD4 | Evasion | A rule with `count: 5000` loaded fine but could never fire: a key keeps at most 2,000 events | Rule limits and engine limits were checked in different places | Counts and sums now merge (rD5); a distinct count or sequence step beyond the state limit is refused when the engine is built | `rD4_aRuleTheEngineCouldNeverFireIsRefusedWhenTheEngineIsBuilt` |
+| rD5 | Evasion | 3,000 downloads of 400 kB (1.2 GB in 50 min) did not trigger the 1 GB volume rule | A full key dropped its oldest events, so the sum never passed 800 MB | Full counts and sums merge the two oldest entries (weights and amounts kept); distinct counts drop only repeated values | `rD5_manySmallEventsCannotHideAVolumeOverTheStateLimit` |
+| rD6 | Denial of service (SOC) | 20,000 flows from one device to one address under a distinct-count rule took over 5 s (the probe timed out; rD5's probe took 122 s): the engine fell behind | Every new event re-scanned every window: quadratic in the events per key | One two-pointer pass per event, with running weight, sum and distinct counts | `rD6_oneBusyKeyCannotMakeTheEngineQuadratic` |
+| rD7 | Spoofing (replay) | After a collector restart, a batch captured before it was accepted again | Used batch numbers lived only in memory | `EndpointCollector.lastBatches(cursor)` rebuilds them from the verified trail (every event carries its batch number); a broken or oversized trail stops the collector from starting | `rD7_aBatchCapturedBeforeARestartIsRefusedAfterIt` |
+
+Found while writing the abuse tests (before the red-team pass, fixed at once): an `in (...)` list of repeated
+values passed the 32-value limit (only distinct values were counted; the token limit still bounded it).
+
+Probes that did not find a breach, kept as guards: framing the CEO's laptop with forged syslog (watch-only
+alert), flooding a collector (overflow event and `collector-flooded` alert), flooding correlation state with
+invented keys (refused and alerted, the live key kept), future-dated and backdated events, broad queries over
+a large store, a forged record in the chain.
+
+### 5E UEBA and prioritisation
+
+#### Threats
+
+| # | STRIDE | Threat | Mitigation in code | Test |
+|---|---|---|---|---|
+| E1 | Spoofing | Forged syslog or cloud lines name an innocent person (framing) | Collected-only evidence capped at ln 1000 in risk (at most MEDIUM, score ≤ 50); collected-only alerts never actionable and at most P2 | `UebaRedTeamTest.forgedCollectedEventsCannotMakeAnInnocentPersonHighRisk` |
+| E2 | Tampering | Slow baseline poisoning | Learned hourly counts clipped at λ + 2√λ + 1; `DRIFT` against the lowest daily level of 30 days; while drifting the baseline may not grow | `slowPoisoningCannotTeachTheBaselineAnExfiltrationRate` |
+| E3 | Tampering | Teaching the baseline with the suspicious events themselves | One-hour quarantine; events with an anomaly or cited by any alert are never learned; flagged values learned only after a signed false positive | `UebaAbuseTest.eventsUnderAnAlertAreNotLearnedEvenIfTheAlertComesLater` |
+| E4 | Tampering | A forged chain or a forged record | Reads only through a keyed `AuditCursor`; stops for good at the first break; records that do not convert (missing fields, actor not the dataset's collector) are counted as malformed | `aBrokenChainStopsReadingForGoodAndMalformedRecordsAreCounted` |
+| E5 | Tampering | Event times far in the future or past move the hourly state | Events outside [recorded − 2 days, recorded + 5 min] are counted as skewed, neither judged nor learned | `aFarFutureEventDoesNotSwitchOffVolumeDetection`, `lateAndSkewedEventsAreCountedNotGuessed` |
+| E6 | Repudiation | A score nobody can explain | Every anomaly carries its numbers; every contribution listed with evidence sequence numbers; ranked alerts list one reason per term | `UebaSimulationTest.summary` recomputes every score from its contributions |
+| E7 | Info disclosure | Reports or reasons leak payloads or carry injection | Reasons sanitised and bounded (`Sanitize`), values shortened to 40 characters; JSON escapes quotes, controls, bidi and line separators; no payload copied into alerts | `hostileValuesAreHandledAsData`, `jsonEscapesEverythingHostile` |
+| E8 | Denial of service | A flood of new entities evicts a victim's baseline | Profiles are never evicted; new ones beyond `maxProfiles` are refused and counted | `aFloodOfNewEntitiesCannotEvictAnEstablishedBaseline`, `floodsAreBounded` |
+| E9 | Denial of service | A flood of alerts buries the real one | Queue keeps the most urgent; a full queue only accepts something more urgent than its last entry; copies fold into one place | `aFloodOfAlertsCannotPushARealAlertOutOfTheQueue`, `theQueueFoldsCopiesAndOrdersByPriority` |
+| E10 | Denial of service | Unbounded memory | Bounds on profiles, actions, values, destinations, peer keys, quarantine, risk entities and contributions (the weakest makes room, never a stronger one), evidence index, alert memory, queue, report inputs | `floodsAreBounded` |
+| E11 | Elevation | An entity lowers its own risk, or a forged or replayed verdict does | No input subtracts; only time or a verdict admitted by `VerdictGate` | `anEntitysOwnGoodBehaviourNeverLowersItsRisk`, `forgedReplayedOrWrongVerdictsDoNotLowerRisk` |
+| E12 | Elevation | Hiding in a noisy peer group | Peers can strengthen a finding, never weaken it | `aNoisyPeerGroupDoesNotHideAFirstTimeValue` |
+| E13 | Elevation | A rule claims its alert is actionable | `actionable` computed from the cited records' provenance; unknown records count as not actionable | `rankingPointsByHandAndUnknownAssets` |
+
+#### Red-team findings
+
+*(each reproduced as a working probe first, then fixed, then kept as a regression test in `UebaRedTeamTest`; the
+first version of the code had the weakness, the probe failed against it, the fix made it pass)*
+
+| # | STRIDE | Breach (before the fix) | Root cause | Fix | Test |
+|---|---|---|---|---|---|
+| E-R1 | Tampering | Over 40 days the attacker raised the hourly download count just under z = 4 each hour (starting from 2 per hour); then 60 downloads in one hour raised **no volume anomaly** (only a time-of-day one), because the learned mean had reached about 120 | Every unflagged hour entered the window unchanged; nothing compared the baseline with its own past | Clip each learned hour at λ + 2√λ + 1; once a day compare λ with the lowest daily level of 30 days, report `DRIFT` from 3 x, and while drifting clip at that level | `slowPoisoningCannotTeachTheBaselineAnExfiltrationRate` |
+| E-R2 | Spoofing | 40 forged collected process events and 80 forged downloads naming the CEO gave the CEO **risk 100, CRITICAL** | Collected and verified evidence added up alike | Groups backed only by collected evidence count together for at most ln 1000 (scaled, labelled); the ranker already capped them at P2 | `forgedCollectedEventsCannotMakeAnInnocentPersonHighRisk` |
+| E-R3 | Elevation | In a group where 6 of 11 peers run `psexec.exe`, an insider's first `psexec.exe` raised **no anomaly** | A value common among peers halved the weight, pushing it below the reporting threshold | Peers only strengthen (rare for peers: + ln 2), never weaken | `aNoisyPeerGroupDoesNotHideAFirstTimeValue` |
+| E-R4 | Denial of service | 5,000 forged HIGH alerts about distinct addresses **pushed the real P1 honeytoken alert out** of a 100-place queue | A full queue dropped its oldest entry | A full queue drops its last entry in triage order, and only for something more urgent; otherwise the newcomer is refused and counted | `aFloodOfAlertsCannotPushARealAlertOutOfTheQueue` |
+| E-R5 | Denial of service | 200 events naming invented devices **evicted the victim's baseline** (limit 50 profiles); the victim's first `mimikatz.exe` was then not judged at all | Profiles were kept in a least-recently-used map | Established profiles are never evicted; new ones beyond the limit are refused and counted (`refusedProfiles`) | `aFloodOfNewEntitiesCannotEvictAnEstablishedBaseline` |
+| E-R6 | Tampering | One forged collected download dated 30 days ahead **switched off volume detection** for that person and action: a 60-download burst was not seen | The hourly state moved to the newest event time, and every real event then counted as late | Events more than 5 minutes ahead of, or 2 days behind, their audit record time are counted as skewed, neither judged nor learned | `aFarFutureEventDoesNotSwitchOffVolumeDetection` |
+
+Found while building, not by a probe: the time-of-day profile learned every event, so one busy hour of 200 events
+could outvote weeks of habits (seen in the E-R1 probe output as a spurious time-of-day anomaly). It now learns one
+sample per entity per active hour. And a UEBA alert was first dated at the anomaly that triggered it rather than the
+newest one, so ranking at the alert's time missed risk already known; fixed.
+
+### 5F SOAR, cases and SOC API
+
+#### Threats
+
+| # | STRIDE | Threat | Mitigation in code | Test |
+|---|---|---|---|---|
+| F1 | Spoofing | Someone calls the SOC API as an analyst | Mutual TLS 1.3 with the Dwarpal CA only; exact RFC 2253 subject, case-sensitive; unknown subject 403 | `SocApiTest.onlyConfiguredAnalystsByExactCertificateSubject` |
+| F2 | Spoofing | An analyst submits a colleague's captured verdict | `analystId` must be the caller; part B's gate checks the key and single use | `SocApiTest.verdictsMustBeSignedByTheCallingAnalyst` |
+| F3 | Spoofing | A forged acknowledgement makes a device look isolated (or released) | Device-bound `DEVICE_AGENT` key, telemetry domain, exact body with random command id, rising batch, 5-minute freshness | `SoarTest.forgedReplayedOrStaleAcknowledgementsAreRefused`, `aReleaseCannotBeAcknowledgedWithAnOldBatchNumber` |
+| F4 | Tampering | A playbook file removes the guard rails | Strict linter; two administrators; rollback refused; any edit voids approvals | `PlaybookCompilerTest`, `PlaybookInstallerTest`, `SoarRedTeamTest.aPlaybookFileWithoutGuardRailsDoesNotLoad` |
+| F5 | Tampering | YAML attacks (object construction, alias bombs, duplicate keys, oversized files) | `SafeConstructor`, aliases 0, duplicates refused, size and depth limits, strict schema | `PlaybookCompilerTest.unsafeYamlIsRefusedWithoutEchoingIt` |
+| F6 | Repudiation | An analyst denies a note, assignment or API call | Audited before the change (`CASE_NOTE` with SHA-256, `CASE_ASSIGNED`, `SOCAPI_CALL`); no audit, no change; no audit, no data | `CaseManagerTest.noAuditNoChange`, `SocApiTest.everyCallIsAuditedAndDataIsNotSentWithoutIt` |
+| F7 | Information disclosure | An analyst reads cases, risk or events about herself or colleagues | Visibility rules, 404 for not visible, links and search counts filtered | `CaseManagerTest.casesAboutAnyAnalystAreForLeadsOnly`, `SocApiRedTeamTest` |
+| F8 | Information disclosure | Errors or logs leak detail or secrets | Fixed error bodies; reasons only in the audit trail; YAML errors name places only; secrets refused in playbook files | `SocApiTest.bodiesAreStrict`, `PlaybookCompilerTest.secretsInPlaybookFilesAreRefused` |
+| F9 | Denial of service | Slow or flooding clients, huge bodies, expensive searches | Bounded threads, queue, in-flight limit, 16 KiB bodies, strict JSON limits, per-analyst rate limits for calls, writes and searches, search window at most 31 days, per-request deadline | `SocApiTest.callsAreRateLimitedPerAnalyst`, `aSlowClientIsCutOffAtTheDeadline` |
+| F10 | Denial of service | The SOC is turned against innocent people (forged syslog, own case, one analyst against an executive) | Provenance rule twice, watch caps and budget on collected evidence, two analysts for protected people and their devices, own-case rule | `SoarRedTeamTest` |
+| F11 | Elevation of privilege | An analyst acts beyond her role (assigns others, acts directly without a verdict) | Assignment rules; no endpoint revokes, denies or isolates; everything destructive goes through a signed verdict and part B's guard rails | `SocApiTest.assignmentsFollowTheRoles`, `SocApiRedTeamTest.noEndpointActsWithoutAVerdict` |
+| F12 | Denial of service | Connectors flood or fill the disk; a down connector blocks the response | Rate limit per minute, 10 MB per file, failures recorded and never fatal, no network | `ConnectorTest`, `SoarTest.aFailingConnectorNeverStopsTheResponse` |
+
+#### Red-team findings
+
+*(each reproduced as a working probe first, then fixed, then kept as a regression test)*
+
+| # | STRIDE | Breach (before the fix) | Root cause | Fix | Test |
+|---|---|---|---|---|---|
+| F-R1 | Denial of service (against the CEO) | A forged syslog line naming the CEO, confirmed by one analyst who believed it, put a x1000 watch on her (watch-only mode kept the play's watches as written: the probe measured log-odds 6.9 instead of at most 2.3); a few forged lines a day could keep her locked out without any destructive step | Watch-only mode removed destructive steps but trusted the watches' weights, and nothing limited repetition | On collected evidence a watch is at most x10 with a half-life of at most one day, and each entity gets at most one such watch a day (refused, audited, otherwise); one a day never sums past x100 | `SoarRedTeamTest.forgedSyslogLinesCannotLockTheCeoOutThroughWatches` |
+| F-R2 | Elevation of privilege | One analyst confirmed a verified alert that named only the CEO's laptop, and the laptop was denied, its sessions ended and it was isolated (status `APPLIED` with one verdict) | Part B's two-person rule looks only at the people an alert names | Devices owned by a protected person (asset catalogue) or of criticality 5 need two analysts before part B sees the verdict; the same analyst twice, a different alert or a disagreeing second analyst do not count; the wait lapses after part B's second-analyst window | `SoarRedTeamTest.oneAnalystCannotIsolateTheCeosLaptopThroughAnAlertNamingOnlyTheDevice`, `aSecondAnalystWhoDisagreesCancelsTheProtectedDeviceWait` |
+| F-R3 | Information disclosure | A search for "subject = ben" by ana hid ben's events but answered `"matched":4,"truncated":true,"hidden":3`, so she could count a colleague's activity | Hidden events were left out of the list but not out of the numbers | When anything is hidden, `matched` is what is shown, `hidden` is gone from the answer, `truncated` refers to the shown list; the audit record keeps the hidden count | `SocApiRedTeamTest.searchDoesNotRevealHowManyEventsAboutColleaguesMatched` |
+| F-R4 | Information disclosure | Reading alice's case showed `"links":["case-1"]`, the id of a case about ben that shares an address; the timeline said the same | Links were computed for the whole SOC, not for the reader | Links and LINKED timeline entries are filtered by the reader's visibility | `SocApiRedTeamTest.caseLinksDoNotRevealCasesTheReaderCannotSee` |
+
+Probes that held from the start and stay as regression tests: a forged syslog line never isolates the CEO's laptop; an analyst cannot act on, read or annotate her own case (in the SOAR and through the API); an analyst cannot read a colleague's case through any endpoint, and "not yours" looks like "does not exist"; a playbook file without guard rails does not load whoever signed it; no endpoint revokes, denies, isolates or releases without a verdict; a collected alert cannot ride on a case decided in full mode.
+
+### 5.2 Integration (cross-part)
+
+Run on the whole SOC with all six parts wired together on the simulated organisation (seed 7, 60 users): tests
+`SixPartEndToEndTest` and `SocCrossPartRedTeamTest`. `(F)` marks a breach that was reproduced as a working probe
+on the integrated build before it was fixed.
+
+| # | STRIDE | Threat or breach | Mitigation in code | Test |
+|---|---|---|---|---|
+| 5.2I-1 | Denial of service / evasion (F) | A flood that overflowed a collector's queue hid its own overflow report: the report waited at the back of 10,000 queued events, behind the source quota, for hours | The loss is reported first, at the front of the next poll | `aFloodFromOneSourceIsRefusedAndReportedWhileAnotherSourcesEventStillArrives`, `aFloodFillsOnlyTheCollectorsOwnQueueAndTheLossIsReported` |
+| 5.2I-2 | Elevation / repudiation (F) | The API hid a case about an analyst from non-lead colleagues, but the SOAR itself did not check: a script or console calling it directly could let a colleague close the case of a friend | `CaseManager.mayDecide`: never one's own case, and a case about any analyst only by a lead; checked inside `Soar.handle` | `anAnalystCannotActOnOrReadACaseAboutThemselvesThroughAnyDoor` |
+| 5.2I-3 | Tampering / denial of service | Two engines on one trail (part A's rules and part D's copies of them) raise two alerts for one attack | Part D's copies live in a file that is not loaded by default; the default rules only cover what part A cannot see (cross-source and health) | `theDefaultRulesLoadCleanAndCoverTheCrossSourceAttacksWhilePartAKeepsItsOwnRules`, `partARulesExpressedInTheLanguageAgreeWithPartAOnTheSameTrail` |
+| 5.2I-4 | Elevation (against innocent people) | Forged syslog about the CEO's laptop opens a case and, once an analyst confirms it, isolates the laptop | Collected evidence is ranked, not actionable; the play for it is watch only; nothing is isolated, revoked or denied | `forgedFirewallLinesAboutTheCeoOpenACaseAndAWatchButNeverIsolateTheLaptop` |
+| 5.2I-5 | Elevation (against innocent people) | Forged cloud logs make a colleague look like an exfiltrator | Cloud alerts are P2 at most (capped), not actionable; confirming them changes nothing destructive | `forgedCloudLogsAboutAnInnocentPersonCannotTriggerAnythingDestructive`, `cloudExfiltrationIsP2NotP1BecauseItRestsOnCollectedEvidenceOnly` |
+| 5.2I-6 | Elevation | A playbook file removes the guard rails (isolate on a collected-only rule) | Strict lint against the rule catalogue's evidence classes; two-person signed install | `aPlaybookFileThatRemovesTheGuardRailsIsRefusedWhateverTheRuleBook` |
+| 5.2I-7 | Spoofing | Genuine signed telemetry of the device, or an edited acknowledgement, is passed off as the sensor's confirmation of isolation | The acknowledgement must match the exact command body and carry a valid device signature; once only | `telemetryCannotBePassedOffAsTheSensorsIsolationAcknowledgement` |
+| 5.2I-8 | Tampering / evasion | Backdated lines open windows in the past; future lines close everyone's windows | Ingestion refuses lines more than 5 minutes ahead and more than 7 days behind; late lines are flagged and cannot raise alerts | `backdatedAndFutureLinesAreRefusedAndOpenNoWindowsInThePast` |
+| 5.2I-9 | Elevation (drift) | The rule catalogue (what a playbook may do on a rule) and the ranker (whether an alert is actionable) disagree after a rule is added | Checked on every alert raised in the simulation: collected-only rules never actionable, verified rules always actionable, mixed rules actionable exactly when some evidence is verified | `whatCannotBeActedOnIsNeverRankedActionableAndTheCatalogueAgreesWithTheRanker` |
+| 5.2I-10 | Repudiation | A signed verdict is used twice, or by two consumers that share one replay store | Each consumer (part F's SOAR, part E's UEBA) has its own gate on the same key ring; each admits a verdict once | `aFalsePositiveFromAnalystsLiftsRiskInUebaAndTheSameVerdictCannotBeUsedTwice` |
+| 5.2I-11 | Spoofing / elevation | Anyone with a valid certificate acts as an analyst; an analyst submits a colleague's signed verdict | SOC API: analysts by exact certificate subject; the verdict's signer must be the caller; reports are for leads | `theSocApiServesTheWholePictureOverMutualTlsToExactlyTheAnalysts` |
+| 5.2I-12 | Tampering | The new record types break older readers (analytics misreading collected events as decisions) | Part C reads decisions only; collected events and the SOC's own records are skipped and counted | `analyticsReadDwarpalsDecisionsFromTheSameChainAndIgnoreTheCollectedEvents` |
+| 5.2I-13 | Evasion | Detection per person needed the uploader's name, which native DLP records did not carry | Native events carry the actor as a field, and DLP records name it as a subject entity | `SecurityEventTest` |
+| 5.2I-14 | Tampering | Playbook bundles were signed under a message domain defined outside the one place all signed messages live | Domain and message moved to `SignedMessages.playbookBundle` | `approvalsMustCoverThisExactTextAndBeFreshAndOfTheRightPurpose` |
+
+Red-team pass on the integrated SOC: five probes found nothing (framing the CEO with syslog, framing a colleague
+with cloud logs, faking the sensor's acknowledgement, backdating, a playbook file without guard rails); two found
+real breaches (5.2I-1 and 5.2I-2), both fixed with a regression test. Slow baseline poisoning is part E's
+(E-R1) and was not repeated here.
+
 ## Residual risks (accepted for this layer, scheduled)
 
 | Risk | Why accepted now | Planned in |
@@ -438,3 +589,13 @@ part D's and must be reproduced there.
 | Several writers to the signal feed must share one `SignalLedger`, or a false positive may lift another writer's entry | `SignalFeed` has no per-holder clear | Per-holder clear in `SignalFeed` |
 | What-If replays recorded requests without their evidence (data minimisation), so absolute decisions drift (250 of 720 in the simulation); the diff between two policies is still like for like | Faithful replay needs the engine to accept already-verified facts | After submission |
 | Behaviour history is not time-indexed, so a replay sees what was learned after the request | Both policies see the same state | Point-in-time history |
+| Correlation state and the event store live in memory: a restart forgets open windows (the store refills from the trail) | No database yet | Persistent state with the store |
+| DHCP leases are configuration: a stale lease names the wrong device for a firewall flow | The alert is collected-only anyway (watch, never destructive) | Lease feed from the DHCP server |
+| A key flood beyond 10,000 keys per rule refuses new keys (alerted), so a new attacker key arriving during a flood is not tracked | Bounded memory | Accepted; the flood itself is an alert |
+| Sustained source-quota backpressure (queue filling but not yet overflowing) raises no alert until the queue overflows | The first overflow report is now first in line (5.2I-1) | A backlog signal from the ingestor |
+| Detection, UEBA and ranking thresholds are starting values for the simulated organisation, not tuned on real logs | No real traffic | Calibrate on real logs |
+| `sensor-heartbeat-missing` is silent until a device agent sends heartbeats | The simulated sensor sends none | The demo launcher (Layer 6) |
+| The SOC API returns analyst notes and alert text sanitised only for control and bidirectional characters | Escaping belongs to the page | The console must HTML-escape everything (Layer 6) |
+| Isolation commands to the sensor are not signed by Dwarpal (the simulated sensor trusts its channel) | A real sensor needs a signed command | Key purpose and `SignedMessages.isolationCommand` with a real sensor |
+| Cases, isolation state, protected-device waits and the collected-watch budget live in memory | No database yet | Persistent store |
+| `count by` queries are answered by the event store but not yet exposed through the SOC API's search | `EventSearch` returns events only | Add a `counts` method to `EventSearch` |

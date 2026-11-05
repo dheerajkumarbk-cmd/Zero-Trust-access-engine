@@ -78,7 +78,7 @@ network can send a syslog line naming the CEO.
 
 ## 3. Part 0: contracts (this session)
 
-**Status: built and tested (2026-11-05).** Everything below exists on `main`; build on it. Threat model v1.3 rows P1 to P9.
+**Status: all six parts built and integrated on a local branch (2026-11-05), not yet pushed.** Part 0 is on `main`; parts D, E and F and the integration are described in `docs/layer-5-2-report.md`. Threat model v1.4.
 
 | Item | Where | What it gives the parts |
 |---|---|---|

@@ -1,6 +1,6 @@
 package dev.dwarpal.soar;
 
-import dev.dwarpal.crypto.Canonical;
+import dev.dwarpal.crypto.SignedMessages;
 import dev.dwarpal.crypto.Digests;
 import dev.dwarpal.crypto.SignatureProof;
 
@@ -17,7 +17,7 @@ public record PlaybookBundle(long sequence, String yaml, List<SignatureProof> ap
 
     public static final int MAX_APPROVALS = 16;
     /** Domain of what approvers sign; kept apart from policy bundles so one approval cannot serve as the other. */
-    public static final String DOMAIN = "dwarpal/playbook-bundle/v1";
+    public static final String DOMAIN = SignedMessages.PLAYBOOK_BUNDLE_V1;
 
     public PlaybookBundle {
         if (sequence < 1) {
@@ -32,6 +32,6 @@ public record PlaybookBundle(long sequence, String yaml, List<SignatureProof> ap
 
     /** What an approver signs: this sequence, the SHA-256 of this exact text, and when. */
     public static byte[] signedMessage(long sequence, String yaml, Instant signedAt) {
-        return Canonical.encode(DOMAIN, Long.toString(sequence), Digests.sha256Hex(yaml), signedAt.toString());
+        return SignedMessages.playbookBundle(sequence, Digests.sha256Hex(yaml), signedAt);
     }
 }

@@ -31,6 +31,8 @@ public final class SecurityEvents {
     public static final String RECORD_TYPE = "SECURITY_EVENT";
     public static final String NATIVE_DATASET = "dwarpal.audit";
     public static final String COLLECTOR_PREFIX = "collector:";
+    /** The data guard's (Layer 4) DLP audit type, whose actor is the uploader. */
+    static final String DLP_TYPE = "casb.dlp";
     /** Prefix of the event's own fields inside a {@code SECURITY_EVENT} payload. */
     static final String FIELD_PREFIX = "f.";
 
@@ -135,6 +137,16 @@ public final class SecurityEvents {
         if (fields.size() < SecurityEvent.MAX_FIELDS) {
             fields.put("auditType", a.type());
         }
+        if (fields.size() < SecurityEvent.MAX_FIELDS) {
+            fields.put("actor", a.actor());
+        }
+        // A DLP record names the uploader only as its actor: make them a person the rules can count by.
+        if (a.type().equals(DLP_TYPE) && entities.size() < SecurityEvent.MAX_ENTITIES) {
+            Entity uploader = entity(Entity.Kind.SUBJECT, a.actor());
+            if (!entities.contains(uploader)) {
+                entities.add(uploader);
+            }
+        }
         return new SecurityEvent("audit-" + a.sequence(), a.at(), NATIVE_DATASET, category(a.type()),
                 actionOf(a.type()), outcome(a), SecurityEvent.Provenance.VERIFIED_AUDIT, entities, fields);
     }
@@ -202,7 +214,7 @@ public final class SecurityEvents {
         if (a.type().endsWith("_REQUIRED")) {
             return SecurityEvent.EventOutcome.CHALLENGED;
         }
-        if (a.type().equals("casb.dlp")) {
+        if (a.type().equals(DLP_TYPE)) {
             return a.field("action").filter("BLOCK"::equals).isPresent()
                     ? SecurityEvent.EventOutcome.FAILURE : SecurityEvent.EventOutcome.SUCCESS;
         }

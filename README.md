@@ -73,6 +73,17 @@ the same signal feed the engine reads; and `analytics` replays recorded traffic 
 (What-If), calibrates probabilities and measures accuracy on the same trail. See the
 [Layer 5 report](docs/layer-5-report.md).
 
+## The SOC platform (Layer 5.2)
+
+The SOC loop gets the tools an analyst works in, and they are one system with the loop, not beside it. Collectors
+(`siem.platform`) bring in firewall syslog, signed endpoint batches and cloud logs and write them into the same
+audit chain as Dwarpal's own decisions; one search language serves analysts and correlation rules; UEBA (`ueba`)
+learns what is normal for each person, device and peer group with statistics that can be checked by hand and ranks
+alerts P1 to P4; the SOAR (`soar`) turns signed verdicts into guarded actions, including isolating a device that the
+device's own signed acknowledgement confirms; and the SOC API (`socapi`) serves queue, cases, risk, search and
+reports over mutual TLS. Evidence that anybody on the network could have forged may be watched and ranked, but never
+triggers a destructive action. See the [Layer 5.2 report](docs/layer-5-2-report.md).
+
 ## The maths
 
 - **M3, Bayes with base rate** (Axelsson 2000): `logit P(attack|x) = logit P(attack) + Σ ln LR_k`
@@ -87,7 +98,7 @@ the same signal feed the engine reads; and `analytics` replays recorded traffic 
 - **Failure bursts:** Poisson likelihood ratio for brute force, password spray and org-wide surges, clamped at zero.
 
 Reports: [Layer 1](docs/layer-1-report.md), [Layer 2](docs/layer-2-report.md), [Layer 3](docs/layer-3-report.md),
-[Layer 4](docs/layer-4-report.md), [Layer 5](docs/layer-5-report.md),
+[Layer 4](docs/layer-4-report.md), [Layer 5](docs/layer-5-report.md), [Layer 5.2](docs/layer-5-2-report.md),
 and the full [project state](docs/project-state.md).
 
 ## Build

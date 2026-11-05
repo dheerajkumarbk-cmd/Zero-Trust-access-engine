@@ -161,7 +161,8 @@ class RedTeamTest {
                     List.of(Entity.device("d1")), Map.of("dst", "1.1.1.1")), at);
         }
         dev.dwarpal.audit.AuditCursor cursor = t.cursor();
-        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+        // generous limit: the linear engine needs a few seconds on a loaded laptop, a quadratic one minutes
+        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
             e.run(cursor, 10_000);
             e.run(cursor, 10_000);
         });

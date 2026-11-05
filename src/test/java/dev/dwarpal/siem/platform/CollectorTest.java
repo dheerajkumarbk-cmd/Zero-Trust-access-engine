@@ -121,11 +121,16 @@ class CollectorTest {
         }
         assertEquals(CollectorBase.MAX_PENDING, c.pending());
         assertEquals(25, c.overflowed());
+        // Regression (integration finding I-1): the loss is reported at the FRONT of the queue. Behind 10,000
+        // queued events and a source quota the report used to wait for hours, so a flood hid itself.
+        List<SecurityEvent> first = c.poll(1);
+        assertEquals(1, first.size());
+        assertEquals("collector.overflow", first.getFirst().action());
+        assertEquals("25", first.getFirst().field("lost").orElseThrow());
         List<SecurityEvent> es = drain(c);
-        SecurityEvent last = es.getLast();
-        assertEquals("collector.overflow", last.action());
-        assertEquals("25", last.field("lost").orElseThrow());
-        assertTrue(drain(c).isEmpty(), "reported once");
+        assertEquals(CollectorBase.MAX_PENDING, es.size());
+        assertTrue(es.stream().noneMatch(e -> e.action().equals("collector.overflow")), "reported once");
+        assertTrue(drain(c).isEmpty());
         assertThrows(IllegalArgumentException.class, () -> c.poll(0));
     }
 

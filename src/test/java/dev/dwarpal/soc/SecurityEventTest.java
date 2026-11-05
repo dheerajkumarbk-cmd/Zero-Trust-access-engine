@@ -254,8 +254,12 @@ class SecurityEventTest {
             assertTrue(e.field("bad-name").isEmpty());
         }
         Map<String, String> dlpAudit = Map.of("action", "AUDIT");
-        log.append("casb.dlp", "dwarpal", T, dlpAudit);
-        assertEquals(SecurityEvent.EventOutcome.SUCCESS, SecurityEvents.fromAudit(read(sink, cases.length)).event().outcome());
+        log.append("casb.dlp", "alice", T, dlpAudit);
+        SecurityEvent dlp = SecurityEvents.fromAudit(read(sink, cases.length)).event();
+        assertEquals(SecurityEvent.EventOutcome.SUCCESS, dlp.outcome());
+        assertEquals(Entity.subject("alice"), dlp.first(Entity.Kind.SUBJECT).orElseThrow(), "the uploader is the actor");
+        assertEquals("alice", dlp.field("actor").orElseThrow());
+        assertEquals("dwarpal", SecurityEvents.fromAudit(read(sink, 0)).event().field("actor").orElseThrow());
     }
 
     @Test

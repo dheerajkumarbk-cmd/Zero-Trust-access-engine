@@ -65,21 +65,19 @@ abstract class CollectorBase implements EventSource {
             throw new IllegalArgumentException("max must be positive");
         }
         List<SecurityEvent> out = new ArrayList<>(Math.min(max, pending.size() + 1));
-        while (out.size() < max && !pending.isEmpty()) {
-            out.add(pending.poll());
-        }
-        if (out.size() < max && overflow > overflowReported) {
+        // The loss is reported first, ahead of the queue: behind a full queue and a source quota the report would
+        // wait hours, and a flood would hide itself (cross-part red team, integration finding I-1).
+        if (overflow > overflowReported) {
             long lost = overflow - overflowReported;
             overflowReported = overflow;
-            out.add(event(lastTime(out), SecurityEvent.Category.SYSTEM, "collector.overflow",
+            out.add(event(lastOffered, SecurityEvent.Category.SYSTEM, "collector.overflow",
                     SecurityEvent.EventOutcome.FAILURE, SecurityEvent.Provenance.COLLECTED, List.of(),
                     Map.of("lost", Long.toString(lost), "reason", "queue full")));
         }
+        while (out.size() < max && !pending.isEmpty()) {
+            out.add(pending.poll());
+        }
         return out;
-    }
-
-    private Instant lastTime(List<SecurityEvent> out) {
-        return out.isEmpty() ? lastOffered : out.getLast().at();
     }
 
     private Instant lastOffered = Instant.EPOCH;

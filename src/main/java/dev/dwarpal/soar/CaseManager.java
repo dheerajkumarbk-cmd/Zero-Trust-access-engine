@@ -345,6 +345,21 @@ public final class CaseManager implements AlertSink {
         return e.assignee == null || e.assignee.equals(who.id()) || e.awaitingSecond;
     }
 
+    /**
+     * Whether an analyst may decide a case: never one about themselves, and a case about any analyst only a lead
+     * (integration finding I-2: the API checked this, but the SOAR itself did not, so a console or a script calling
+     * it directly could let a colleague close the case of a friend).
+     */
+    public synchronized boolean mayDecide(String analystId, String caseId) {
+        Analyst who = analysts.get(analystId);
+        Optional<Case> c = book.get(caseId);
+        if (who == null || c.isEmpty() || c.get().concerns(analystId)) {
+            return false;
+        }
+        boolean aboutAnalyst = analysts.keySet().stream().anyMatch(c.get()::concerns);
+        return who.lead() || !aboutAnalyst;
+    }
+
     /** Whether an entity names an analyst (so only leads, and not that analyst, may read about it). */
     public boolean aboutAnalyst(Entity e) {
         return e.kind() == Entity.Kind.SUBJECT && analysts.containsKey(e.id());

@@ -158,13 +158,15 @@ class RuleBookTest {
     // ---- the shipped rules ----------------------------------------------------------------------------------
 
     @Test
-    void theDefaultRulesLoadCleanAndCoverPartAAndTheCrossSourceAttacks() {
+    void theDefaultRulesLoadCleanAndCoverTheCrossSourceAttacksWhilePartAKeepsItsOwnRules() {
         RuleBook b = RuleBook.defaults(DATASETS);
-        assertTrue(b.rules().size() >= 15);
+        assertTrue(b.rules().size() >= 10);
         List<String> ids = b.rules().stream().map(RuleBook.Rule::id).toList();
+        assertTrue(ids.stream().noneMatch(i -> i.startsWith("cr-")), "part A's engine runs part A's rules");
+        List<String> partA = RuleBook.partAEquivalents(DATASETS).rules().stream().map(RuleBook.Rule::id).toList();
         for (String a : List.of("cr-break-glass-used", "cr-honeytoken-touched", "cr-deny-storm-subject",
                 "cr-deny-storm-ip", "cr-mfa-fatigue", "cr-pam-refused")) {
-            assertTrue(ids.contains(a), a);
+            assertTrue(partA.contains(a), a);
         }
         for (String x : List.of("stolen-laptop-collection", "stolen-laptop-access", "beacon-regular-destination",
                 "beacon-from-document-process", "cloud-download-volume", "cloud-bulk-download-then-external-share",

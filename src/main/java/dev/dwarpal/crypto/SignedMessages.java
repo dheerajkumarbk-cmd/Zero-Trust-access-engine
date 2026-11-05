@@ -25,6 +25,7 @@ public final class SignedMessages {
     public static final String BREAK_GLASS_REVIEW_V1 = "dwarpal/break-glass-review/v1";
     public static final String SOC_VERDICT_V1 = "dwarpal/soc-verdict/v1";
     public static final String ENDPOINT_TELEMETRY_V1 = "dwarpal/endpoint-telemetry/v1";
+    public static final String PLAYBOOK_BUNDLE_V1 = "dwarpal/playbook-bundle/v1";
 
     /**
      * What an approver signs: this request, this person, this role, for this long. Changing any of
@@ -61,6 +62,15 @@ public final class SignedMessages {
     public static byte[] endpointTelemetry(String deviceId, long batch, Instant sealedAt, String bodySha256Hex) {
         return Canonical.encode(ENDPOINT_TELEMETRY_V1, deviceId, Long.toString(batch), sealedAt.toString(),
                 bodySha256Hex);
+    }
+
+    /**
+     * What an administrator signs to approve one playbook bundle (with a {@link KeyPurpose#POLICY_SIGNER} key: the
+     * same people who approve policies): its sequence number (only ever increasing, so an old bundle cannot be put
+     * back), the SHA-256 of its exact text (hex), and when it was signed.
+     */
+    public static byte[] playbookBundle(long sequence, String yamlSha256Hex, Instant signedAt) {
+        return Canonical.encode(PLAYBOOK_BUNDLE_V1, Long.toString(sequence), yamlSha256Hex, signedAt.toString());
     }
 
     private SignedMessages() {

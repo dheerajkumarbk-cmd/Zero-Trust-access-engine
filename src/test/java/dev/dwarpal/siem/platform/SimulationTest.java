@@ -11,6 +11,7 @@ import dev.dwarpal.soc.Alert;
 import dev.dwarpal.soc.Entity;
 import dev.dwarpal.soc.EventSearch;
 import dev.dwarpal.soc.SecurityEvent;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -45,6 +46,19 @@ class SimulationTest {
     private static EventStore store;
     private static Ingestor ingestor;
     private static final List<SimOrganisation.Result> RESULTS = new ArrayList<>();
+
+    @AfterAll
+    static void release() {
+        // the simulated trail is large: free it for the test classes that run after this one in the same JVM
+        org = null;
+        telemetry = null;
+        alerts = null;
+        partA = null;
+        engine = null;
+        store = null;
+        ingestor = null;
+        RESULTS.clear();
+    }
 
     @BeforeAll
     static void run() {
@@ -94,6 +108,14 @@ class SimulationTest {
         AuditCursor cursor = AuditCursor.fromStart(org.sink, org.auditKey);
         while (engine.run(cursor, 10_000).read() > 0) {
             assertTrue(engine.broken().isEmpty());
+        }
+        // Part A's rules in the language: a second engine on the same trail, only to compare with part A.
+        CorrelationEngine equivalents = new CorrelationEngine(RuleBook.partAEquivalents(Map.of("firewall",
+                SecurityEvent.Provenance.COLLECTED, "endpoint", SecurityEvent.Provenance.SIGNED_SENSOR, "cloud",
+                SecurityEvent.Provenance.COLLECTED)), alerts, CorrelationEngine.Settings.defaults());
+        AuditCursor second = AuditCursor.fromStart(org.sink, org.auditKey);
+        while (equivalents.run(second, 10_000).read() > 0) {
+            assertTrue(equivalents.broken().isEmpty());
         }
         store = new EventStore(AuditCursor.fromStart(org.sink, org.auditKey), 500_000);
         while (store.refresh(10_000).read() > 0) {

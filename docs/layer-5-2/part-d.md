@@ -24,7 +24,7 @@
 | `EventStore` | Implements `EventSearch`. Reads the trail only through a keyed `AuditCursor`, keeps at most `capacity` events (oldest record evicted first), indexes by event time, entity, category and dataset; a search starts from the smallest index its required comparisons allow, walks newest first and stops after 200,000 events, saying so. `counts()` answers `count by` (at most 1,000 groups). Broken chain, evicted range and cost limit are reported in every answer |
 | `RuleBook` | Correlation rules as safe YAML (SnakeYAML `SafeConstructor`, no aliases, no duplicate keys, 128 KiB, unknown keys are errors, parser messages never passed on). Each rule: id, title, severity, 1 to 8 MITRE techniques from `Techniques`, and one of `match`, `threshold` (count, distinct count or sum, by 1 to 3 fields, within 1 min to 24 h), `sequence` (2 to 8 steps with `min` events each, by key, within a window, across sources) or `absence` (a key that matched, then nothing for 5 min to 7 days). Lint ERRORs block the file: unknown technique, duplicate id, out-of-range values, and rules that can never fire (a dataset nobody writes, two different required values for one field, a provenance the dataset never carries). WARNINGs: broad rules, CRITICAL rules fed only by collected evidence |
 | `CorrelationEngine` | Runs the rule book over the chain (keyed cursor; stops for good at a break), raises `Alert`s into the shared `AlertSink`. Event-time windows with events arriving out of order; the clock is the newest event time, and events dated more than 5 min after their record are ignored; events older than clock minus 2 h lateness minus the window are too late. Bounded state (10,000 keys per rule, 2,000 events per key; full counts and sums merge instead of forgetting), one window of quiet per key after firing, 50 alerts per rule per hour then one `correlation-flood`, one `correlation-state-full` per rule per hour, refused alerts kept (1,000) and retried. An alert backed only by `COLLECTED` events starts with "COLLECTED evidence only, not for destructive action"; `recent()` gives each alert with its techniques and `actionable` |
-| `default-rules.yaml` | 18 rules: part A's rules in the language (7 rules covering 6 of A's; A's deny-storm-ip is split into count and spray) (`cr-break-glass-used`, `cr-honeytoken-touched`, `cr-deny-storm-subject`, `cr-deny-storm-ip`, `cr-spray-ip`, `cr-mfa-fatigue`, `cr-pam-refused`), endpoint (`encoded-powershell`), A6 (`stolen-laptop-collection`, `stolen-laptop-access`), A8 (`beacon-regular-destination`, `beacon-from-document-process`), A9 (`cloud-download-volume`, `cloud-bulk-download-then-external-share`) and the SOC's own sources (`telemetry-refused`, `telemetry-gap`, `collector-flooded`, `sensor-heartbeat-missing`) |
+| `default-rules.yaml`, `part-a-equivalents.yaml` | **After integration:** `default-rules.yaml` holds 11 rules: endpoint (`encoded-powershell`), A6 (`stolen-laptop-collection`, `stolen-laptop-access`), A8 (`beacon-regular-destination`, `beacon-from-document-process`), A9 (`cloud-download-volume`, `cloud-bulk-download-then-external-share`) and the SOC's own sources (`telemetry-refused`, `telemetry-gap`, `collector-flooded`, `sensor-heartbeat-missing`). Part A's rules in the language (the seven `cr-*` rules) moved to `part-a-equivalents.yaml`, which is not loaded by default: part A's `DetectionEngine` runs those rules in production, and loading both opens two cases for one attack. `RuleBook.partAEquivalents` loads the file for the comparison test |
 
 ## Design decisions and why
 
@@ -48,8 +48,8 @@
 8. **Alerts cite audit sequence numbers and are deterministic.** Ids are `al-<rule>-<newest evidence record>`,
    so a replayed trail gives the same ids (deduplication across restarts), and `raisedAt` is the newest
    evidence's record time.
-9. **Rules use their own ids** (`cr-` for part A's rules), so both engines can run side by side; integration
-   chooses (request 3).
+9. **Rules use their own ids** (`cr-` for part A's rules), so both engines can run side by side. Integration chose
+   part A's engine for production and moved the `cr-*` rules to a file that is not loaded by default (request 3).
 
 ## Threats and mitigations (STRIDE)
 
@@ -137,6 +137,8 @@ simulation they look for): break-glass, honeytoken, PAM refusals, telemetry refu
 heartbeat.
 
 ## Requests to integration
+
+*All answered in the Layer 5.2 integration; see `docs/layer-5-2-report.md` section 7.*
 
 1. **Techniques on alerts.** `Alert` has no techniques, so part E cannot rank by MITRE technique from the alert
    alone. Either add `List<Technique> techniques` to `Alert` (soc contract), or have part E read

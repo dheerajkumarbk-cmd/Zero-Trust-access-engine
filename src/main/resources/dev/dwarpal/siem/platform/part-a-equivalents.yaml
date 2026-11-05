@@ -1,0 +1,73 @@
+# Part A's detection rules expressed in the correlation language (Layer 5.2 part D).
+#
+# Not loaded by default: part A's DetectionEngine runs these rules in production (it also checks the
+# audit anchor), and loading both would open two cases for one attack. Kept to show the language and to
+# check, on the same trail, that both engines agree.
+
+version: 1
+rules:
+
+  # ---- part A's rules, expressed in the language (same meaning, own ids) -----------------------------------
+
+  - id: cr-break-glass-used
+    title: Emergency (break-glass) account used
+    severity: CRITICAL
+    techniques: [T1078]
+    match: 'dataset = dwarpal.audit and action = break.glass.used'
+
+  - id: cr-honeytoken-touched
+    title: Decision on a honeytoken resource
+    severity: CRITICAL
+    techniques: [T1078]
+    match: 'dataset = dwarpal.audit and action = access.decision and f.policy = "hard-gate:honeytoken"'
+
+  - id: cr-deny-storm-subject
+    title: Many denied requests in one person's name (they are the target, not the suspect)
+    severity: MEDIUM
+    techniques: [T1110]
+    threshold:
+      where: 'dataset = dwarpal.audit and action = access.decision and outcome = failure'
+      by: subject
+      within: 15m
+      count: 5
+
+  - id: cr-deny-storm-ip
+    title: Many denied requests from one address
+    severity: HIGH
+    techniques: [T1110.004]
+    threshold:
+      where: 'dataset = dwarpal.audit and action = access.decision and outcome = failure'
+      by: ip
+      within: 1h
+      count: 10
+
+  - id: cr-spray-ip
+    title: Denied requests for many people from one address
+    severity: HIGH
+    techniques: [T1110.003]
+    threshold:
+      where: 'dataset = dwarpal.audit and action = access.decision and outcome = failure'
+      by: ip
+      within: 1h
+      distinct: subject
+      count: 5
+
+  - id: cr-mfa-fatigue
+    title: Repeated step-up (MFA) challenges for one person
+    severity: HIGH
+    techniques: [T1621]
+    threshold:
+      where: 'dataset = dwarpal.audit and action = access.decision and outcome = challenged'
+      by: subject
+      within: 30m
+      count: 5
+
+  - id: cr-pam-refused
+    title: Repeated refused privilege elevations
+    severity: MEDIUM
+    techniques: [T1548]
+    threshold:
+      where: 'dataset = dwarpal.audit and action in (elevation.refused, elevation.approval.refused)'
+      by: who
+      within: 1h
+      count: 3

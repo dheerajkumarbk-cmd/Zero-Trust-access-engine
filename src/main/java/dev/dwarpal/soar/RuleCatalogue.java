@@ -58,10 +58,25 @@ public final class RuleCatalogue {
     }
 
     /**
-     * Part A's detection rules (dev.dwarpal.siem): they read only the keyed audit chain, so their evidence is
-     * verified. The two deny-storm rules and MFA fatigue name the person under attack.
+     * The rules Dwarpal ships: part A's detection rules (dev.dwarpal.siem), which read only the keyed audit chain,
+     * so their evidence is verified (the two deny-storm rules and MFA fatigue name the person under attack); part
+     * D's correlation rules; and part E's anomaly rule.
      */
     public static RuleCatalogue reference() {
+        return partA().with(java.util.List.of(
+                // Part D's correlation rules (dev.dwarpal.siem.platform, default-rules.yaml): endpoint batches are
+                // signed, firewall and cloud lines are collected; health rules are for people only.
+                verified("encoded-powershell"), verified("stolen-laptop-collection"), verified("stolen-laptop-access"),
+                mixed("beacon-from-document-process"), collected("beacon-regular-destination"),
+                collected("cloud-download-volume"), collected("cloud-bulk-download-then-external-share"),
+                collected("telemetry-refused"), collected("telemetry-gap"), collected("collector-flooded"),
+                collected("sensor-heartbeat-missing"), verified("correlation-flood"),
+                // Part E's anomaly alerts (dev.dwarpal.ueba): evidence from any source, judged per alert.
+                mixed("ueba-anomaly")));
+    }
+
+    /** Part A's detection rules only (for tests and deployments without parts D and E). */
+    public static RuleCatalogue partA() {
         return new RuleCatalogue(java.util.List.of(
                 verified("honeytoken-touched"), verified("stolen-token-revoked"), verified("break-glass-used"),
                 verified("break-glass-refused"), victim("deny-storm-ip"), victim("deny-storm-subject"),
@@ -87,6 +102,14 @@ public final class RuleCatalogue {
 
     private static Rule verified(String id) {
         return new Rule(id, Evidence.VERIFIED, false);
+    }
+
+    private static Rule mixed(String id) {
+        return new Rule(id, Evidence.MIXED, false);
+    }
+
+    private static Rule collected(String id) {
+        return new Rule(id, Evidence.COLLECTED_ONLY, false);
     }
 
     private static Rule victim(String id) {

@@ -157,6 +157,9 @@ public final class Soar {
         Objects.requireNonNull(v, "verdict");
         Optional<Case> c = book.caseOf(v.alertId());
         Optional<Alert> alert = book.alert(v.alertId());
+        if (c.isPresent() && !cases.mayDecide(v.analystId(), c.get().id())) {
+            return refuse(v, c.get().id(), "this analyst may not decide this case");
+        }
         boolean actionable = cases.ranked(v.alertId()).map(RankedAlert::actionable).orElse(false);
         Route route = c.map(k -> routes.get(k.id())).orElse(null);
         if (route == null) {

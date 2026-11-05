@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -48,6 +49,16 @@ class UebaSimulationTest {
             list.add(new Asset(Entity.device(u.laptop()), c, u.id(), Set.of(dept, "laptop"), true));
         }
         return new InMemoryAssetCatalog(list);
+    }
+
+    @AfterAll
+    static void release() {
+        // the simulated trail is large: free it for the test classes that run after this one in the same JVM
+        trail = null;
+        ueba = null;
+        assets = null;
+        alerts.clear();
+        ranked.clear();
     }
 
     @BeforeAll

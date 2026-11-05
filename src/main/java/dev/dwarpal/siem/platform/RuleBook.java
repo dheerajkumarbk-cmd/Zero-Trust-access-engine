@@ -64,6 +64,8 @@ public final class RuleBook {
     public static final Duration MAX_WINDOW = Duration.ofHours(24);
     public static final Duration MAX_ABSENCE = Duration.ofDays(7);
     public static final String DEFAULT_RESOURCE = "default-rules.yaml";
+    /** Part A's rules in the language: not loaded by default (part A's engine runs them), kept as a cross-check. */
+    public static final String PART_A_RESOURCE = "part-a-equivalents.yaml";
 
     public enum Kind { MATCH, THRESHOLD, SEQUENCE, ABSENCE }
 
@@ -162,20 +164,34 @@ public final class RuleBook {
     }
 
     /**
-     * The rules shipped with Dwarpal ({@value #DEFAULT_RESOURCE}): six of part A's rules expressed in the
-     * language, and the cross-source rules for the stolen laptop, beaconing and cloud exfiltration.
+     * The rules shipped with Dwarpal ({@value #DEFAULT_RESOURCE}): the cross-source rules for the stolen laptop,
+     * beaconing and cloud exfiltration, and the health rules of the collectors. Part A's rules are not repeated:
+     * part A's {@code DetectionEngine} runs them.
      *
      * @param datasets each dataset collectors write and the most trusted provenance it can carry
      */
     public static RuleBook defaults(Map<String, SecurityEvent.Provenance> datasets) {
-        try (InputStream in = RuleBook.class.getResourceAsStream(DEFAULT_RESOURCE)) {
+        return resource(DEFAULT_RESOURCE, datasets);
+    }
+
+    /**
+     * Part A's rules expressed in the language ({@value #PART_A_RESOURCE}), with their own {@code cr-} ids. Not for
+     * production next to part A's engine (two cases for one attack); for demonstrating the language and for
+     * checking that both engines agree on the same trail.
+     */
+    public static RuleBook partAEquivalents(Map<String, SecurityEvent.Provenance> datasets) {
+        return resource(PART_A_RESOURCE, datasets);
+    }
+
+    private static RuleBook resource(String name, Map<String, SecurityEvent.Provenance> datasets) {
+        try (InputStream in = RuleBook.class.getResourceAsStream(name)) {
             if (in == null) {
-                throw new IllegalStateException("default rules missing from the build");
+                throw new IllegalStateException("rule file " + name + " missing from the build");
             }
             byte[] b = in.readNBytes(MAX_BYTES + 1);
             return load(new String(b, StandardCharsets.UTF_8), datasets);
         } catch (IOException e) {
-            throw new UncheckedIOException("cannot read the default rules", e);
+            throw new UncheckedIOException("cannot read the rule file " + name, e);
         }
     }
 

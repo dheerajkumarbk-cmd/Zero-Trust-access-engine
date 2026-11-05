@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Playbooks as data: abuse cases first (files that try to get past the guard rails), then what a good file gives. */
 class PlaybookCompilerTest {
 
-    private static final RuleCatalogue RULES = RuleCatalogue.reference().with(List.of(
+    private static final RuleCatalogue RULES = RuleCatalogue.partA().with(List.of(
             new RuleCatalogue.Rule("fw-port-scan", RuleCatalogue.Evidence.COLLECTED_ONLY, false),
             new RuleCatalogue.Rule("beacon-correlated", RuleCatalogue.Evidence.MIXED, false)));
 
@@ -216,7 +216,13 @@ class PlaybookCompilerTest {
         PlaybookSet set = c.set().orElseThrow();
         assertEquals("reference-2026-11-05", set.version());
         assertEquals(64, set.sha256().length());
-        assertEquals(dev.dwarpal.response.Playbooks.referencePlays().keySet(), set.plays().keySet());
+        assertEquals(RuleCatalogue.reference().ids(), set.plays().keySet(), "every shipped rule has a reviewed playbook");
+        for (var e : dev.dwarpal.response.Playbooks.referencePlays().entrySet()) {
+            if (set.extrasFor(e.getKey()).isolate()) {
+                continue;   // part F adds device isolation on purpose (honeytoken-touched)
+            }
+            assertEquals(e.getValue(), set.playFor(e.getKey()), "part A's rules: the same plays as part B's " + e.getKey());
+        }
         assertTrue(set.extrasFor("honeytoken-touched").isolate());
         assertFalse(set.extrasFor("mfa-fatigue").isolate());
         assertEquals(dev.dwarpal.response.Playbooks.referencePlays().get("deny-storm-ip"), set.playFor("deny-storm-ip"));

@@ -260,7 +260,8 @@ public final class SimTelemetry {
 
     private void bigLegitDownload(int i) {
         SimOrganisation.User u = org.users.get(i);
-        Instant start = at(6, u.habit1() + 30);
+        // Day 7: no A6 that day, so the false-positive check is not mixed with an attack on the same person.
+        Instant start = at(7, u.habit1() + 30);
         for (int k = 0; k < 60; k++) {
             cloud(start.plusSeconds(45L * k), Activity.L5_BIG_LEGIT_DOWNLOAD, u.id(), i, "file.download",
                     "/finance/quarter-close-" + k + ".xlsx", 8_000_000 + rnd.nextInt(4_000_000), "none");

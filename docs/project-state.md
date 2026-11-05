@@ -3,12 +3,12 @@
 | | |
 |---|---|
 | Document | Project state and progress log |
-| State as of | 2026-11-05 (Layer 5 integrated) |
+| State as of | 2026-11-05 (Layer 5.2 integrated on a local branch, not yet pushed) |
 | Repository | https://github.com/dheerajkumarbk-cmd/Zero-Trust-access-engine (public) |
 | Platform | Java 25 LTS (Temurin 25.0.5), Maven 3.9, no Docker, runs on an 8 GB laptop |
-| Size | 206 main classes (23,237 lines), 98 test files (18,708 lines), 749 tests |
-| Layers complete | Layer 1 (core decision engine), Layer 2 (behavioural risk scorers), Layer 3 (Policy Administrator: A sessions, B privileged access), Layer 4 (enforcement points: engine API, ZTNA gateway, web gateway, SaaS data guard), Layer 5 first round (SOC loop: encrypted audit store and detection, case and response loop, analytics) |
-| Next | Layer 5 second round (SIEM platform, UEBA and prioritisation, SOAR and XDR-lite, SOC API for the dashboard); then Layer 6 (console and demo) |
+| Size | 267 main classes (34,459 lines), 132 test files (26,337 lines), 974 tests |
+| Layers complete | Layer 1 (core decision engine), Layer 2 (behavioural risk scorers), Layer 3 (Policy Administrator: A sessions, B privileged access), Layer 4 (enforcement points: engine API, ZTNA gateway, web gateway, SaaS data guard), Layer 5 (SOC loop: first round, encrypted audit store and detection, case and response loop, analytics; second round, the SOC platform: SIEM platform, UEBA and prioritisation, SOAR with device isolation, SOC API) |
+| Next | Layer 6 (console, demo, hosting) when requested; then hybrid post-quantum signatures after the submission |
 
 The name: a *dvārapāla* (Sanskrit, "door guardian") is the guardian figure at a temple gate who
 decides who may pass. Dwarpal does the same for every access request.
@@ -194,11 +194,15 @@ Mapping to the CISA Zero Trust Maturity Model (v2.0) pillars:
 | 4 | `devidp` | 7 | 971 | Development identity provider: PBKDF2 passwords, simulated WebAuthn, key-bound MFA proofs |
 | 4 | `swg` | 16 | 1,967 | Secure web gateway: forward proxy, host canonicalisation, block lists, categories, SSRF guard |
 | 4 | `casb` | 9 | 1,232 | SaaS data guard: validated detectors, DLP policy, redaction |
-| 5 | `soc` | 5 | 160 | Shared SOC records: alerts, entities, severities, signed analyst verdicts |
+| 5 | `soc` | 19 | 1,088 | Shared SOC records and contracts: alerts, entities, signed analyst verdicts; security events with provenance, event search, entity risk, alert ranking, assets, MITRE techniques |
 | 5 | `siem` | 6 | 2,234 | Encrypted append-only audit store (AES-256-GCM), head anchoring, CEF / syslog / JSON-lines export, detection rules with deduplication and throttling |
 | 5 | `response` | 10 | 1,576 | Case book, single-use verdicts, playbooks with guard rails, signal ledger, watch-list scorer, DLP feedback |
 | 5 | `analytics` | 11 | 1,713 | Request recorder, What-If replay (M8), Beta calibration, sensitivity, accuracy (confusion, ROC, cost), reports that state their data |
-| | **Total** | **206** | **23,237** | Layers 1 to 3: 7,168 lines. Layer 4: 9,769 lines. Layer 5: about 6,000 lines |
+| 5.2 | `siem.platform` | 10 | 3,663 | Collectors (syslog, signed endpoint batches, cloud JSON), ingestor with quotas and time checks, search language and event store, correlation rules as safe YAML, correlation engine |
+| 5.2 | `ueba` | 14 | 2,617 | Baselines, explainable detectors, peer groups, entity risk with half-lives, alert ranking, triage queue, MITRE coverage, daily SOC report |
+| 5.2 | `soar` | 18 | 2,786 | Playbooks as data with two-person install, case management, SOAR, device isolation with signed acknowledgements, file connectors |
+| 5.2 | `socapi` | 5 | 1,205 | The SOC API over mutual TLS: queue, cases, risk, search, reports, notes, assignment, signed verdicts |
+| | **Total** | **267** | **34,459** | Layers 1 to 3: 7,168 lines. Layer 4: 9,769 lines. Layer 5: about 6,000 lines. Layer 5.2: about 10,300 lines plus the part 0 contracts |
 
 ### 4.2 The full request path
 
@@ -666,6 +670,23 @@ confirmed by a person, acted on, and fed back as signals. Full report: [layer-5-
 | Detection | 10 rules over verified events only (break-glass, honeytoken, stolen token, deny storms per person and per address, MFA fatigue, impossible travel then allow, DLP spikes, PAM refusals); deduplication, hourly caps, bounded state; any break in the chain stops detection for good with a critical alert |
 | Response | Alerts grouped into cases; an analyst's verdict counts only when signed by their own key, once; playbooks deny (always with an end, at most 30 days), watch (fading) or revoke; two analysts for privileged people; rate limits; a false positive undoes the case's denies and watches |
 | Analytics | What-If replays recorded traffic through the current and a proposed policy with a frozen clock and no side effects; Beta posteriors for calibration; sensitivity of MFA betas and costs; confusion table, ROC and expected cost; every report states its data source |
+
+### 7.5 Layer 5.2: the SOC platform
+
+The second round of Layer 5 turns the SOC core into the platform an analyst works in. The parts are not separate
+from the first round: every collected event is written into the same keyed audit chain as Dwarpal's own decisions,
+and every alert cites chain sequence numbers. Full report: [layer-5-2-report.md](layer-5-2-report.md).
+
+| Part | Package | Design |
+|---|---|---|
+| D SIEM platform | `siem.platform` | Collectors for syslog, signed endpoint batches and cloud JSON; ingestor with per-source quotas and event-time checks; one search language for analysts and rules; correlation rules as safe YAML (match, threshold, cross-source sequence, absence) with MITRE techniques; refused input is itself evidence |
+| E UEBA and prioritisation | `ueba` | Statistics a person can check by hand (z-scores, rule of succession, half-lives in log-odds), every contribution listed; P1 to P4 from severity, entity risk, asset criticality and provenance; daily report that starts with its data source |
+| F SOAR, cases, SOC API | `soar`, `socapi` | Playbooks as data, signed by two administrators; cases with SLA and notes; device isolation confirmed only by the device's own signed acknowledgement; SOC API over mutual TLS with analysts by certificate subject |
+
+The rule that holds it together is provenance: an alert that rests only on forgeable evidence (syslog, a cloud
+export) may be shown, ranked and may open a case, but never triggers a destructive action. The collector, the
+ranker, the playbook linter and the SOAR each enforce it, and an end-to-end test checks that they agree on every
+alert raised in the simulated organisation.
 
 ---
 
@@ -1346,7 +1367,7 @@ Stated openly, each with where it will be addressed:
 | `SECURITY.md` | Vulnerability reporting, built-in safeguards |
 | `docs/threat-model.md` | STRIDE threat model, attack cases, residual risks |
 | `docs/security-architecture.md` | Defence in depth, IAM and PAM, encryption, ASVS mapping, post-quantum readiness |
-| `docs/layer-1-report.md`, `docs/layer-2-report.md`, `docs/layer-3-report.md` | Per-layer reports (Layer 3 in full detail) |
+| `docs/layer-1-report.md` to `docs/layer-5-report.md`, `docs/layer-5-2-report.md` | Per-layer reports; `docs/layer-5-2/part-d.md`, `part-e.md`, `part-f.md` hold each SOC platform part's design, STRIDE table and red-team findings |
 | `docs/report-layers-1-2.md` | Consolidated report |
 | `docs/project-state.md` | This document |
 
@@ -1362,8 +1383,8 @@ The whole project has six layers:
 | 2 | Behavioural risk scorers | Ten detectors that turn a login into evidence; poisoning-resistant learning | Done |
 | 3 | Policy Administrator | A: sessions bound to a client key, re-checked on every request, revocable. B: no standing admin, just-in-time elevation, break-glass | Done |
 | 4 | Enforcement and SASE edge | The gateway in front of applications (ZTNA proxy, web gateway, SaaS/DLP controls) calling Layers 1 to 3 over an mTLS API; what the demo talks to | Done |
-| 5 | SOC loop and analytics | First round: encrypted audit store, anchoring, export, detection; cases, verdicts and playbooks with decaying signals (M5); What-If replay (M8), calibration, sensitivity and accuracy | First round done |
-| 5.2 | SOC platform | SIEM platform (collectors, common event format, analyst rule language, search), UEBA and risk-based prioritisation (MITRE ATT&CK tags, reports), SOAR and XDR-lite (playbooks as data, full cases, simulated endpoint sensors, device isolation), SOC API for the dashboard | Next |
+| 5 | SOC loop and analytics | First round: encrypted audit store, anchoring, export, detection; cases, verdicts and playbooks with decaying signals (M5); What-If replay (M8), calibration, sensitivity and accuracy | Done |
+| 5.2 | SOC platform | SIEM platform (collectors, common event format, analyst rule language, search), UEBA and risk-based prioritisation (MITRE ATT&CK tags, reports), SOAR and XDR-lite (playbooks as data, full cases, simulated endpoint sensors, device isolation), SOC API for the dashboard | Built and integrated; push waits for approval |
 | 6 | Console, demo and deployment | Web front end for users, admins and analysts; demo deployment (for example Vercel) | When requested |
 | Cross-cutting | Post-quantum | Hybrid Ed25519 + ML-DSA signatures on every proof (signature field grows from 256 characters to about 4.5 KB) | After submission |
 

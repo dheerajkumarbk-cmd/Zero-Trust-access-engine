@@ -179,7 +179,7 @@ public final class SoarWorld {
         }
         connectors.add(new FileConnector("ticket", Connector.Kind.TICKET, connectorDir, 100, clock));
         connectors.add(new FileConnector("chat", Connector.Kind.CHAT, connectorDir, 100, clock));
-        catalogue = RuleCatalogue.reference().with(List.of(
+        catalogue = RuleCatalogue.partA().with(List.of(
                 new RuleCatalogue.Rule(SYSLOG_RULE, RuleCatalogue.Evidence.COLLECTED_ONLY, false),
                 new RuleCatalogue.Rule(MIXED_RULE, RuleCatalogue.Evidence.MIXED, false)));
         soar = soar(compile(TEST_PLAYBOOKS));
