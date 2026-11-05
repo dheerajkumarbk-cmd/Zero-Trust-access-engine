@@ -24,6 +24,7 @@ public final class SignedMessages {
     public static final String BREAK_GLASS_V1 = "dwarpal/break-glass/v1";
     public static final String BREAK_GLASS_REVIEW_V1 = "dwarpal/break-glass-review/v1";
     public static final String SOC_VERDICT_V1 = "dwarpal/soc-verdict/v1";
+    public static final String CONSOLE_DELEGATION_V1 = "dwarpal/console-delegation/v1";
     public static final String ENDPOINT_TELEMETRY_V1 = "dwarpal/endpoint-telemetry/v1";
     public static final String PLAYBOOK_BUNDLE_V1 = "dwarpal/playbook-bundle/v1";
 
@@ -45,6 +46,17 @@ public final class SignedMessages {
     /** What a reviewer signs after examining one break-glass use. */
     public static byte[] breakGlassReview(String grantId, String verdict, Instant signedAt) {
         return Canonical.encode(BREAK_GLASS_REVIEW_V1, grantId, verdict, signedAt.toString());
+    }
+
+    /**
+     * The console's assertion that one call is made on behalf of an analyst: who, the validity window, a one-time
+     * identifier, and the call itself (method, target and the SHA-256 of the body), so it cannot be moved to
+     * another call.
+     */
+    public static byte[] consoleDelegation(String analystId, Instant issuedAt, Instant expiresAt, String jti,
+                                           String method, String target, String bodySha256Hex) {
+        return Canonical.encode(CONSOLE_DELEGATION_V1, analystId, issuedAt.toString(), expiresAt.toString(), jti,
+                method, target, bodySha256Hex);
     }
 
     /** An analyst's verdict on one alert: which alert, who decided, what, and when (Layer 5). */

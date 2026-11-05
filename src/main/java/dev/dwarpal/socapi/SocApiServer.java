@@ -195,6 +195,9 @@ public final class SocApiServer implements AutoCloseable {
     private final AtomicLong internalFailures = new AtomicLong();
     private final AtomicLong auditFailures = new AtomicLong();
     private final AtomicLong timedOut = new AtomicLong();
+    private final String consoleSubject;
+    private final Delegation.Verifier delegation;
+    private final Map<String, Analyst> analystsById;
 
     private SocApiServer(Builder b) throws IOException {
         this.audit = Objects.requireNonNull(b.audit, "audit");
@@ -220,6 +223,17 @@ public final class SocApiServer implements AutoCloseable {
             throw new IllegalArgumentException("no callers configured");
         }
         this.callers = Map.copyOf(byPrincipal);
+        Map<String, Analyst> byId = new LinkedHashMap<>();
+        byPrincipal.values().forEach(a -> byId.put(a.id(), a));
+        this.analystsById = Map.copyOf(byId);
+        if ((b.consoleSubject == null) != (b.delegation == null)) {
+            throw new IllegalArgumentException("delegation needs both the console's certificate subject and a verifier");
+        }
+        if (b.consoleSubject != null && byPrincipal.containsKey(b.consoleSubject)) {
+            throw new IllegalArgumentException("the console's certificate cannot also be an analyst's");
+        }
+        this.consoleSubject = b.consoleSubject;
+        this.delegation = b.delegation;
         this.json = new JsonReader(new JsonLimits(settings.maxBodyBytes(), 4, SocJson.MAX_TEXT, 16, 16, 20, 64));
         this.inFlight = new Semaphore(settings.maxConcurrent());
         this.reads = new RateLimiter(settings.readsPerMinute(), Duration.ofMinutes(1), 1_000);
@@ -283,16 +297,33 @@ public final class SocApiServer implements AutoCloseable {
 
     private void handle(HttpExchange ex) {
         try (ex) {
-            Optional<Analyst> caller = identify(ex);
+            Optional<byte[]> preRead = Optional.empty();
+            Optional<Analyst> caller;
+            String delegationNote = "";
+            if (viaConsole(ex)) {
+                // the console speaks for an analyst: the signed assertion covers the body, so read it first
+                boolean tooLarge = false;
+                if (ex.getRequestMethod().equals("POST") && jsonContent(ex.getRequestHeaders().getFirst("Content-Type"))) {
+                    preRead = readBody(ex);
+                    tooLarge = preRead.isEmpty();
+                }
+                Delegation.Verdict v = tooLarge ? Delegation.Verdict.refuse("body too large") : delegation.verify(
+                        ex.getRequestHeaders().getFirst(Delegation.HEADER), ex.getRequestMethod(),
+                        ex.getRequestURI().getRawPath(), preRead.orElse(new byte[0]));
+                caller = v.analystId().map(analystsById::get);
+                delegationNote = caller.isPresent() ? " (via console)" : " [delegation refused: " + v.reason() + "]";
+            } else {
+                caller = identify(ex);
+            }
             Optional<Routed> route = route(ex.getRequestURI().getRawPath(), ex.getRequestURI().getRawQuery());
             Answer a;
             try {
-                a = answer(ex, caller, route);
+                a = answer(ex, caller, route, preRead);
             } catch (RuntimeException e) {
                 internalFailures.incrementAndGet();
                 a = Answer.refuse(503, "unavailable", "internal failure: " + e.getClass().getSimpleName());
             }
-            a = audited(a, caller.map(Analyst::id).orElse("unknown"), ex.getRequestMethod(), route);
+            a = audited(a, caller.map(Analyst::id).orElse("unknown"), ex.getRequestMethod(), route, delegationNote);
             send(ex, a);
         } catch (IOException | RuntimeException e) {
             // the connection broke while answering; nobody is left to answer
@@ -311,6 +342,14 @@ public final class SocApiServer implements AutoCloseable {
     }
 
     /** The analyst with exactly this certificate subject (RFC 2253 strings, not case-folding {@code equals}). */
+    private boolean viaConsole(HttpExchange ex) {
+        if (consoleSubject == null || !(ex instanceof HttpsExchange https) || https.getSSLSession() == null) {
+            return false;
+        }
+        return TlsContexts.peerPrincipal(https.getSSLSession())
+                .map(p -> p.getName(X500Principal.RFC2253).equals(consoleSubject)).orElse(false);
+    }
+
     Optional<Analyst> caller(X500Principal subject) {
         return Optional.ofNullable(callers.get(subject.getName(X500Principal.RFC2253)));
     }
@@ -329,7 +368,8 @@ public final class SocApiServer implements AutoCloseable {
         return Optional.empty();
     }
 
-    private Answer answer(HttpExchange ex, Optional<Analyst> caller, Optional<Routed> route) throws IOException {
+    private Answer answer(HttpExchange ex, Optional<Analyst> caller, Optional<Routed> route, Optional<byte[]> preRead)
+            throws IOException {
         if (caller.isEmpty()) {
             return Answer.refuse(403, "forbidden", "certificate subject is not a configured analyst");
         }
@@ -359,7 +399,7 @@ public final class SocApiServer implements AutoCloseable {
                 if (!jsonContent(ex.getRequestHeaders().getFirst("Content-Type"))) {
                     return Answer.refuse(415, "unsupported media type", "content type is not application/json");
                 }
-                Optional<byte[]> bytes = readBody(ex);
+                Optional<byte[]> bytes = preRead.isPresent() ? preRead : readBody(ex);
                 if (bytes.isEmpty()) {
                     return Answer.refuse(413, "request too large", "body over " + settings.maxBodyBytes() + " bytes");
                 }
@@ -556,9 +596,6 @@ public final class SocApiServer implements AutoCloseable {
         } catch (RuntimeException ex) {
             return Answer.refuse(503, "unavailable", "counts failed: " + ex.getClass().getSimpleName());
         }
-        if (r == null) {
-            return Answer.refuse(503, "unavailable", "counts answered nothing");
-        }
         if (r.problem().isPresent()) {
             return new Answer(200, JsonValue.object().put("problem", Sanitize.text(r.problem().get(), 200)).build(),
                     "counts problem", "", false);
@@ -704,7 +741,7 @@ public final class SocApiServer implements AutoCloseable {
         return t.equals("application/json") || t.equals("application/json;charset=utf-8");
     }
 
-    private Answer audited(Answer a, String caller, String method, Optional<Routed> route) {
+    private Answer audited(Answer a, String caller, String method, Optional<Routed> route, String via) {
         boolean refusal = a.status() != 200;
         boolean routine = route.map(r -> r.endpoint() == Endpoint.HEALTH).orElse(false);
         if ((refusal || routine) && !refusalAudits.tryAcquire(caller + ":" + a.status(), clock.instant())) {
@@ -712,6 +749,9 @@ public final class SocApiServer implements AutoCloseable {
         }
         Map<String, String> f = new LinkedHashMap<>();
         f.put("caller", caller);
+        if (!via.isEmpty()) {
+            f.put("via", Sanitize.text(via.strip(), 160));
+        }
         f.put("method", method == null || method.length() > 10 ? "other" : Sanitize.text(method, 10));
         f.put("endpoint", route.map(r -> r.endpoint().template).orElse("unknown"));
         route.ifPresent(r -> {
@@ -804,6 +844,8 @@ public final class SocApiServer implements AutoCloseable {
         private InetSocketAddress address = new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
         private Clock clock = Clock.systemUTC();
         private List<SocCaller> callers = List.of();
+        private String consoleSubject;
+        private Delegation.Verifier delegation;
         private SocApiSettings settings = SocApiSettings.defaults();
         private EventSearch search;
         private EntityRisk risk;
@@ -826,6 +868,16 @@ public final class SocApiServer implements AutoCloseable {
 
         public Builder clock(Clock v) {
             clock = v;
+            return this;
+        }
+
+        /**
+         * Lets the console (the certificate with exactly this RFC 2253 subject) act for the configured analysts,
+         * one signed assertion per call (see {@link Delegation}).
+         */
+        public Builder delegation(String consoleSubject, Delegation.Verifier verifier) {
+            this.consoleSubject = Objects.requireNonNull(consoleSubject, "consoleSubject");
+            this.delegation = Objects.requireNonNull(verifier, "verifier");
             return this;
         }
 
