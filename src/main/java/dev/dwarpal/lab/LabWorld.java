@@ -41,6 +41,7 @@ import dev.dwarpal.soar.PlaybookCompiler;
 import dev.dwarpal.soar.RuleCatalogue;
 import dev.dwarpal.soar.SimulatedSensor;
 import dev.dwarpal.soar.Soar;
+import dev.dwarpal.socapi.Delegation;
 import dev.dwarpal.socapi.SocApiServer;
 import dev.dwarpal.socapi.SocApiSettings;
 import dev.dwarpal.socapi.SocCaller;
@@ -271,6 +272,8 @@ public final class LabWorld implements AutoCloseable {
                     .tls(TlsContexts.create(pki.keyStore("soc-api"), pki.password(), pki.trustStore(), pki.password()))
                     .address(new InetSocketAddress(InetAddress.getLoopbackAddress(), config.port()))
                     .clock(org.clock)
+                    .delegation(TlsContexts.component("console").getName(javax.security.auth.x500.X500Principal.RFC2253),
+                            new Delegation.Verifier(org.keys, org.clock, 100_000))
                     .callers(ANALYSTS.stream().map(a -> SocCaller.component(a.id(), a)).toList())
                     .settings(SocApiSettings.defaults()).search(store).risk(ueba)
                     .reports((name, now) -> name.equals("daily") ? Optional.of(dailyReport().text()) : Optional.empty())
@@ -531,6 +534,14 @@ public final class LabWorld implements AutoCloseable {
      */
     public Verdict signVerdict(String analystId, String alertId, Verdict.Outcome outcome) {
         return org.verdict(analystId, alertId, outcome, org.clock.instant());
+    }
+
+    /**
+     * What the console server signs its calls with: one short assertion per call naming the analyst it acts for.
+     * Hold it in the console process only.
+     */
+    public Delegation.Issuer delegationIssuer() {
+        return new Delegation.Issuer(org.consoleKey.getPrivate(), SimOrganisation.CONSOLE_KEY_ID, org.clock);
     }
 
     /** The https address of the SOC API. */

@@ -98,6 +98,13 @@ Each session finishes its parts to `docs/layer-6/standards.md` section 5. In add
 * `LabWorld.auditView` (`dev.dwarpal.lab.LabAudit`): `page(after, limit, type)`, `record(seq)`, `verify()`. Verify
   re-computes the whole chain and compares it with the anchored head, including the record at the anchored
   sequence number. The head is anchored to `<lab>/audit.anchor` whenever it moves (`LabWorld.anchor`).
+* **Signed delegation** (`dev.dwarpal.socapi.Delegation`): the console connects with its own `console`
+  certificate and sends `Dwarpal-On-Behalf-Of: v1;analyst=..;iat=..;exp=..;jti=..;kid=..;sig=..` on every call.
+  Get the issuer from `LabWorld.delegationIssuer()` and call `issuer.header(analystId, method, rawPath, bodyBytes)`
+  for each request (`bodyBytes` exactly as sent, `null` for a GET). One use per assertion, 60 s lifetime, bound to
+  method, path and body. The SOC API audits the call under the analyst with `via: (via console)`; refused
+  assertions are audited with the reason. Implement `SocChannel` with this; per-analyst certificates stay valid
+  for direct clients only.
 
 ## 6. What the integration session does while the parts build (0b)
 

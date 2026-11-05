@@ -147,6 +147,9 @@ public final class SimOrganisation {
         }
     }
 
+    /** The console server's delegation key (the key ring trusts it for {@code CONSOLE_DELEGATE} only). */
+    public static final String CONSOLE_KEY_ID = "console-delegate";
+    public final KeyPair consoleKey = Ed25519.generateKeyPair();
     public final long seed;
     public final List<User> users;
     public final KeyRing keys;
@@ -187,6 +190,7 @@ public final class SimOrganisation {
         }
         ks.add(new TrustedKey(SimRequests.IDP_KEY_ID, KeyPurpose.IDENTITY_PROVIDER, "corp-idp", SimRequests.IDP.getPublic(),
                 from, to));
+        ks.add(new TrustedKey(CONSOLE_KEY_ID, KeyPurpose.CONSOLE_DELEGATE, "console", consoleKey.getPublic(), from, to));
         ks.add(new TrustedKey("soc-ana", KeyPurpose.SOC_ANALYST, "ana", ANALYST_ANA.getPublic(), from, to));
         ks.add(new TrustedKey("soc-ben", KeyPurpose.SOC_ANALYST, "ben", ANALYST_BEN.getPublic(), from, to));
         this.users = List.copyOf(us);
