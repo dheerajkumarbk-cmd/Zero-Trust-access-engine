@@ -596,9 +596,6 @@ public final class SocApiServer implements AutoCloseable {
         } catch (RuntimeException ex) {
             return Answer.refuse(503, "unavailable", "counts failed: " + ex.getClass().getSimpleName());
         }
-        if (r == null) {
-            return Answer.refuse(503, "unavailable", "counts answered nothing");
-        }
         if (r.problem().isPresent()) {
             return new Answer(200, JsonValue.object().put("problem", Sanitize.text(r.problem().get(), 200)).build(),
                     "counts problem", "", false);
