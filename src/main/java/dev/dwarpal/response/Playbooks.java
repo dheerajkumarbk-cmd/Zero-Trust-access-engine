@@ -137,22 +137,34 @@ public final class Playbooks {
      */
     public static Map<String, Play> referencePlays() {
         Duration day = Duration.ofDays(1);
-        return Map.of(
-                "honeytoken-touched", Play.of(new Play.Revoke(Entity.Kind.SUBJECT), new Play.Revoke(Entity.Kind.DEVICE),
-                        new Play.Deny(Entity.Kind.SUBJECT, day), new Play.Deny(Entity.Kind.DEVICE, day),
-                        new Play.Deny(Entity.Kind.IP, day)),
-                "stolen-token", Play.of(new Play.Revoke(Entity.Kind.SESSION), new Play.Revoke(Entity.Kind.SUBJECT),
-                        new Play.Watch(Entity.Kind.SUBJECT, Math.log(100), day)),
-                "break-glass-used", Play.of(new Play.Revoke(Entity.Kind.SUBJECT), new Play.Deny(Entity.Kind.SUBJECT, day)),
-                "deny-storm", Play.of(new Play.Deny(Entity.Kind.IP, Duration.ofHours(4)),
-                        new Play.Watch(Entity.Kind.SUBJECT, Math.log(10), day)),
-                "mfa-fatigue", Play.of(new Play.Revoke(Entity.Kind.SUBJECT),
-                        new Play.Watch(Entity.Kind.SUBJECT, Math.log(100), Duration.ofDays(2))),
-                "impossible-travel-allow", Play.of(new Play.Revoke(Entity.Kind.SUBJECT),
-                        new Play.Watch(Entity.Kind.SUBJECT, Math.log(100), day)),
-                "dlp-block-spike", Play.of(new Play.Watch(Entity.Kind.SUBJECT, Math.log(100), Duration.ofDays(7))),
-                "pam-refusals", Play.of(new Play.Watch(Entity.Kind.SUBJECT, Math.log(10), day)),
-                "audit-chain-break", Play.of());
+        // Keys are part A's rule ids (dev.dwarpal.siem); an integration test checks that every rule has a play.
+        // The two deny-storm rules and mfa-fatigue name the person being attacked, whom anyone can name by
+        // sending requests: they deny addresses only and watch the person, never deny them.
+        Play storm = Play.of(new Play.Deny(Entity.Kind.IP, Duration.ofHours(4)),
+                new Play.Watch(Entity.Kind.SUBJECT, Math.log(10), day));
+        return Map.ofEntries(
+                Map.entry("honeytoken-touched", Play.of(new Play.Revoke(Entity.Kind.SUBJECT),
+                        new Play.Revoke(Entity.Kind.DEVICE), new Play.Deny(Entity.Kind.SUBJECT, day),
+                        new Play.Deny(Entity.Kind.DEVICE, day), new Play.Deny(Entity.Kind.IP, day))),
+                Map.entry("stolen-token-revoked", Play.of(new Play.Revoke(Entity.Kind.SESSION),
+                        new Play.Revoke(Entity.Kind.SUBJECT), new Play.Watch(Entity.Kind.SUBJECT, Math.log(100), day))),
+                Map.entry("break-glass-used", Play.of(new Play.Revoke(Entity.Kind.SUBJECT),
+                        new Play.Deny(Entity.Kind.SUBJECT, day))),
+                Map.entry("break-glass-refused", Play.of(new Play.Watch(Entity.Kind.SUBJECT, Math.log(10), day))),
+                Map.entry("deny-storm-ip", storm),
+                Map.entry("deny-storm-subject", storm),
+                Map.entry("mfa-fatigue", Play.of(new Play.Revoke(Entity.Kind.SUBJECT),
+                        new Play.Watch(Entity.Kind.SUBJECT, Math.log(100), Duration.ofDays(2)))),
+                Map.entry("impossible-travel-allow", Play.of(new Play.Revoke(Entity.Kind.SUBJECT),
+                        new Play.Watch(Entity.Kind.SUBJECT, Math.log(100), day))),
+                Map.entry("dlp-block-spike", Play.of(new Play.Watch(Entity.Kind.SUBJECT, Math.log(100),
+                        Duration.ofDays(7)))),
+                Map.entry("pam-refused", Play.of(new Play.Watch(Entity.Kind.SUBJECT, Math.log(10), day))),
+                Map.entry("audit-chain-break", Play.of()),
+                Map.entry("audit-anchor-mismatch", Play.of()),
+                // Detection's own health alerts: for people, not for automatic action.
+                Map.entry("alert-flood", Play.of()),
+                Map.entry("detection-state-full", Play.of()));
     }
 
     /** For a rule without a play: watch the people it names (x10, half-life one day), nothing destructive. */

@@ -89,8 +89,8 @@ class ResponseRedTeamTest {
         Playbooks.Result r = w.decide("ana", id, FALSE_POSITIVE);
         assertEquals(Playbooks.Status.REFUSED, r.status(), "ana cannot clear herself");
         // and an alert that only later names her joins the case and still makes her a party to it
-        String later = w.raise("pam-refusals", Severity.LOW, Entity.subject("dave"));
-        Alert second = w.alert("pam-refusals", Severity.LOW, Entity.subject("dave"), Entity.subject("cleo"));
+        String later = w.raise("pam-refused", Severity.LOW, Entity.subject("dave"));
+        Alert second = w.alert("pam-refused", Severity.LOW, Entity.subject("dave"), Entity.subject("cleo"));
         assertTrue(w.book.raise(second));
         assertEquals(Playbooks.Status.REFUSED, w.decide("cleo", later, FALSE_POSITIVE).status());
     }
@@ -99,13 +99,13 @@ class ResponseRedTeamTest {
     void r6_aFloodOfLowAlertsCannotShutOutACriticalOne() {
         ResponseWorld small = new ResponseWorld(ResponseSettings.defaults().withLimits(20, 10, 50, 5));
         for (int i = 0; small.book.size() < 50; i++) {
-            small.book.raise(small.alert("deny-storm", Severity.LOW, Entity.ip("192.0.2." + i)));
+            small.book.raise(small.alert("deny-storm-ip", Severity.LOW, Entity.ip("192.0.2." + i)));
         }
         Alert critical = small.alert("honeytoken-touched", Severity.CRITICAL, Entity.subject("alice"));
         assertTrue(small.book.raise(critical));
         assertEquals(1, small.book.dropped());
         assertEquals(1, small.audited("CASE_DROPPED"));
-        assertFalse(small.book.raise(small.alert("deny-storm", Severity.LOW, Entity.ip("192.0.3.1"))),
+        assertFalse(small.book.raise(small.alert("deny-storm-ip", Severity.LOW, Entity.ip("192.0.3.1"))),
                 "the flood itself is refused, not the other way round");
     }
 

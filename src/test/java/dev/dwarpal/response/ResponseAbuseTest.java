@@ -154,7 +154,7 @@ class ResponseAbuseTest {
     @Test
     void noAuditNoAction() {
         String id = honeytokenOnAlice();
-        Alert later = w.alert("deny-storm", Severity.LOW, Entity.ip("192.0.2.9"));
+        Alert later = w.alert("deny-storm-ip", Severity.LOW, Entity.ip("192.0.2.9"));
         w.auditDown.set(true);
         assertEquals(Playbooks.Status.REFUSED, w.decide("ana", id, TRUE_POSITIVE).status());
         assertFalse(w.book.raise(later), "the case book needs the trail too");

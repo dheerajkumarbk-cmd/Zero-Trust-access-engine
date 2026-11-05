@@ -64,6 +64,15 @@ A session opens only on fresh, verified MFA bound to the client's session key, a
 opens one session. Single decisions without a session exist only for web browsing. See the
 [Layer 4 report](docs/layer-4-report.md).
 
+## The SOC loop (Layer 5)
+
+Decisions flow back into decisions. The audit trail is stored encrypted and anchored (`siem`); detection
+rules read only verified records and raise alerts, which become cases (`response`); an analyst confirms or
+rejects each case with a signed verdict; playbooks then block, watch or revoke, within guard rails, through
+the same signal feed the engine reads; and `analytics` replays recorded traffic through a proposed policy
+(What-If), calibrates probabilities and measures accuracy on the same trail. See the
+[Layer 5 report](docs/layer-5-report.md).
+
 ## The maths
 
 - **M3, Bayes with base rate** (Axelsson 2000): `logit P(attack|x) = logit P(attack) + Σ ln LR_k`
@@ -78,7 +87,7 @@ opens one session. Single decisions without a session exist only for web browsin
 - **Failure bursts:** Poisson likelihood ratio for brute force, password spray and org-wide surges, clamped at zero.
 
 Reports: [Layer 1](docs/layer-1-report.md), [Layer 2](docs/layer-2-report.md), [Layer 3](docs/layer-3-report.md),
-[Layer 4](docs/layer-4-report.md),
+[Layer 4](docs/layer-4-report.md), [Layer 5](docs/layer-5-report.md),
 and the full [project state](docs/project-state.md).
 
 ## Build

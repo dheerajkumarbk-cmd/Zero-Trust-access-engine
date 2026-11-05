@@ -1,4 +1,4 @@
-# Dwarpal threat model (STRIDE), v1.1
+# Dwarpal threat model (STRIDE), v1.2
 
 Scope: the Policy Engine core (v0.1 to v0.6) and the Policy Administrator: sessions (v0.7, v0.8) and
 privileged access (v0.8). The PEP
@@ -255,6 +255,125 @@ Red-team pass on part 0:
 | R11 | Elevation | A caller claiming to be five years ahead set a five-year deny on the CEO (still in force two years later) | `deny` measured its 30-day limit from a time the caller supplied | The feed keeps its own clock; changes take durations | `r1_aCallerCannotChooseTheTimeADenyIsMeasuredFrom` |
 | R12 | Elevation | A snapshot read for a far-future time deleted every deny ending before then, and the empty result was then served from the cache for the present | Building a snapshot removed expired entries; the cache had no lower time bound | Reading never changes the store; the cache covers only the interval it was built for | `r2_readingTheFutureNeitherDeletesNorHidesDenies` |
 
+## v1.2 Layer 5 (SOC loop: SIEM and detection, response, analytics)
+
+Ids are prefixed by part: 5A (SIEM and detection), 5B (response loop), 5C (analytics); `R` marks a breach
+found by that part's red-team pass, reproduced as a working probe before the fix. Details and design reasons
+are in `docs/layer-5/part-a.md`, `part-b.md` and `part-c.md`.
+
+### 5A SIEM and detection
+
+| # | STRIDE | Threat | Mitigation in code | Test |
+|---|---|---|---|---|
+| 5A-1 | Info disclosure | A stolen disk, backup or copied store file reveals the audit trail (who accessed what, from where) | AES-256-GCM per record; the key is passed in and never written; no plaintext or key bytes in the file | `theFileHoldsNeitherPlaintextNorTheKey`, `theWrongKeyReadsNothing` |
+| 5A-2 | Tampering | Bit flips, swapped records, a replayed record, a frame spliced from another store, a changed header | GCM tag over each record with sequence and store id as associated data; detected on open and on every read; writes refused afterwards | `aFlippedBitIsDetectedAndEarlierRecordsStayReadable`, `swappedRecordsAreDetected`, `aReplayedRecordIsDetected`, `aChangedStoreIdBreaksEveryRecord`, `aFileChangedAfterOpeningIsCaughtOnRead`, `aFrameAppendedWithoutTheKeyIsDamageAndAChainBreak` |
+| 5A-3 | Tampering / repudiation | A trail cut back at a record boundary (invisible to the store and to the chain) | `HeadAnchor` in a separate place; the engine compares at the anchor; stale, rolled-back, rewritten or removed anchors are refused | `aTruncationAtAFrameBoundaryNeedsTheAnchor`, `aTruncatedTrailDisagreesWithItsAnchor`, `aRemovedOrRolledBackAnchorIsTamperingOnceOneExisted`, `rA1_aRestoredOldAnchorIsStaleAndStopsDetection` |
+| 5A-4 | Tampering | A caller (or bug) writes a gap or a fork into the store | Only sequence + 1 linked to the previous MAC is accepted | `onlyTheNextRecordOfTheChainIsAccepted` |
+| 5A-5 | Denial of service | Huge records or a corrupt length field exhaust memory | Records at most 1 MiB, refused before writing; frame length bounds-checked before allocating; batches capped | `oversizedRecordsAreRefusedBeforeAnythingIsWritten`, `aFrameLengthOutOfBoundsIsDamageNotAHugeAllocation`, `batchesAreCappedLikeEverySource` |
+| 5A-6 | Tampering | Two writers on one file interleave frames | File lock on a byte past the end (readers never blocked on Windows) | `aSecondWriterOnTheSameFileIsRefused` |
+| 5A-7 | Spoofing / tampering | A field value or name forges another field or another event in the SIEM (CEF `\|` `=`, syslog `]` `"`, new lines, bidi) | Per-format escaping of names and values; names mapped to safe, distinct keys; one event per line | `cefCannotBeForged`, `cefHeaderFieldsEscapePipesAndBackslashes`, `syslogCannotBeForged`, `jsonLinesAreLosslessAndOneLine`, `namesMapToDistinctSafeKeys` |
+| 5A-8 | Denial of service / repudiation | One huge value pushes the subject or address out of a size-capped SIEM line | Values cut at 2,048, lines at about 32 KiB, short fields first, no split surrogate pairs | `aHugeValueCannotPushOutTheSubject`, `cuttingNeverSplitsASurrogatePair` |
+| 5A-9 | Spoofing | Detection fed forged or edited records raises alerts against innocent people, or misses real ones | Keyed cursor built by the engine; a break raises one CRITICAL alert and stops for good | `aRecordForgedWithAnotherKeyIsNeverDetectedOn`, `aChainBreakRaisesOneCriticalAlertAndStopsForGood`, `aSourceThatThrowsIsABreakNotAnEnd` |
+| 5A-10 | Denial of service (SOC) | An alert flood drowns the analysts or buries a real CRITICAL alert | Per-entity dedup with roll-up; per-rule hourly caps (separate cap for CRITICAL rules); one `alert-flood` alert | `repeatsFoldIntoOneAlertAndARollUpWithTheirCount`, `aDenyFloodCannotBuryABreakGlassAlert`, `rA3_honeytokenFloodsAreCappedWithOneCriticalFloodAlert` |
+| 5A-11 | Denial of service / evasion | Detection state flooded with invented entities, so the real attacker is not tracked, or memory runs out | Bounded state; idle keys dropped, live keys never forgotten; refusals counted and alerted | `floodingDetectionStateRaisesStateFull`, `windowCounterIsBounded`, `boundedUnderAMillionEvents` |
+| 5A-12 | Elevation (SOC as a weapon) | Junk requests in the CEO's name make detection point at the CEO, so a playbook locks the CEO out | `deny-storm-subject` names the person as target plus the attacking addresses, and says it is not evidence against them; request 4 to part B | `junkInSomeonesNameNamesTheAttackingAddresses` |
+| 5A-13 | Evasion | An attacker resets a counting rule between attempts (MFA fatigue) | Only an ALLOW ends a step-up run | `rA2_aDenyBetweenPushesDoesNotResetMfaFatigue`, `mfaFatigueNeedsFivePushesWithoutAnAllow` |
+| 5A-14 | Repudiation / info loss | Alerts lost when the case book is full or down | Refused alerts kept and retried; reading stops while any wait; `lost` counted | `alertsTheSinkRefusesAreKeptAndNothingMoreIsReadUntilItAccepts`, `aSinkThatThrowsIsTreatedAsRefusing` |
+| 5A-15 | Tampering | A factor name forged inside free text makes a decision look like impossible travel | Index search only at a factor boundary; number length capped; NaN and non-positive refused; no ReDoS-prone regex | `onlyARealPositiveTravelFactorCounts` |
+| 5A-16 | Info disclosure | Alerts or exceptions carry secrets or payload text | Summaries carry ids and counts only; damage messages name record numbers only; invalid ids hashed | `oddIdsInARecordStillCountAndNeverReachAnAlertRaw` |
+
+Red-team pass:
+
+| # | STRIDE | Breach (before the fix) | Root cause | Fix | Test |
+|---|---|---|---|---|---|
+| 5A-R1 | Tampering | An attacker who can write the store and the anchor directory cut the store back to record 5 and put back a copy of the anchor file from record 5. After a restart, the trail agreed with "its" anchor: five records (all `BREAK_GLASS_USED`) gone without trace | A new `HeadAnchor` instance has no memory of later anchors, and an anchor carried no notion of age | Every write renews the anchor's time (a heartbeat, even when the head is unchanged); `readFresh(maxAge)` refuses an anchor older than the schedule allows (or dated in the future), and detection treats that as `audit-anchor-mismatch` | `rA1_aRestoredOldAnchorIsStaleAndStopsDetection`, `rA1_aLiveAnchorStaysFreshOnAQuietTrail` |
+| 5A-R2 | Evasion | 40 MFA pushes to the CEO in 15 minutes raised no alert: the attacker sent one deliberately bad request (from Tor, so DENY) after every fourth push | The fatigue rule reset its count on any decision that was not a STEP_UP, including a DENY the attacker could cause at will | Only an ALLOW (a successful decision for that person) ends a run | `rA2_aDenyBetweenPushesDoesNotResetMfaFatigue` |
+| 5A-R3 | Denial of service (SOC) | Someone who knows a honeytoken's id sent 2,000 requests with invented device ids: 2,000 CRITICAL alerts, none throttled (alert fatigue, and part B's playbooks run per alert) | CRITICAL alerts were exempt from throttling, and the honeytoken dedup key includes the device | CRITICAL rules get their own cap (200 per rule per hour), then one CRITICAL `alert-flood` alert; the rest are counted | `rA3_honeytokenFloodsAreCappedWithOneCriticalFloodAlert` |
+
+### 5B Response loop
+
+| # | STRIDE | Threat | Mitigation in code | Test |
+|---|---|---|---|---|
+| 5B-1 | Spoofing | A forged verdict (another analyst's key, another outcome, junk, unknown key) triggers a playbook | `VerdictGate` → `Verdict.verify`: SOC_ANALYST key bound to the named analyst over exactly this claim | `aForgedVerdictDoesNothing` |
+| 5B-2 | Spoofing | A key of another purpose (an IdP key bound to the analyst's name) signs a verdict | Purpose checked by the key ring | `aVerdictSignedWithAKeyOfAnotherPurposeDoesNotCount` |
+| 5B-3 | Tampering | A captured verdict is replayed (for example to re-deny someone after a false positive) | Single use per (alert, analyst, outcome, time); retention covers the whole validity; full store refuses | `aReplayedVerdictCountsOnce`, `aFullReplayStoreRefusesRatherThanForgets` |
+| 5B-4 | Tampering | A stale or future-dated verdict | At most 15 min old, at most 2 min ahead | `staleAndFutureVerdictsAreRefused` |
+| 5B-5 | Elevation | An analyst clears (or decides) a case about themselves | Refused if the analyst is any person any alert of the case names | `anAnalystCannotDecideACaseAboutThemselves`, `r5_...` |
+| 5B-6 | Denial of service | An alert flood plus verdicts (or one stolen analyst key) locks out the company | 20 destructive actions per hour overall, 10 per analyst, counted per target; watches unaffected | `anAlertFloodCannotDenyTheWholeCompany`, `r8_...` |
+| 5B-7 | Denial of service | Junk verdicts in an analyst's name use up their quota | Quota consumed only after verification; refusals audited 20 per minute per name | `junkVerdictsInAnAnalystsNameDoNotUseUpTheirQuota` |
+| 5B-8 | Elevation / DoS | One analyst locks out a privileged account (or the office egress) | Two-person rule for destructive steps on alerts naming privileged or protected people, and on shared addresses | `privilegedAccountsNeedASecondAnalystForDestructiveSteps`, `sharedAddressesNeedTwoAnalystsTooButOrdinaryOnesDoNot`, `r3_...` |
+| 5B-9 | Elevation | One stolen analyst key lifts a deny on a confirmed attacker | Lifting what two confirmed needs two | `liftingWhatTwoAnalystsConfirmedNeedsTwoAnalysts`, `r4_...` |
+| 5B-10 | Elevation | A deny that never ends | Playbook denies at most 7 days (plays checked against the settings at start-up), the feed's own 30-day cap behind it | `aDenyEndsOnTimeAndNeverOutlastsTheMaximum` |
+| 5B-11 | Repudiation | Actions taken without a record | Audited before acting; no audit, no action; cases audited before each change | `noAuditNoAction`, `anActionThatCannotBeAuditedIsNotTaken`, `aTruePositiveRevokesDeniesAndWatchesAndTheEngineSeesIt` |
+| 5B-12 | Tampering | A false positive on one case frees the person from another case's deny | `SignalLedger` shares; interrupted lifts remembered and reconciled | `r2_...`, `anInterruptedLiftIsRememberedAndReconciled` |
+| 5B-13 | Tampering | A false positive wipes DLP evidence | DLP is its own holder | `aFalsePositiveDoesNotLiftDlpEvidence` |
+| 5B-14 | Spoofing | Forged `casb.dlp` records raise an innocent person's risk | Keyed `AuditCursor`; stops at the first break | `r7_...`, `aBrokenTrailStopsTheFeedbackForGood` |
+| 5B-15 | Denial of service | Repeated DLP findings deny a person | DLP alone capped at x100; 10 updates per person per hour | `dlpAloneNeverReachesTheLevelOfAConfirmedAttack`, `dlpUpdatesAreLimitedPerPerson` |
+| 5B-16 | Tampering | A request dated in the future hides a watch | Scorer uses the earlier of request time and its clock | `r1_...` |
+| 5B-17 | Denial of service | A flood of low alerts hides a critical one; memory exhaustion | Bounded case book; severity-aware room-making; refuse and count | `theCaseBookIsBoundedAndForgetsOnlyWhatIsSafeToForget`, `r6_...` |
+| 5B-18 | Info disclosure | Secrets or analysts' reasons leak through the scorer's explanation or audit records | Scorer evidence has numbers only; audit records carry ids, rule, step and target (alerts never copy payloads); reasons sanitised and capped | `theScorerIsSilentWithoutAWatchAndAddsUpPersonDeviceAndAddress` |
+| 5B-19 | Elevation | Directory down: a privileged person treated as ordinary | Unknown privilege = privileged | `whenTheDirectoryCannotTellWhoIsPrivilegedTwoAnalystsAreNeeded` |
+| 5B-20 | Elevation | A benign verdict closes a case while its watch stays in force | BENIGN refused when actions are in force | `aBenignVerdictCannotQuietlyKeepActionsInForce` |
+| 5B-21 | Denial of service | Enforcement unreachable mid-play | Reported as PARTIAL, case stays TRIAGED, a new verdict retries only what is missing | `enforcementDownIsReportedAndCanBeRetried` |
+
+Red-team pass:
+
+| # | Breach | Root cause | Fix | Test |
+|---|---|---|---|---|
+| 5B-R1 | (Tampering) A request dated 30 days ahead saw a x1000 watch (half-life 1 h) as faded: no risk factor at all | The scorer decayed the watch to the request's own time | The earlier of the request's time and the scorer's clock | `r1_aRequestDatedInTheFutureCannotMakeAWatchLookFaded` |
+| 5B-R2 | (Tampering) Carol, denied for 24 h by case 1, was freed by a false positive on a second case about her | Undo called `SignalFeed.clear`, which ends every deny and watch on the entity | `SignalLedger`: shares per holder; a lift puts the others back with the time and weight left | `r2_aFalsePositiveOnOneCaseDoesNotFreeThePersonFromAnother` |
+| 5B-R3 | (Elevation) One analyst revoked root's laptop and denied root's address; only root's account waited for a second analyst | The two-person rule looked at the target, not at whom the alert is about | Every destructive step on an alert naming a protected person waits | `r3_theTwoPersonRuleCoversThePrivilegedPersonsDeviceAndAddressToo` |
+| 5B-R4 | (Elevation) A deny two analysts had confirmed was lifted by a third analyst alone: one stolen key frees an attacker | Undo needed one verdict | Lifting what two confirmed needs two | `r4_oneStolenAnalystKeyCannotLiftWhatTwoAnalystsConfirmed` |
+| 5B-R5 | (Elevation) Ana, named second in an alert about alice, cleared the deny on herself | The self-decision check compared only the case's key entity | Any person named by any alert of the case | `r5_anAnalystNamedAnywhereInACaseCannotDecideIt` |
+| 5B-R6 | (Denial of service) 50 LOW alerts filled the case book and the CRITICAL honeytoken alert was refused | Full meant refuse, whatever the severity | Drop the oldest untouched, less severe open case (audited `CASE_DROPPED`) | `r6_aFloodOfLowAlertsCannotShutOutACriticalOne` |
+| 5B-R7 | (Spoofing) Five forged `casb.dlp` records, written with another key, raised alice's risk | The trail was read checking order and links only | DLP feedback requires the audit key; there is no unkeyed path | `r7_dlpRecordsWithoutAValidMacDoNotRaiseAnyonesRisk` |
+| 5B-R8 | (Denial of service) One verdict on an alert naming 16 people revoked and denied all 16 with a limit of 6 | The rate limit counted once per verdict | Counted per destructive target | `r8_oneVerdictOnAnAlertNamingManyPeopleIsLimitedPerTarget` |
+
+### 5C Analytics
+
+| # | STRIDE | Threat | Mitigation in code | Test |
+|---|---|---|---|---|
+| 5C-1 | Tampering | A What-If run through the live pipeline poisons the behaviour model and the audit trail | Only `PolicyEngine` accepted; no API takes a `DecisionPoint` | `AnalyticsRedTeamTest.c1_*` |
+| 5C-2 | Spoofing | A recorded request claims a lower classification to hide a new RESTRICTED grant | Classification from the directory; unknown = RESTRICTED | `c3_*`, `c3b_*` |
+| 5C-3 | Information disclosure | Recorder keeps posture and login proofs that can be replayed | Evidence stripped; `RecordedRequest` refuses evidence | `c5_*` |
+| 5C-4 | Information disclosure | A report leaks request ids, addresses, devices or evidence | Change and Observation have no such fields; reports built only from ids, counts and rates | `c4_*` |
+| 5C-5 | Information disclosure | A recorder dump reveals the honeytoken list | Signal snapshots are not recorded | design 4; `RecordedRequest` components |
+| 5C-6 | Denial of service | One account floods the recorder so What-If sees only the attacker's traffic | Per-subject quota, refusals counted; window stated in `stats()` | `c6_*` |
+| 5C-7 | Denial of service | Huge inputs exhaust memory (replays, observations, grids, report lines) | Limits: 200,000 replayed requests, 10,000 changes kept (all counted), 1,000,000 observations, 1,000 grid points, 64 sections, 2,000 lines, 400-character values | `manyChangesAreCountedButListBounded`, `tooManyRequestsRefused`, `limits`, `c9_*`, `c12_*` |
+| 5C-8 | Repudiation / tampering | Forged audit records feed the analytics (SOC as a target) | `AuditCursor` with the key; reading stops at the first break and the source statement says so | `c11_*`, `AuditDecisionsTest` |
+| 5C-9 | Tampering (log forging) | Hostile text forges report lines or hides text with bidi controls | `Sanitize.text` on every label, value, title and description; JSON escaped | `c9_*` |
+| 5C-10 | Elevation of privilege | A What-If reports "no change" for an edit that grants access, so a reviewer approves it | Freshness gate detected (INVALID); lint-failing proposals refused; sensitive grants listed first | `c2_*`, `c10_*`, `grantToRestrictedResourceIsFlagged` |
+| 5C-11 | Repudiation (of numbers) | A number quoted without its data is read as real-world accuracy | `DataSource` mandatory in every report, statement printed first with a caveat | `dataSourceStatementsAlwaysCarryACaveat`, `reportStatesItsSourceAndValidity` |
+| 5C-12 | Tampering (silent failure) | A recording failure changes or blocks access | Recorder returns the delegate's decision; failures only counted | `recorderFailureNeverChangesTheDecision` |
+
+Red-team pass:
+
+| # | Breach | Root cause | Fix | Test |
+|---|---|---|---|---|
+| 5C-R1 | What-If with side effects: replaying through a `DecisionPoint` given the live pipeline appended audit records and learned the replayed logins | API accepted any decision point | WhatIf takes a `PolicyEngine` only; test checks audit, history, trust and signals unchanged | `c1_replayThroughThePipelineWouldLearnAndAudit_whatIfAcceptsOnlyThePureEngine` |
+| 5C-R2 | An engine with a live `FreshnessGate` denied every historical request under both policies: a three-grant payroll edit showed 0 changes | The one clock reader in the engine | Runs where the gate fired are INVALID, with the reason in the report | `c2_freshnessGateWouldHideTheDiff_replayIsMarkedInvalid` |
+| 5C-R3 | A recorded request claiming `payroll` was INTERNAL hid a new grant to a RESTRICTED resource; an unknown resource was not flagged either | Classification read from the request | Directory lookup; unknown counts as RESTRICTED; ADMIN gains flagged too | `c3_*`, `c3b_*`, `c3c_*` |
+| 5C-R4 | Report leaking request data (ids, addresses, devices) | Risk of copying request fields into reports | Change/Observation carry only ids that say who gains what; checked over every request of the simulation against every report's text and JSON | `c4_reportsCarryNoRequestIdsAddressesDevicesOrEvidence` |
+| 5C-R5 | Recorder kept posture and authentication proofs (replayable credentials) | Whole request kept | Evidence stripped; record type refuses evidence | `c5_recorderStripsSignedEvidence` |
+| 5C-R6 | One account sending 5,000 requests would evict all other traffic from a FIFO recorder | No per-subject bound | Per-subject quota, refusals counted | `c6_floodingSubjectCannotEvictOthers` |
+| 5C-R7 | No legitimate traffic gave "0% false alarms" and NaN in JSON | 0/0 reported as 0 | Undefined rates are "n/a" / null; empty data refused | `c7_noLegitimateTrafficIsNotZeroFalseAlarms` |
+| 5C-R8 | Hard-gate denials ranked as most benign on the ROC (posterior = prior) | Posterior used as the score | Score = outcome, then posterior | `c8_gateDenialsRankAsMostSuspicious` |
+| 5C-R9 | A description with a newline forged an "Accuracy: detection rate: 1.0" line; bidi controls | Free text in reports | Sanitised and cut everywhere; bounded reports | `c9_hostileTextCannotForgeReportLines` |
+| 5C-R10 | A proposal with linter errors would be "replayed" and reported | No check | `withPolicySet` lint gate: refused | `c10_proposalWithLinterErrorsIsRefused` |
+| 5C-R11 | A record written into the store without the key, claiming P(attack) = 0, would enter the analysis | SOC as a target | Keyed `AuditCursor`; reading stops at the break and the source says "chain broken after sequence N" | `c11_forgedAuditRecordsStopTheReaderAndAreNotUsed` |
+| 5C-R12 | Impossible inputs (k > n, NaN exposure, beta 1.5, empty or huge grids, infinite factors, p = 1 with beta = 0 giving 0/0) | Unchecked numbers | Validation everywhere; 0/0 in step-up resolution stays strict | `c12_estimatorsRefuseImpossibleInputs` |
+
+### Integration (cross-part)
+
+| # | STRIDE | Threat or breach | Mitigation in code | Test |
+|---|---|---|---|---|
+| 5I-1 | Elevation | Four playbooks were keyed by names no detection rule raised (`deny-storm`, `pam-refusals`, `stolen-token`, unmatched health alerts), so their alerts only ever got the cautious default | Playbooks keyed by part A's rule ids; a test fails if any rule lacks a play or any play lacks a rule | `everyRuleHasItsOwnPlayAndEveryPlayHasARule` |
+| 5I-2 | Tampering / denial of service | Rules matched other packages' wording ("possible token theft", the rendering of risk factors): rewording a message silently disabled detection | Machine-readable `cause` on revocations and `signals` on decisions; rules use them first, old wording only for older trails | `tokenTheftIsMatchedOnTheCauseNotTheWording`, `travelIsMatchedOnTheSignalNames`, `decisionsOnTheSimulatedOrganisationCarrySignals` |
+| 5I-3 | Denial of service | After a restart the audit writer started again at sequence 1, the encrypted store refused it, and every decision became a deny | `AuditLog(key, sink, head)` continues from the store's verified head; a stale head is refused (no fork) | `afterARestartTheWriterContinuesTheEncryptedTrailAndAStaleHeadIsRefused` |
+| 5I-4 | Elevation (against innocent people) | An attacker floods the trail with denied requests in the CEO's name; part A raises a deny-storm alert naming the CEO; an analyst confirms it | The play denies the sending address only and adds a small watch on the CEO (x10, fading); the CEO is protected (two analysts) | `junkInTheCeosNameBlocksTheSenderButNeverLocksOutTheCeo` |
+| 5I-5 | Tampering | A What-If replayed on the live engine: the freshness gate called every old request stale and hid a dangerous change | `WhatIf` replays on `PolicyEngine.forReplay()` (drops only the clock-reading gate; live engine unchanged) | `c2_freshnessGateWouldHideTheDiff_replayUsesAReplayCopy` |
+| 5I-6 | Repudiation / tampering | Detection or analytics over the encrypted store differs from the trail it holds | Same alerts and same decision entries from the store as from memory; anchor checked | `theEncryptedStoreFeedsDetectionAndAnalyticsExactlyLikeTheTrailItHolds` |
+
 ## Residual risks (accepted for this layer, scheduled)
 
 | Risk | Why accepted now | Planned in |
@@ -263,7 +382,7 @@ Red-team pass on part 0:
 | Hardware (TPM) attestation not verified | Needs an attestation verifier | Later layer; until then capped at AGENT_SIGNED |
 | HMAC audit key cannot live in an HSM yet (key must be extractable) | Simplicity | Layer 4: KMS-backed signing of chain heads |
 | Correlated scorers overcount under naive Bayes | Inherent in the model | Documented; evaluation chapter |
-| Linter conflict detection is structural only | SMT out of scope | What-If replay (Layer 4) |
+| Linter conflict detection is structural only | SMT out of scope | What-If replay shows the effect of a change on recorded traffic (Layer 5 C); no proof |
 | ~~PEP must treat an exception (null input) as DENY~~ | Closed in v1.0: every enforcement point maps any failure, timeout or odd answer to a deny (`RemoteSessionAuthority`, `aFailingOrSilentAuthorityIsADeny`) | Done (Layer 4) |
 | ~~Admin endpoint flooding (each rejection is audited)~~ | Closed in v0.8 (A8, R7) | Done (Layer 3) |
 | Per-method MFA beta values are assumptions | No peer-reviewed rates exist | Sensitivity analysis in evaluation |
@@ -286,6 +405,16 @@ Red-team pass on part 0:
 | The web gateway knows its users by source address (`IdentityResolver.fixed`) | No proxy authentication yet; fine on a protected network, wrong behind NAT | HTTPS-proxy mode with the device certificate as identity (tested in part C), wired in the demo launcher |
 | No TLS interception in the web gateway: only host names are seen | Interception needs a certificate on every client | Accepted; stated as a limit |
 | DLP does not decode base64, compressed or Office/PDF content | Lite DLP; binary containers are blocked by default | Accepted; a determined insider can always encode |
-| DLP findings reach the audit trail but not the behavioural scorers | Engine-side change | Layer 5 (SOC loop) |
+| ~~DLP findings reach the audit trail but not the behavioural scorers~~ | Closed in v1.2: `DlpFeedback` turns blocks into fading watches read by `WatchlistScorer` | Done (Layer 5) |
 | The JDK HTTP server's own slow-request limits (`sun.net.httpserver.maxReqTime`) are JVM-wide | Each server already has its own per-request deadline in code | The demo launcher sets them on the command line as a second layer |
 | A compromised ZTNA gateway holds the application's shared secret and can reach the app directly | The gateway is the app's only door by design | Mutual TLS from gateway to app instead of a shared secret (later) |
+| Detection windows start from zero after a restart (rule state is in memory) | No database yet | Persistent state with the store |
+| Detection thresholds are starting values, not measured rates | No real traffic | Calibrate on real logs (part C's tools) |
+| A rule's hourly cap hides further alerts of the same rule during a flood (they are counted, and the flood is alerted) | Protects analysts from alert floods | Accepted |
+| An attacker who can write both the store and the anchor and stop the anchor schedule can hide records written since the last anchor | Anchor on another volume or account limits it | Ship anchors off the machine |
+| The three Layer 5 keys (audit HMAC, store AES, anchor HMAC) come from the launcher; on Windows the store file has no POSIX permissions | Deployment concern | Layer 6 launcher and installer ACL |
+| Revocations by a playbook cannot be undone by a false positive (people log in again) | Ending sessions is the safe side | Accepted |
+| Case book and signal ledger live in memory: a restart forgets which case holds which deny (feed entries still end on their own) | No database yet | Persistent store |
+| Several writers to the signal feed must share one `SignalLedger`, or a false positive may lift another writer's entry | `SignalFeed` has no per-holder clear | Per-holder clear in `SignalFeed` |
+| What-If replays recorded requests without their evidence (data minimisation), so absolute decisions drift (250 of 720 in the simulation); the diff between two policies is still like for like | Faithful replay needs the engine to accept already-verified facts | After submission |
+| Behaviour history is not time-indexed, so a replay sees what was learned after the request | Both policies see the same state | Point-in-time history |

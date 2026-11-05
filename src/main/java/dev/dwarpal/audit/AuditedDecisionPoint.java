@@ -71,6 +71,10 @@ public final class AuditedDecisionPoint implements DecisionPoint {
         f.put("sourceIp", r.network().ip());
         f.put("pep", r.pepRegion());
         f.put("factors", d.risk().factors().toString());
+        // Machine-readable: the names (identifiers, validated by RiskFactor) of the factors that raised the risk.
+        f.put("signals", d.risk().factors().stream().filter(x -> x.logLikelihoodRatio() > 0)
+                .map(dev.dwarpal.risk.RiskFactor::name).distinct().sorted()
+                .collect(java.util.stream.Collectors.joining(",")));
         f.put("reasons", String.join(" | ", d.reasons()));
         return f;
     }

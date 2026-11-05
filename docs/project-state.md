@@ -1,14 +1,14 @@
-# Dwarpal: project state document (Layers 1 to 4)
+# Dwarpal: project state document (Layers 1 to 5)
 
 | | |
 |---|---|
 | Document | Project state and progress log |
-| State as of | 2026-11-04 (Layer 4 integrated) |
+| State as of | 2026-11-05 (Layer 5 integrated) |
 | Repository | https://github.com/dheerajkumarbk-cmd/Zero-Trust-access-engine (public) |
 | Platform | Java 25 LTS (Temurin 25.0.5), Maven 3.9, no Docker, runs on an 8 GB laptop |
-| Size | 170 main classes (16,937 lines), 70 test files (12,917 lines), 531 tests |
-| Layers complete | Layer 1 (core decision engine), Layer 2 (behavioural risk scorers), Layer 3 (Policy Administrator: A sessions, B privileged access), Layer 4 (enforcement points: engine API, ZTNA gateway, web gateway, SaaS data guard) |
-| Next | Layer 5 (SOC loop and analytics); the demo front end (Layer 6) when requested |
+| Size | 206 main classes (23,237 lines), 98 test files (18,708 lines), 749 tests |
+| Layers complete | Layer 1 (core decision engine), Layer 2 (behavioural risk scorers), Layer 3 (Policy Administrator: A sessions, B privileged access), Layer 4 (enforcement points: engine API, ZTNA gateway, web gateway, SaaS data guard), Layer 5 first round (SOC loop: encrypted audit store and detection, case and response loop, analytics) |
+| Next | Layer 5 second round (SIEM platform, UEBA and prioritisation, SOAR and XDR-lite, SOC API for the dashboard); then Layer 6 (console and demo) |
 
 The name: a *dvārapāla* (Sanskrit, "door guardian") is the guardian figure at a temple gate who
 decides who may pass. Dwarpal does the same for every access request.
@@ -173,12 +173,12 @@ Mapping to the CISA Zero Trust Maturity Model (v2.0) pillars:
 |---|---|---|---|---|
 | 1 | `domain` | 17 | 453 | Request, subject, device, posture, resource, network, evidence; validation and sanitising |
 | 1 | `crypto` | 8 | 450 | Ed25519, canonical signed messages (10 types), key ring with 5 key purposes, SHA-256 digests |
-| 1 | `pip` | 3 | 112 | Attribute directory and threat-intelligence snapshot |
-| 1 | `engine` | 16 | 968 | `PolicyEngine`, the seven stages, hard gates, MFA settings |
+| 1 | `pip` | 4 | 385 | Attribute directory, threat-intelligence snapshot, SOC signal feed (expiring denies, fading watches) |
+| 1 | `engine` | 16 | 992 | `PolicyEngine`, the seven stages, hard gates, MFA settings; copies for replay and cost sweeps |
 | 1 | `risk` | 5 | 208 | Risk factors, scorer interface, Bayesian aggregation |
 | 1 | `decision` | 3 | 175 | Outcomes, cost model, decision object with user and analyst views |
 | 1 | `policy` | 10 | 939 | Policy language, safe YAML loader, linter, combining algorithms |
-| 1 | `audit` | 6 | 330 | HMAC-SHA256 chained audit trail, audited decision point |
+| 1 | `audit` | 9 | 624 | HMAC-SHA256 chained audit trail, audited decision point; verified reading (`AuditCursor`, `AuditEvent`) and continuing a stored trail |
 | 1 | `admin` | 2 | 212 | Two-person signed policy bundles, throttled rejection auditing |
 | 1 | `runtime` | 1 | 50 | `DecisionPipeline`: assembles the layers in the only safe order |
 | 2 | `risk.scorers` | 10 | 732 | The ten behavioural scorers and their maths helpers |
@@ -194,7 +194,11 @@ Mapping to the CISA Zero Trust Maturity Model (v2.0) pillars:
 | 4 | `devidp` | 7 | 971 | Development identity provider: PBKDF2 passwords, simulated WebAuthn, key-bound MFA proofs |
 | 4 | `swg` | 16 | 1,967 | Secure web gateway: forward proxy, host canonicalisation, block lists, categories, SSRF guard |
 | 4 | `casb` | 9 | 1,232 | SaaS data guard: validated detectors, DLP policy, redaction |
-| | **Total** | **170** | **16,937** | Layers 1 to 3: 7,168 lines. Layer 4: 9,769 lines |
+| 5 | `soc` | 5 | 160 | Shared SOC records: alerts, entities, severities, signed analyst verdicts |
+| 5 | `siem` | 6 | 2,234 | Encrypted append-only audit store (AES-256-GCM), head anchoring, CEF / syslog / JSON-lines export, detection rules with deduplication and throttling |
+| 5 | `response` | 10 | 1,576 | Case book, single-use verdicts, playbooks with guard rails, signal ledger, watch-list scorer, DLP feedback |
+| 5 | `analytics` | 11 | 1,713 | Request recorder, What-If replay (M8), Beta calibration, sensitivity, accuracy (confusion, ROC, cost), reports that state their data |
+| | **Total** | **206** | **23,237** | Layers 1 to 3: 7,168 lines. Layer 4: 9,769 lines. Layer 5: about 6,000 lines |
 
 ### 4.2 The full request path
 
@@ -640,6 +644,29 @@ the engine through one API and enforce the answer. Full report: [layer-4-report.
 | SaaS data guard | Reads, downloads and uploads through sessions; uploads scanned by validated detectors (Luhn, Verhoeff, PAN, IFSC, keys, tokens) and blocked, redacted or audited by the data's classification; values never logged |
 | Sessions at the edge | The PA opens a session only on fresh, verified MFA bound to the session key, and each MFA proof opens one session, whichever PEP asks. Single decisions exist only for web browsing |
 
+### 7.4 Layer 5: the SOC loop (first round)
+
+Layer 5 closes the loop from decisions back to decisions: what the engine decided is stored, detected,
+confirmed by a person, acted on, and fed back as signals. Full report: [layer-5-report.md](layer-5-report.md).
+
+```
+ decisions --> audit chain --> encrypted store --(verified cursor)--> detection rules --> alerts
+                    |               |                                                       |
+                 anchor        exporters (CEF, syslog, JSON)                              case book
+                                                                                             |
+ engine <-- signal feed <-- playbooks (guard rails) <-- signed analyst verdict (single use) -+
+   ^             (deny with an end, fading watch)
+   +-- analytics: What-If replay, calibration, sensitivity, accuracy (on the same trail)
+```
+
+| Element | Design |
+|---|---|
+| Audit store | Append-only file, every record sealed with AES-256-GCM and bound to its position; checked in full on open; a writer continues from the verified head after a restart |
+| Anchoring | The chain head written, with its own HMAC key, to a second place on a schedule; a reader that finds the trail short of or different from the anchor stops and alerts |
+| Detection | 10 rules over verified events only (break-glass, honeytoken, stolen token, deny storms per person and per address, MFA fatigue, impossible travel then allow, DLP spikes, PAM refusals); deduplication, hourly caps, bounded state; any break in the chain stops detection for good with a critical alert |
+| Response | Alerts grouped into cases; an analyst's verdict counts only when signed by their own key, once; playbooks deny (always with an end, at most 30 days), watch (fading) or revoke; two analysts for privileged people; rate limits; a false positive undoes the case's denies and watches |
+| Analytics | What-If replays recorded traffic through the current and a proposed policy with a frozen clock and no side effects; Beta posteriors for calibration; sensitivity of MFA betas and costs; confusion table, ROC and expected cost; every report states its data source |
+
 ---
 
 ## 8. Mathematics reference
@@ -659,11 +686,11 @@ costs C_B = 1000, C_F = 1, C_D = 20; challenge β = 0.05.
 | M2 | Three-action cost model | "Which action loses least?" | Done (Layer 1) | 8.2 |
 | M3 | Bayes with a base rate | "How likely is an attack, honestly?" | Done (Layer 1) | 8.1 |
 | M4 | Beta reputation | "How trustworthy is this user or device, and how sure are we?" | Done (Layer 2) | 8.5 |
-| M5 | Exponential decay | "How fast should old evidence fade?" | Done for reputation; per-signal SOC decay in Layer 5 | 8.5 |
+| M5 | Exponential decay | "How fast should old evidence fade?" | Done for reputation and for SOC watches (half-life per watch, Layer 5) | 8.5 |
 | M6 | Circular login-time density | "Is this an unusual hour for this user?" | Done (Layer 2) | 8.6 |
 | M7 | Impossible travel with GeoIP radii | "Could one person have moved that fast?" | Done (Layer 2) | 8.7 |
-| M8 | Change-impact analysis | "What would this policy edit change?" | Linter done; What-If replay in Layer 5 | 8.13 |
-| M9 | MFA fatigue | "How strong is each MFA method?" (the β values) | β per method done; PAM accepts only WebAuthn; sensitivity analysis in Layer 5 | 8.3 |
+| M8 | Change-impact analysis | "What would this policy edit change?" | Linter and What-If replay done (Layer 5) | 8.13 |
+| M9 | MFA fatigue | "How strong is each MFA method?" (the β values) | β per method done; PAM accepts only WebAuthn; sensitivity analysis done (Layer 5) | 8.3 |
 
 Two further detectors were added in Layer 2 on the same footing: **Poisson rate tests** (8.8) and
 **IP reputation** (8.9).
@@ -951,9 +978,13 @@ Before a new policy P₂ replaces P₁, the question is which requests would be 
 
 Margrave (Fisler et al., ICSE 2005) and Cedar (OOPSLA 2024) compute this exactly with decision
 diagrams or SMT solvers. Dwarpal's plan is empirical: **What-If replay** of recorded traffic through
-both policies (Layer 5; the freshness gate is switched off for replay, which the engine already
-supports). Today's structural part is the linter, which blocks identical conditions with different
-effects and shadowed rules before deployment.
+both policies, built in Layer 5 (`analytics.WhatIf`). The replay runs on `PolicyEngine.forReplay()`, a
+copy without the freshness gate (the one stage that reads the clock), on a frozen clock, and writes
+nothing: no audit, no learning, no signals. It reports gains and losses of access by policy, subject,
+resource and action. The structural part is the linter, which blocks identical conditions with different
+effects and shadowed rules before deployment. Limit: recorded requests are kept without their evidence
+(data minimisation), so absolute decisions drift from the live ones; the diff between two policies is
+still like for like.
 
 ---
 
@@ -1072,7 +1103,11 @@ Stated plainly, so the comparison stays honest:
 | Model calibration | Models trained and measured on real attack data | Probabilities are stated assumptions, tested on synthetic data |
 | Device trust | Hardware attestation (TPM, Secure Enclave), MDM compliance | Agent-signed posture; hardware attestation reserved |
 | Sessions | Mature session management at global scale, credential vaulting and session recording | Sessions, continuous evaluation, revocation and JIT admin done (Layer 3); no vaulting or recording |
-| Enforcement | Global gateways and points of presence | No enforcement point yet (Layer 4) |
+| Enforcement | Global gateways and points of presence | One ZTNA gateway, web gateway and SaaS data guard per deployment (Layer 4) |
+| SIEM | Collect any log source, normalised schema, search, rule languages, years of retention | Its own tamper-evident, encrypted, anchored trail; 10 rules in code; export to a real SIEM in CEF, syslog or JSON lines. No other sources, no rule language or search yet (Layer 5 second round) |
+| UEBA | Machine-learned baselines and peer groups over all users | Per-user baselines in the engine's scorers (Layer 2); no peer groups or entity risk score in the SOC yet (Layer 5 second round) |
+| SOAR | Visual playbooks, hundreds of connectors, case management with SLAs | Cases, signed single-use verdicts, playbooks with guard rails (deny with an end, two analysts for privileged people, undo on false positive) acting on Dwarpal's own controls; playbooks in code, no external connectors |
+| XDR / EDR | Kernel-level endpoint sensors, device isolation | Device posture from the client agent only; endpoint telemetry will be simulated (Layer 5 second round) |
 | Integrations | Thousands of applications through SAML and OpenID Connect | Programmatic API only |
 | Operations | High availability, 24/7 support, admin consoles, compliance certifications | Single-process library, command line, documentation |
 
@@ -1326,8 +1361,9 @@ The whole project has six layers:
 | 1 | Core decision engine | One explained decision per request from signed evidence, policy and Bayesian risk; audit chain; two-person policy changes | Done |
 | 2 | Behavioural risk scorers | Ten detectors that turn a login into evidence; poisoning-resistant learning | Done |
 | 3 | Policy Administrator | A: sessions bound to a client key, re-checked on every request, revocable. B: no standing admin, just-in-time elevation, break-glass | Done |
-| 4 | Enforcement and SASE edge | The gateway in front of applications (ZTNA proxy, web gateway, SaaS/DLP controls) calling Layers 1 to 3 over an mTLS API; what the demo talks to | Next |
-| 5 | SOC loop and analytics | SIEM shipping of the audit chain, alerts, analyst feedback with decaying signals (M5), What-If replay (M8), calibration and accuracy measurement | Planned |
+| 4 | Enforcement and SASE edge | The gateway in front of applications (ZTNA proxy, web gateway, SaaS/DLP controls) calling Layers 1 to 3 over an mTLS API; what the demo talks to | Done |
+| 5 | SOC loop and analytics | First round: encrypted audit store, anchoring, export, detection; cases, verdicts and playbooks with decaying signals (M5); What-If replay (M8), calibration, sensitivity and accuracy | First round done |
+| 5.2 | SOC platform | SIEM platform (collectors, common event format, analyst rule language, search), UEBA and risk-based prioritisation (MITRE ATT&CK tags, reports), SOAR and XDR-lite (playbooks as data, full cases, simulated endpoint sensors, device isolation), SOC API for the dashboard | Next |
 | 6 | Console, demo and deployment | Web front end for users, admins and analysts; demo deployment (for example Vercel) | When requested |
 | Cross-cutting | Post-quantum | Hybrid Ed25519 + ML-DSA signatures on every proof (signature field grows from 256 characters to about 4.5 KB) | After submission |
 

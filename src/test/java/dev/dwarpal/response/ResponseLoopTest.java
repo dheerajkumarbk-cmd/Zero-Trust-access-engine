@@ -30,9 +30,9 @@ class ResponseLoopTest {
 
     @Test
     void alertsAreGroupedIntoCasesByThePersonTheyAreAbout() {
-        String a1 = w.raise("deny-storm", Severity.LOW, Entity.ip("192.0.2.7"), Entity.subject("carol"));
+        String a1 = w.raise("deny-storm-ip", Severity.LOW, Entity.ip("192.0.2.7"), Entity.subject("carol"));
         String a2 = w.raise("mfa-fatigue", Severity.HIGH, Entity.subject("carol"));
-        String a3 = w.raise("deny-storm", Severity.MEDIUM, Entity.ip("192.0.2.8"));
+        String a3 = w.raise("deny-storm-ip", Severity.MEDIUM, Entity.ip("192.0.2.8"));
         Case c = w.book.caseOf(a1).orElseThrow();
         assertEquals(c.id(), w.book.caseOf(a2).orElseThrow().id());
         assertEquals(Entity.subject("carol"), c.key());
@@ -78,7 +78,7 @@ class ResponseLoopTest {
 
     @Test
     void aDenyEndsOnTimeAndNeverOutlastsTheMaximum() {
-        String id = w.raise("deny-storm", Severity.MEDIUM, Entity.ip("192.0.2.66"), Entity.subject("carol"));
+        String id = w.raise("deny-storm-ip", Severity.MEDIUM, Entity.ip("192.0.2.66"), Entity.subject("carol"));
         assertEquals(Playbooks.Status.APPLIED, w.decide("ben", id, TRUE_POSITIVE).status());
         assertTrue(w.feed.denied(SignalFeed.Kind.IP, "192.0.2.66", w.now()));
         w.later(Duration.ofHours(4).minusSeconds(1));
@@ -97,7 +97,7 @@ class ResponseLoopTest {
 
     @Test
     void aWatchDecaysWithItsHalfLife() {
-        String id = w.raise("pam-refusals", Severity.LOW, Entity.subject("carol"));
+        String id = w.raise("pam-refused", Severity.LOW, Entity.subject("carol"));
         assertEquals(Playbooks.Status.APPLIED, w.decide("ben", id, TRUE_POSITIVE).status());
         double w0 = w.feed.watchLogLr(SignalFeed.Kind.SUBJECT, "carol", w.now());
         assertEquals(Math.log(10), w0, 1e-9);
@@ -128,15 +128,15 @@ class ResponseLoopTest {
 
     @Test
     void benignAndFalsePositiveWithoutActionsJustClose() {
-        String a = w.raise("deny-storm", Severity.LOW, Entity.ip("192.0.2.1"));
-        String b = w.raise("deny-storm", Severity.LOW, Entity.ip("192.0.2.2"));
+        String a = w.raise("deny-storm-ip", Severity.LOW, Entity.ip("192.0.2.1"));
+        String b = w.raise("deny-storm-ip", Severity.LOW, Entity.ip("192.0.2.2"));
         assertEquals(Playbooks.Status.CLOSED, w.decide("ana", a, BENIGN).status());
         assertEquals(Playbooks.Status.CLOSED, w.decide("ana", b, FALSE_POSITIVE).status());
         assertEquals(0, w.enforcement.destructive());
         assertTrue(w.book.unresolved().isEmpty());
         assertEquals(Playbooks.Status.REFUSED, w.decide("ben", a, BENIGN).status(), "already decided");
         assertEquals(Playbooks.Status.REFUSED, w.decide("ben", a, TRUE_POSITIVE).status(), "already decided");
-        String c = w.raise("deny-storm", Severity.LOW, Entity.ip("192.0.2.1"));
+        String c = w.raise("deny-storm-ip", Severity.LOW, Entity.ip("192.0.2.1"));
         assertTrue(!w.book.caseOf(c).orElseThrow().id().equals(w.book.caseOf(a).orElseThrow().id()),
                 "a new alert after a closed case opens a new one");
     }
@@ -153,7 +153,7 @@ class ResponseLoopTest {
         assertEquals(Case.State.TRIAGED, w.book.caseOf(id).orElseThrow().state());
         assertEquals(Playbooks.Status.REFUSED, w.playbooks.handle(w.verdict("ana", id, TRUE_POSITIVE,
                 w.now().plusSeconds(1))).status(), "not the same analyst twice");
-        String other = w.raise("pam-refusals", Severity.LOW, Entity.subject("root"));
+        String other = w.raise("pam-refused", Severity.LOW, Entity.subject("root"));
         assertEquals(Playbooks.Status.REFUSED, w.decide("ben", other, TRUE_POSITIVE).status(),
                 "the second analyst confirms the same alert");
         w.later(Duration.ofMinutes(5));
@@ -210,7 +210,7 @@ class ResponseLoopTest {
 
     @Test
     void sharedAddressesNeedTwoAnalystsTooButOrdinaryOnesDoNot() {
-        String id = w.raise("deny-storm", Severity.MEDIUM, Entity.ip("198.51.100.1"), Entity.ip("192.0.2.99"));
+        String id = w.raise("deny-storm-ip", Severity.MEDIUM, Entity.ip("198.51.100.1"), Entity.ip("192.0.2.99"));
         Playbooks.Result r = w.decide("ana", id, TRUE_POSITIVE);
         assertEquals(Playbooks.Status.AWAITING_SECOND_ANALYST, r.status());
         assertTrue(w.feed.denied(SignalFeed.Kind.IP, "192.0.2.99", w.now()));
@@ -234,13 +234,13 @@ class ResponseLoopTest {
         String again = w.raise("something-new", Severity.HIGH, Entity.subject("erin"), Entity.device("laptop-erin"));
         assertEquals(Playbooks.Status.APPLIED, custom.handle(w.verdict("ana", again, TRUE_POSITIVE)).status());
         assertEquals(List.of("device:laptop-erin"), w.enforcement.revoked);
-        assertEquals(9, Playbooks.referencePlays().size());
+        assertEquals(14, Playbooks.referencePlays().size());
     }
 
     @Test
     void aStolenTokenPlayEndsTheSession() {
         SessionGrant g = ResponseWorld.grant(w.aliceLogsIn());
-        String id = w.raise("stolen-token", Severity.HIGH, Entity.subject("alice"),
+        String id = w.raise("stolen-token-revoked", Severity.HIGH, Entity.subject("alice"),
                 new Entity(Entity.Kind.SESSION, g.sessionId()));
         assertEquals(Playbooks.Status.APPLIED, w.decide("ben", id, TRUE_POSITIVE).status());
         assertEquals(List.of("session:" + g.sessionId(), "subject:alice"), w.enforcement.revoked);
@@ -250,22 +250,22 @@ class ResponseLoopTest {
     @Test
     void theCaseBookIsBoundedAndForgetsOnlyWhatIsSafeToForget() {
         ResponseWorld small = new ResponseWorld(ResponseSettings.defaults().withLimits(20, 10, 3, 2));
-        String a = small.raise("deny-storm", Severity.LOW, Entity.ip("192.0.2.1"));
-        small.raise("deny-storm", Severity.LOW, Entity.ip("192.0.2.1"));
-        assertFalse(small.book.raise(small.alert("deny-storm", Severity.LOW, Entity.ip("192.0.2.1"))),
+        String a = small.raise("deny-storm-ip", Severity.LOW, Entity.ip("192.0.2.1"));
+        small.raise("deny-storm-ip", Severity.LOW, Entity.ip("192.0.2.1"));
+        assertFalse(small.book.raise(small.alert("deny-storm-ip", Severity.LOW, Entity.ip("192.0.2.1"))),
                 "two alerts per case");
-        String held = small.raise("pam-refusals", Severity.LOW, Entity.subject("carol"));
-        small.raise("deny-storm", Severity.LOW, Entity.ip("192.0.2.3"));
-        assertFalse(small.book.raise(small.alert("deny-storm", Severity.LOW, Entity.ip("192.0.2.4"))),
+        String held = small.raise("pam-refused", Severity.LOW, Entity.subject("carol"));
+        small.raise("deny-storm-ip", Severity.LOW, Entity.ip("192.0.2.3"));
+        assertFalse(small.book.raise(small.alert("deny-storm-ip", Severity.LOW, Entity.ip("192.0.2.4"))),
                 "full of open cases, and nothing less severe to drop");
         assertEquals(2, small.book.refused());
         small.decide("ana", a, BENIGN);
         small.decide("ana", held, TRUE_POSITIVE);
         assertTrue(small.book.caseOf(held).orElseThrow().holdsActions());
-        assertTrue(small.book.raise(small.alert("deny-storm", Severity.LOW, Entity.ip("192.0.2.4"))),
+        assertTrue(small.book.raise(small.alert("deny-storm-ip", Severity.LOW, Entity.ip("192.0.2.4"))),
                 "the benign case is forgotten to make room");
         assertTrue(small.book.caseOf(a).isEmpty());
-        assertFalse(small.book.raise(small.alert("deny-storm", Severity.LOW, Entity.ip("192.0.2.5"))),
+        assertFalse(small.book.raise(small.alert("deny-storm-ip", Severity.LOW, Entity.ip("192.0.2.5"))),
                 "a case whose actions are in force is never forgotten");
         assertTrue(small.book.caseOf(held).isPresent());
         assertEquals(3, small.book.size());

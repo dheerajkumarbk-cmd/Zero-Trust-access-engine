@@ -44,6 +44,29 @@ public final class AuditLog {
         this.sink = Objects.requireNonNull(sink, "sink");
     }
 
+    /**
+     * Continues a trail that already exists, after a restart: the next record gets
+     * {@code resumeFrom.sequence() + 1} and links to {@code resumeFrom.mac()}. The head must come from the
+     * verified store itself (for example {@code EncryptedAuditStore.head()}, which checked every record on
+     * open) or from a trusted anchor, never from an unauthenticated place: a wrong head is refused by a store
+     * that checks continuity, so the writer fails closed rather than forking the chain.
+     */
+    public AuditLog(SecretKey key, AuditSink sink, Head resumeFrom) {
+        this(key, sink);
+        Objects.requireNonNull(resumeFrom, "resumeFrom");
+        if (resumeFrom.sequence() < 0) {
+            throw new IllegalArgumentException("sequence must not be negative");
+        }
+        if (resumeFrom.mac() == null || !resumeFrom.mac().matches("[0-9a-f]{64}")) {
+            throw new IllegalArgumentException("mac must be 64 lower-case hex characters");
+        }
+        if (resumeFrom.sequence() == 0 && !GENESIS.equals(resumeFrom.mac())) {
+            throw new IllegalArgumentException("an empty trail starts at the genesis MAC");
+        }
+        this.sequence = resumeFrom.sequence();
+        this.lastMac = resumeFrom.mac();
+    }
+
     /** Position of the newest record, for anchoring outside the log. */
     public record Head(long sequence, String mac) {
     }

@@ -161,8 +161,9 @@ public final class WhatIf {
      *                                  so there is nothing to compare: fail closed rather than report)
      */
     public WhatIf(PolicyEngine current, PolicySet proposed, AttributeDirectory directory) {
-        this.current = Objects.requireNonNull(current, "current");
-        this.proposed = current.withPolicySet(Objects.requireNonNull(proposed, "proposed"));
+        // Replay copies: the live freshness gate would call every old request stale and hide the diff.
+        this.current = Objects.requireNonNull(current, "current").forReplay();
+        this.proposed = this.current.withPolicySet(Objects.requireNonNull(proposed, "proposed"));
         this.directory = Objects.requireNonNull(directory, "directory");
     }
 

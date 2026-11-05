@@ -168,7 +168,7 @@ class WatchAndDlpTest {
         DlpFeedback fb = new DlpFeedback(w.sink, w.auditKey, w.ledger, w.clock);
         dlp("carol", "BLOCK", "INTERNAL");
         fb.poll(100);
-        String id = w.raise("pam-refusals", dev.dwarpal.soc.Severity.LOW, dev.dwarpal.soc.Entity.subject("carol"));
+        String id = w.raise("pam-refused", dev.dwarpal.soc.Severity.LOW, dev.dwarpal.soc.Entity.subject("carol"));
         w.decide("ana", id, dev.dwarpal.soc.Verdict.Outcome.TRUE_POSITIVE);
         assertEquals(Math.log(40), w.feed.watchLogLr(SignalFeed.Kind.SUBJECT, "carol", w.now()), 1e-9);
         w.later(Duration.ofMinutes(1));

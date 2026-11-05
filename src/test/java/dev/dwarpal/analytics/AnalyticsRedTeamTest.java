@@ -11,6 +11,7 @@ import dev.dwarpal.domain.Action;
 import dev.dwarpal.domain.DataClassification;
 import dev.dwarpal.domain.Evidence;
 import dev.dwarpal.domain.ResourceKind;
+import dev.dwarpal.engine.PolicyEngine;
 import dev.dwarpal.engine.DecisionPoint;
 import dev.dwarpal.engine.PolicyEngineTest;
 import dev.dwarpal.risk.RiskAssessment;
@@ -92,18 +93,18 @@ class AnalyticsRedTeamTest {
     // ---- C2: a live freshness gate makes every replay "no change" ------------------------------------------
 
     @Test
-    void c2_freshnessGateWouldHideTheDiff_replayIsMarkedInvalid() {
-        PolicyEngineTestShim shim = new PolicyEngineTestShim();
-        // Probe: with the live gate both policies deny everything, so a dangerous edit shows no change.
-        WhatIf.Result r = new WhatIf(SmallWorld.liveEngine(policies("v1", INTERNAL_APPS)),
-                policies("v3", INTERNAL_APPS, ENGINEERING_READS_PAYROLL), SmallWorld.DIRECTORY)
-                .replay(SmallWorld.everything(), SignalSnapshot.empty());
-        assertEquals(0, r.gains(), "probe: the stale gate hides the three payroll grants");
-        // Fix: the run says it measured nothing.
-        assertFalse(r.valid());
-        assertTrue(r.invalid().getFirst().contains("freshness gate"));
-        String text = r.report(shim.source()).text();
-        assertTrue(text.contains("status: INVALID"), text);
+    void c2_freshnessGateWouldHideTheDiff_replayUsesAReplayCopy() {
+        PolicyEngine live = SmallWorld.liveEngine(policies("v1", INTERNAL_APPS));
+        // Probe (before integration): with the live gate both policies denied everything, so a dangerous edit
+        // showed no change. Fix at part C: the run was marked INVALID. Fix at integration: WhatIf replays on
+        // PolicyEngine.forReplay(), which drops only the clock-reading gate, so the real diff is measured.
+        assertTrue(live.checksFreshness());
+        assertFalse(live.forReplay().checksFreshness());
+        WhatIf.Result r = new WhatIf(live, policies("v3", INTERNAL_APPS, ENGINEERING_READS_PAYROLL),
+                SmallWorld.DIRECTORY).replay(SmallWorld.everything(), SignalSnapshot.empty());
+        assertTrue(r.valid(), r.invalid().toString());
+        assertTrue(r.gains() > 0, "the payroll grants are visible");
+        assertTrue(live.checksFreshness(), "the live engine keeps its gate");
     }
 
     // ---- C3: classification claimed by the request -----------------------------------------------------------

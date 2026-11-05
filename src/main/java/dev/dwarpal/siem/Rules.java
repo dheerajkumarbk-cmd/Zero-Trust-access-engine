@@ -39,6 +39,9 @@ final class Rules {
 
     /** Reason text {@code PolicyAdministrator} writes when a token is presented for another subject or device. */
     static final String TOKEN_THEFT_REASON = "possible token theft";
+    static final String TOKEN_THEFT_CAUSE = "token-theft";
+    static final String TRAVEL_SIGNAL = "impossible-travel";
+    private static final int MAX_SIGNALS = 64;
     static final String HONEYTOKEN_POLICY = "hard-gate:honeytoken";
     private static final int MAX_ENTITIES = 12;
     private static final String TRAVEL = "RiskFactor[name=impossible-travel, logLikelihoodRatio=";
@@ -130,8 +133,33 @@ final class Rules {
         return e.type().equals("ACCESS_DECISION") && e.field("outcome").filter(outcome::equals).isPresent();
     }
 
-    /** Whether the decision's factors include a positive impossible-travel factor. */
+    /**
+     * Whether a revocation was for token theft: the machine-readable {@code cause} field when the record has
+     * one (written since Layer 5 integration), otherwise the fixed reason text of older trails.
+     */
+    static boolean tokenTheft(AuditEvent e) {
+        Optional<String> cause = e.field("cause");
+        if (cause.isPresent()) {
+            return cause.get().equals(TOKEN_THEFT_CAUSE);
+        }
+        return e.field("reason").filter(r -> r.contains(TOKEN_THEFT_REASON)).isPresent();
+    }
+
+    /**
+     * Whether the decision's factors include a positive impossible-travel factor: the machine-readable
+     * {@code signals} list when the record has one (exact names, comma separated), otherwise the rendering of
+     * the factors in older trails.
+     */
     static boolean impossibleTravel(AuditEvent e) {
+        Optional<String> signals = e.field("signals");
+        if (signals.isPresent()) {
+            for (String name : signals.get().split(",", MAX_SIGNALS + 1)) {
+                if (name.equals(TRAVEL_SIGNAL)) {
+                    return true;
+                }
+            }
+            return false;
+        }
         Optional<String> f = e.field("factors");
         if (f.isEmpty()) {
             return false;
@@ -218,8 +246,7 @@ final class Rules {
     static final class StolenToken implements Rule {
         @Override
         public void observe(AuditEvent e, Consumer<Hit> hits) {
-            if (!e.type().equals("SESSION_REVOKED")
-                    || !e.field("reason").filter(r -> r.contains(TOKEN_THEFT_REASON)).isPresent()) {
+            if (!e.type().equals("SESSION_REVOKED") || !tokenTheft(e)) {
                 return;
             }
             Optional<Entity> s = entity(Entity.Kind.SUBJECT, e.field("subjectId"));

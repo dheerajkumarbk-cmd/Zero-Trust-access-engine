@@ -64,6 +64,9 @@ import java.util.function.Predicate;
  */
 public final class PolicyAdministrator {
 
+    /** The {@code cause} field of a session ended because its token came from another subject or device. */
+    public static final String CAUSE_TOKEN_THEFT = "token-theft";
+
     public static final String ACTOR = "policy-administrator";
     private static final int MAX_REASON_LENGTH = 256;
     private static final int TOKEN_BYTES = 32;
@@ -263,11 +266,11 @@ public final class PolicyAdministrator {
 
         Optional<String> over = SessionStore.ended(s, now, limits.idleTimeout());
         if (over.isPresent()) {
-            return endAndReject(s, "SESSION_EXPIRED", over.get(), now);
+            return endAndReject(s, "SESSION_EXPIRED", over.get(), null, now);
         }
         if (!request.subject().id().equals(s.subjectId()) || !request.device().id().equals(s.deviceId())) {
             return endAndReject(s, "SESSION_REVOKED",
-                    "token presented for another subject or device: possible token theft", now);
+                    "token presented for another subject or device: possible token theft", CAUSE_TOKEN_THEFT, now);
         }
         if (!request.resource().id().equals(s.resourceId())) {
             return SessionResult.rejected("token was issued for another resource", false);
@@ -420,9 +423,9 @@ public final class PolicyAdministrator {
         return removed.size();
     }
 
-    private SessionResult endAndReject(Session s, String type, String reason, Instant now) {
+    private SessionResult endAndReject(Session s, String type, String reason, String cause, Instant now) {
         store.remove(s.tokenHash());
-        boolean audited = tryAuditEnd(type, s, ACTOR, reason, now);
+        boolean audited = tryAuditEnd(type, s, ACTOR, reason, cause, now);
         return SessionResult.rejected(reason + (audited ? "" : " (audit trail unavailable)"), true);
     }
 
@@ -518,8 +521,19 @@ public final class PolicyAdministrator {
     }
 
     private void auditEnd(String type, Session s, String actor, String reason, Instant now) {
+        auditEnd(type, s, actor, reason, null, now);
+    }
+
+    /**
+     * {@code cause} is a fixed machine-readable code (for example {@link #CAUSE_TOKEN_THEFT}) that detection
+     * rules match on, so rewording {@code reason} for people can never silently disable a rule.
+     */
+    private void auditEnd(String type, Session s, String actor, String reason, String cause, Instant now) {
         Map<String, String> f = fields(s);
         f.put("reason", reason);
+        if (cause != null) {
+            f.put("cause", cause);
+        }
         audit.append(type, actor, now, f);
     }
 
@@ -532,8 +546,12 @@ public final class PolicyAdministrator {
     }
 
     private boolean tryAuditEnd(String type, Session s, String actor, String reason, Instant now) {
+        return tryAuditEnd(type, s, actor, reason, null, now);
+    }
+
+    private boolean tryAuditEnd(String type, Session s, String actor, String reason, String cause, Instant now) {
         try {
-            auditEnd(type, s, actor, reason, now);
+            auditEnd(type, s, actor, reason, cause, now);
             return true;
         } catch (RuntimeException e) {
             return false;

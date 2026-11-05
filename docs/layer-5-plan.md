@@ -134,6 +134,8 @@ Two additions for Layer 5:
 
 ## 8. Integration (this session, after the three branches)
 
+**Status: done (2026-11-05).** See [layer-5-report.md](layer-5-report.md).
+
 1. Review each branch against this plan and its notes file.
 2. Merge A, then B, then C; apply the requests to integration.
 3. End to end: the simulated organisation's traffic goes through the engine; A's store and rules raise

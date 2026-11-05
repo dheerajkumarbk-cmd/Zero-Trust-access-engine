@@ -136,6 +136,30 @@ public final class PolicyEngine implements DecisionPoint {
         return toBuilder().directory(newDirectory).build();
     }
 
+    /**
+     * A copy for What-If replay only: identical except that every {@link FreshnessGate} (the one gate that reads
+     * the clock) is removed, so old requests are judged as they were made instead of all being "stale". Never
+     * serve live traffic with it: there a request with any timestamp would get past the freshness check.
+     */
+    public PolicyEngine forReplay() {
+        return builder().policySet(policySet).directory(directory).keyRing(keyRing).assurance(assurance)
+                .gates(gates.stream().filter(g -> !(g instanceof FreshnessGate)).toList())
+                .scorers(scorers).aggregator(aggregator).costModel(costModel).build();
+    }
+
+    /**
+     * A copy with other costs (sensitivity sweeps). Its step-up beta must still match the assurance settings'
+     * challenge method, or the copy is refused like any engine.
+     */
+    public PolicyEngine withCostModel(CostModel newCosts) {
+        return toBuilder().costModel(newCosts).build();
+    }
+
+    /** Whether this engine checks request freshness; false only for a {@link #forReplay()} copy or a test. */
+    public boolean checksFreshness() {
+        return gates.stream().anyMatch(g -> g instanceof FreshnessGate);
+    }
+
     private Builder toBuilder() {
         return builder().policySet(policySet).directory(directory).keyRing(keyRing).assurance(assurance)
                 .gates(gates).scorers(scorers).aggregator(aggregator).costModel(costModel);
