@@ -85,7 +85,26 @@ Probes that held from the start and stay as regression tests: a forged syslog li
 
 ## Tests and results
 
-*(filled in after the full gate; see below)*
+`mvn -o verify spotbugs:check`, JDK 25.0.5 (Temurin), offline, 2026-11-05: **BUILD SUCCESS**, 859 tests in the whole
+project, 0 failures, 0 errors, 0 skipped; SpotBugs with FindSecBugs: 0; `-Xlint:all -Werror`.
+
+| Test class | Tests | What it covers |
+|---|---|---|
+| `soar.PlaybookCompilerTest` | 17 | Guard-rail lint, provenance, victims, secrets, unsafe YAML, files, reference set |
+| `soar.PlaybookInstallerTest` | 9 | Two-person approval, exact text, freshness, purpose and domain, rollback, audit, versions per case |
+| `soar.CaseManagerTest` | 15 | Own case, analysts' cases, assignment roles, notes, audit, SLA and breaches, ranking failures, links, bounds |
+| `soar.SoarTest` | 17 | Isolation with signed acknowledgements and their abuse, release by verdict, protected CEO, modes, versions, connectors |
+| `soar.SoarRedTeamTest` | 6 | F-R1, F-R2 and the probes that held |
+| `soar.ConnectorTest` | 5 | Files, sanitising, rate and size limits, failures, simulated sensor |
+| `socapi.SocApiTest` | 16 | Mutual TLS callers, routes, strict bodies, visibility, reads, writes, rate limits, audit, deadline |
+| `socapi.SocApiRedTeamTest` | 6 | F-R3, F-R4 and the probes that held |
+| `socapi.SocApiRoutesTest` | 2 | Route parsing and settings bounds |
+| **Part F total** | **93** | |
+
+Coverage (JaCoCo, same run): `dev.dwarpal.soar` 96.9% lines / 86.0% branches; `dev.dwarpal.socapi` 95.6% lines /
+89.2% branches. Fakes of part D's `EventSearch` and part E's `EntityRisk`, `AlertRanker` and reports are in the tests
+(`SoarWorld.FakeRanker`, `SocApiKit.FakeSearch`, `SocApiKit.FakeRisk`). The test PKI is made with the JDK's keytool at
+run time; every key in the tests is generated at run time.
 
 ## Requests to integration
 
