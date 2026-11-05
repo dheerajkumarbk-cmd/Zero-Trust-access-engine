@@ -114,6 +114,10 @@ public final class SoarWorld {
     public final Path connectorDir;
     public final RuleCatalogue catalogue;
     public final List<Connector> connectors = new ArrayList<>();
+    /** The CEO's laptop: owned by a protected person, criticality 5. Alice's: an ordinary laptop. */
+    public final dev.dwarpal.soc.InMemoryAssetCatalog assets = new dev.dwarpal.soc.InMemoryAssetCatalog(List.of(
+            new dev.dwarpal.soc.Asset(Entity.device("laptop-ceo"), 5, "ceo", Set.of("executive"), true),
+            new dev.dwarpal.soc.Asset(Entity.device("laptop-alice"), 2, "alice", Set.of(), true)));
     public Soar soar;
     private int alerts;
     private int requests;
@@ -255,7 +259,7 @@ public final class SoarWorld {
 
     public Soar soar(PlaybookSet set, Consumer<Soar.Builder> tweak) {
         Soar.Builder b = Soar.builder(audit, ledger).settings(settings).cases(book, cases).verdicts(gate)
-                .enforcement(enforcement).clock(clock).isolation(isolation).connectors(connectors).playbooks(set);
+                .enforcement(enforcement).clock(clock).isolation(isolation).connectors(connectors).playbooks(set).assets(assets);
         tweak.accept(b);
         return b.build();
     }

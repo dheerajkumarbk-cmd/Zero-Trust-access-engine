@@ -12,12 +12,17 @@ import dev.dwarpal.response.ResponseSettings;
 import dev.dwarpal.response.SignalLedger;
 import dev.dwarpal.response.VerdictGate;
 import dev.dwarpal.soc.Alert;
+import dev.dwarpal.soc.Asset;
+import dev.dwarpal.soc.AssetCatalog;
 import dev.dwarpal.soc.Entity;
+import dev.dwarpal.soc.InMemoryAssetCatalog;
 import dev.dwarpal.soc.Priority;
 import dev.dwarpal.soc.RankedAlert;
 import dev.dwarpal.soc.Verdict;
 
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.IdentityHashMap;
@@ -53,6 +58,9 @@ import java.util.Set;
 public final class Soar {
 
     public static final String ACTOR = "soc-soar";
+    /** At most one watch on collected evidence per entity in this time (red-team finding F-R1). */
+    public static final Duration COLLECTED_WATCH_EVERY = Duration.ofDays(1);
+    public static final int MAX_COLLECTED_WATCHES = 100_000;
 
     public enum Mode { FULL, WATCH_ONLY }
 
@@ -78,6 +86,10 @@ public final class Soar {
     private record Route(Generation generation, Mode mode) {
     }
 
+    /** A first verdict on an alert naming a protected person's device, waiting for a second analyst (F-R2). */
+    private record DeviceWait(String alertId, String analystId, Instant at) {
+    }
+
     private final ResponseSettings settings;
     private final CaseBook book;
     private final CaseManager cases;
@@ -88,7 +100,10 @@ public final class Soar {
     private final Clock clock;
     private final DeviceIsolation isolation;
     private final Map<String, Connector> connectors;
+    private final AssetCatalog assets;
     private final LinkedHashMap<String, Route> routes = new LinkedHashMap<>();
+    private final LinkedHashMap<String, DeviceWait> deviceWaits = new LinkedHashMap<>();
+    private final LinkedHashMap<String, Instant> collectedWatches = new LinkedHashMap<>();
     private Generation current;
     private long refused;
     private long notifyFailures;
@@ -103,6 +118,7 @@ public final class Soar {
         this.audit = Objects.requireNonNull(b.audit, "audit");
         this.clock = Objects.requireNonNull(b.clock, "clock");
         this.isolation = Objects.requireNonNull(b.isolation, "isolation");
+        this.assets = Objects.requireNonNull(b.assets, "assets");
         Map<String, Connector> m = new LinkedHashMap<>();
         for (Connector c : b.connectors) {
             if (m.putIfAbsent(c.name(), c) != null) {
@@ -151,11 +167,30 @@ public final class Soar {
             return refuse(v, c.get().id(), "this alert rests on collected evidence only: it cannot confirm a"
                     + " destructive play");
         }
+        List<String> collectedTargets = List.of();
+        if (route.mode() == Mode.WATCH_ONLY && v.outcome() == Verdict.Outcome.TRUE_POSITIVE && c.isPresent()
+                && alert.isPresent()) {
+            collectedTargets = collectedTargets(route, alert.get());
+            Optional<String> over = collectedBudget(collectedTargets);
+            if (over.isPresent()) {
+                return refuse(v, c.get().id(), over.get());
+            }
+        }
+        if (route.mode() == Mode.FULL && c.isPresent() && alert.isPresent()) {
+            Optional<Result> held = protectedDevices(v, c.get(), alert.get(), route);
+            if (held.isPresent()) {
+                return held.get();
+            }
+        }
         Playbooks.Result r = route.generation().in(route.mode()).handle(v);
         if (r.status() == Playbooks.Status.REFUSED || c.isEmpty() || alert.isEmpty()) {
             return new Result(r.status(), r.caseId(), r.message(), r.actions(), Optional.empty(), List.of(), List.of());
         }
         String caseId = c.get().id();
+        if (r.status() == Playbooks.Status.APPLIED) {
+            Instant now = clock.instant();
+            collectedTargets.forEach(t -> collectedWatches.put(t, now));
+        }
         remember(caseId, route);
         cases.awaitingSecond(caseId, r.status() == Playbooks.Status.AWAITING_SECOND_ANALYST);
         cases.record(caseId, CaseView.TimelineEntry.Kind.VERDICT, v.analystId(), v.outcome() + " on " + v.alertId()
@@ -226,8 +261,8 @@ public final class Soar {
             refusedAll += g.full().refusedVerdicts() + g.watchOnly().refusedVerdicts();
             held += g.full().heldBack() + g.watchOnly().heldBack();
         }
-        return new Metrics(current.sequence(), current.set().version(), refusedAll, held, pending().size(), gs.size(),
-                notifyFailures);
+        return new Metrics(current.sequence(), current.set().version(), refusedAll, held,
+                pending().size() + deviceWaits.size(), gs.size(), notifyFailures);
     }
 
     public DeviceIsolation isolation() {
@@ -276,6 +311,144 @@ public final class Soar {
         if (routes.size() > settings.maxCases()) {
             routes.keySet().removeIf(id -> book.get(id).map(k -> k.state() == Case.State.CLOSED && !k.holdsActions())
                     .orElse(true));
+        }
+    }
+
+    // ---- red-team fixes F-R1 and F-R2 -------------------------------------------------------------------------
+
+    /** "KIND:id" of each entity a watch-only play would watch for this alert. */
+    private static List<String> collectedTargets(Route route, Alert alert) {
+        Set<Entity.Kind> watched = new java.util.HashSet<>();
+        for (Play.Step s : route.generation().set().watchOnly().playFor(alert.rule()).steps()) {
+            watched.add(s.target());
+        }
+        return alert.entities().stream().filter(e -> watched.contains(e.kind())).map(e -> e.kind() + ":" + e.id())
+                .distinct().toList();
+    }
+
+    /** Why a collected-evidence watch is refused now (an entity watched on collected evidence today), if it is. */
+    private Optional<String> collectedBudget(List<String> targets) {
+        Instant now = clock.instant();
+        collectedWatches.values().removeIf(at -> !now.isBefore(at.plus(COLLECTED_WATCH_EVERY)));
+        for (String t : targets) {
+            if (collectedWatches.containsKey(t)) {
+                return Optional.of("an entity of this alert was already watched on collected evidence in the last day");
+            }
+        }
+        if (collectedWatches.size() + targets.size() > MAX_COLLECTED_WATCHES) {
+            return Optional.of("too many collected-evidence watches in force");
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Part B asks for two analysts when an alert names a protected person; an alert naming only a protected person's
+     * device (or a device of criticality 5) gets the same rule here, before part B sees the verdict. Empty when part B
+     * may go ahead with this verdict; otherwise the answer.
+     */
+    private Optional<Result> protectedDevices(Verdict v, Case c, Alert a, Route route) {
+        Instant now = clock.instant();
+        DeviceWait wait = deviceWaits.get(c.id());
+        if (wait != null && !now.isBefore(wait.at().plus(settings.secondAnalystWindow()))) {
+            deviceWaits.remove(c.id());
+            waitAudit("SOAR_PENDING_LAPSED", c.id(), wait.alertId(), wait.analystId(), now);
+            cases.awaitingSecond(c.id(), false);
+            wait = null;
+        }
+        if (v.outcome() != Verdict.Outcome.TRUE_POSITIVE) {
+            if (wait != null) {
+                deviceWaits.remove(c.id());
+                waitAudit("SOAR_PENDING_CANCELLED", c.id(), wait.alertId(), v.analystId(), now);
+                cases.awaitingSecond(c.id(), false);
+            }
+            return Optional.empty();
+        }
+        if (!protectedDevice(a) || protectedSubjectNamed(a, now)) {
+            return Optional.empty();
+        }
+        if (wait == null) {
+            if (c.concerns(v.analystId())) {
+                return Optional.of(refuse(v, c.id(), "an analyst cannot decide a case about themselves"));
+            }
+            Optional<String> bad = gate.admit(v);
+            if (bad.isPresent()) {
+                return Optional.of(refuse(v, c.id(), bad.get()));
+            }
+            if (!waitAudit("SOAR_PENDING", c.id(), a.id(), v.analystId(), now)) {
+                return Optional.of(refuse(v, c.id(), "audit trail unavailable"));
+            }
+            if (deviceWaits.size() >= settings.maxCases()) {
+                deviceWaits.remove(deviceWaits.keySet().iterator().next());
+            }
+            deviceWaits.put(c.id(), new DeviceWait(a.id(), v.analystId(), now));
+            remember(c.id(), route);
+            cases.awaitingSecond(c.id(), true);
+            cases.record(c.id(), CaseView.TimelineEntry.Kind.VERDICT, v.analystId(), v.outcome() + " on " + a.id()
+                    + ": waits for a second analyst (a protected person's device)");
+            notify(route.generation().set().extrasFor(a.rule()), PlaybookSet.Template.NEEDS_SECOND_ANALYST, c.id(), a,
+                    cases.view(c.id()).map(CaseView::priority).orElse(Priority.P2));
+            return Optional.of(new Result(Playbooks.Status.AWAITING_SECOND_ANALYST, Optional.of(c.id()),
+                    "the alert names a protected person's device: destructive steps wait for a second analyst", 0,
+                    Optional.of(route.mode()), List.of(), List.of()));
+        }
+        if (wait.analystId().equals(v.analystId())) {
+            return Optional.of(refuse(v, c.id(), "the second verdict must come from another analyst"));
+        }
+        if (!wait.alertId().equals(v.alertId())) {
+            return Optional.of(refuse(v, c.id(), "the second analyst must confirm the same alert"));
+        }
+        deviceWaits.remove(c.id());
+        return Optional.empty();
+    }
+
+    private boolean protectedDevice(Alert a) {
+        for (Entity e : a.entities()) {
+            if (e.kind() != Entity.Kind.DEVICE) {
+                continue;
+            }
+            try {
+                Asset asset = assets.asset(e);
+                if (asset.known() && (asset.criticality() >= 5 || settings.protectedSubjects().contains(asset.owner()))) {
+                    return true;
+                }
+            } catch (RuntimeException ex) {
+                return true;    // cannot tell: two analysts, never one
+            }
+        }
+        return false;
+    }
+
+    /** Whether part B will itself ask for two analysts (the alert names a protected or privileged person). */
+    private boolean protectedSubjectNamed(Alert a, Instant now) {
+        for (Entity e : a.entities()) {
+            if (e.kind() != Entity.Kind.SUBJECT) {
+                continue;
+            }
+            if (settings.protectedSubjects().contains(e.id())) {
+                return true;
+            }
+            try {
+                if (enforcement.rolesOf(e.id(), now).stream().anyMatch(settings.privilegedRoles()::contains)) {
+                    return true;
+                }
+            } catch (RuntimeException ex) {
+                return true;    // part B treats an unknown as privileged too
+            }
+        }
+        return false;
+    }
+
+    private boolean waitAudit(String type, String caseId, String alertId, String analyst, Instant now) {
+        Map<String, String> f = new LinkedHashMap<>();
+        f.put("case", caseId);
+        f.put("alert", alertId);
+        f.put("analyst", analyst);
+        f.put("reason", "protected device");
+        try {
+            audit.append(type, ACTOR, now, f);
+            return true;
+        } catch (RuntimeException e) {
+            return false;
         }
     }
 
@@ -337,6 +510,7 @@ public final class Soar {
         private DeviceIsolation isolation;
         private Collection<Connector> connectors = List.of();
         private PlaybookSet initial;
+        private AssetCatalog assets = new InMemoryAssetCatalog(List.of());
 
         private Builder(AuditLog audit, SignalLedger ledger) {
             this.audit = audit;
@@ -377,6 +551,15 @@ public final class Soar {
 
         public Builder connectors(Collection<Connector> v) {
             connectors = List.copyOf(v);
+            return this;
+        }
+
+        /**
+         * Who owns which device and how critical it is: devices of protected people and devices of criticality 5
+         * need two analysts. Default: an empty catalogue (no device is protected beyond part B's rules).
+         */
+        public Builder assets(AssetCatalog v) {
+            assets = v;
             return this;
         }
 
