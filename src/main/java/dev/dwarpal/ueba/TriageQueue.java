@@ -70,12 +70,24 @@ public final class TriageQueue implements AlertSink {
                 entries.put(k, new Entry(keep, old.alerts() + 1, old.first()));
                 return true;
             }
+            Entry fresh = new Entry(r, 1, alert.raisedAt());
             if (entries.size() >= capacity) {
-                String oldest = entries.keySet().iterator().next();
-                entries.remove(oldest);
+                // Full: the entry that would be looked at last makes room, and only for something more urgent. A flood
+                // therefore displaces only alerts below it, never the real P1 it is meant to bury (E-R4).
+                Map.Entry<String, Entry> worst = null;
+                for (Map.Entry<String, Entry> x : entries.entrySet()) {
+                    if (worst == null || ORDER.compare(x.getValue(), worst.getValue()) > 0) {
+                        worst = x;
+                    }
+                }
+                if (worst == null || ORDER.compare(fresh, worst.getValue()) >= 0) {
+                    refused++;
+                    return false;
+                }
+                entries.remove(worst.getKey());
                 evicted++;
             }
-            entries.put(k, new Entry(r, 1, alert.raisedAt()));
+            entries.put(k, fresh);
             return true;
         }
     }

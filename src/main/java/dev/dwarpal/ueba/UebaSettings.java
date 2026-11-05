@@ -48,6 +48,8 @@ import dev.dwarpal.soc.Entity;
  * @param beaconMinIntervals connections to one destination needed before their timing is judged
  * @param beaconMaxCv        intervals whose coefficient of variation (sd / mean) is at most this are machine-regular
  * @param beaconWeight       assumption: log-odds of regular connections to a destination new for the entity
+ * @param driftRatio         a volume baseline at least this many times its lowest daily level of the last 30 days
+ *                           is drifting (slow poisoning)
  */
 public record UebaSettings(Set<Entity.Kind> baselined, int maxProfiles, int maxActions, int volumeWindow,
                            double volumeZ, int minCount, double minRate, double attackRateFactor, double bytesRatio,
@@ -56,7 +58,7 @@ public record UebaSettings(Set<Entity.Kind> baselined, int maxProfiles, int maxA
                            double maxDetectorWeight, int peerMinSize, double peerRareFraction, double peerBonus,
                            Duration quarantine, int maxQuarantine, int maxEvidenceIndex, Duration correlationWindow,
                            double alertMedium, double alertHigh, double alertCritical, int beaconMinIntervals,
-                           double beaconMaxCv, double beaconWeight) {
+                           double beaconMaxCv, double beaconWeight, double driftRatio) {
 
     public static final int MAX_FIELDS = 32;
 
@@ -85,6 +87,9 @@ public record UebaSettings(Set<Entity.Kind> baselined, int maxProfiles, int maxA
         between(beaconMinIntervals, 3, Baselines.BEACON_TIMES - 1, "beaconMinIntervals");
         positive(beaconMaxCv, "beaconMaxCv");
         positive(beaconWeight, "beaconWeight");
+        if (!(driftRatio > 1) || !Double.isFinite(driftRatio)) {
+            throw new IllegalArgumentException("driftRatio must be above 1");
+        }
         if (attackRateFactor <= 1 || !Double.isFinite(attackRateFactor)) {
             throw new IllegalArgumentException("attackRateFactor must be above 1");
         }
@@ -123,7 +128,16 @@ public record UebaSettings(Set<Entity.Kind> baselined, int maxProfiles, int maxA
                 0.5, Math.log(2), 20, Math.log(10), 8.0,
                 Math.log(100), 5, 0.10, Math.log(2),
                 Duration.ofHours(1), 1_000_000, 2_000_000, Duration.ofHours(2),
-                Math.log(20), Math.log(1000), Math.log(100_000), 10, 0.1, Math.log(100));
+                Math.log(20), Math.log(1000), Math.log(100_000), 10, 0.1, Math.log(100), 3.0);
+    }
+
+    /** The same settings with another profile limit. */
+    public UebaSettings withMaxProfiles(int max) {
+        return new UebaSettings(baselined, max, maxActions, volumeWindow, volumeZ, minCount, minRate, attackRateFactor,
+                bytesRatio, minBytes, noveltyFields, noveltyWindow, minHistory, maxValues, pNewAttack, minNovelty,
+                timeMinSamples, timeThreshold, kappa, maxDetectorWeight, peerMinSize, peerRareFraction, peerBonus,
+                quarantine, maxQuarantine, maxEvidenceIndex, correlationWindow, alertMedium, alertHigh, alertCritical,
+                beaconMinIntervals, beaconMaxCv, beaconWeight, driftRatio);
     }
 
     private static void between(int v, int lo, int hi, String name) {

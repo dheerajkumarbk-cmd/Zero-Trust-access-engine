@@ -33,8 +33,9 @@ import dev.dwarpal.soc.Verdict;
  *   <li>Contributions of one <i>group</i> are one piece of evidence: only the strongest counts (the event count
  *       and the bytes of one burst are not two independent facts; ten copies of one alert are not ten).</li>
  *   <li>Each group is capped at ln 1000 (the attack cap of M3).</li>
- *   <li>Groups backed only by {@code COLLECTED} events together count for at most {@link Settings#collectedCap},
- *       scaled down proportionally: forged syslog lines alone cannot make anyone high risk.</li>
+ *   <li>Groups backed only by {@code COLLECTED} events together count for at most {@link Settings#collectedCap}
+ *       (ln 1000, a score of at most 50, MEDIUM), scaled down proportionally: forged syslog lines alone cannot make
+ *       anyone high risk.</li>
  *   <li>Σ of the counted weights goes through Bayes with the base rate (M3):
  *       {@code p = σ(logit(prior) + Σ)}, shown as {@code score = 100 · (p − prior) / (1 − prior)}, so nothing
  *       known is exactly 0 and Σ = ln 1000 with prior 0.001 is about 50.</li>
@@ -63,7 +64,7 @@ public final class UebaRisk implements EntityRisk, AlertSink {
     /**
      * @param prior           base rate P(attack) of M3
      * @param groupCap        cap per group in log-odds (ln 1000)
-     * @param collectedCap    cap on the total of groups backed only by collected events (ln 100)
+     * @param collectedCap    cap on the total of groups backed only by collected events (ln 1000)
      * @param anomalyHalfLife half-life of UEBA anomalies
      * @param severity        weight of an alert by severity
      * @param maxEntities     entities remembered; when full the lowest-risk entity makes room
@@ -96,7 +97,7 @@ public final class UebaRisk implements EntityRisk, AlertSink {
             w.put(Severity.MEDIUM, new Weight(Math.log(10), Duration.ofDays(3)));
             w.put(Severity.HIGH, new Weight(Math.log(100), Duration.ofDays(7)));
             w.put(Severity.CRITICAL, new Weight(Math.log(1000), Duration.ofDays(14)));
-            return new Settings(0.001, Math.log(1000), Math.log(100), Duration.ofDays(1), w, 100_000, 256);
+            return new Settings(0.001, Math.log(1000), Math.log(1000), Duration.ofDays(1), w, 100_000, 256);
         }
     }
 
@@ -321,11 +322,19 @@ public final class UebaRisk implements EntityRisk, AlertSink {
                 merged.add(new Merged(best, w, g.size(), actionable, ev));
             }
         }
+        // Groups backed only by collected events count together for at most collectedCap, scaled proportionally
+        // (as M3 scales reassurance), so forged syslog alone cannot make anyone high risk (E-R2).
+        double collected = merged.stream().filter(m -> !m.actionable()).mapToDouble(Merged::weight).sum();
+        double scale = collected > settings.collectedCap() ? settings.collectedCap() / collected : 1;
         List<Contribution> out = new ArrayList<>();
         for (Merged m : merged) {
             String reason = m.strongest().reason() + (m.n() > 1 ? " (x" + m.n() + ")" : "");
-            out.add(new Contribution(m.strongest().source(), m.weight(), m.strongest().at(), List.copyOf(m.evidence()),
-                    reason));
+            double w = m.weight();
+            if (!m.actionable() && scale < 1) {
+                w *= scale;
+                reason = String.format(Locale.ROOT, "%s [collected only, x%.2f]", reason, scale);
+            }
+            out.add(new Contribution(m.strongest().source(), w, m.strongest().at(), List.copyOf(m.evidence()), reason));
         }
         out.sort(Comparator.comparingDouble(Contribution::weight).reversed().thenComparing(Contribution::source));
         return out;

@@ -56,7 +56,7 @@ final class Baselines {
         boolean bytesFired;
         final Set<Long> flaggedHours = new HashSet<>();
         /** Daily snapshots of the mean, for the drift check. */
-        final double[] daily = new double[7];
+        final double[] daily = new double[DRIFT_DAYS];
         int dailyFilled;
         long lastSnapshotDay = Long.MIN_VALUE;
         long driftFiredDay = Long.MIN_VALUE;
@@ -158,6 +158,7 @@ final class Baselines {
         int filled;
         int next;
         long firedHour = Long.MIN_VALUE;
+        long learnedHour = Long.MIN_VALUE;
 
         TimeOfDay(int max) {
             minutes = new int[max];
@@ -200,29 +201,32 @@ final class Baselines {
     }
 
     private final UebaSettings settings;
-    private final Lru<Entity, Profile> profiles;
+    private final Map<Entity, Profile> profiles = new HashMap<>();
     /** group|kind|field|value -> ids of the group's entities that learned the value. */
     private final Map<String, Set<String>> peerKnowledge = new HashMap<>();
     static final int MAX_PEER_KEYS = 200_000;
     static final int MAX_DESTINATIONS = 64;
+    static final int DRIFT_DAYS = 30;
     static final int BEACON_TIMES = 32;
     static final int MAX_PEER_MEMBERS = 10_000;
     long refusedProfiles;
 
-    long evictedProfiles() {
-        return profiles.evicted;
-    }
 
     Baselines(UebaSettings settings) {
         this.settings = settings;
-        int max = settings.maxProfiles();
-        this.profiles = new Lru<>(max);
     }
 
-    /** The profile of an entity, created if there is room. */
+    /**
+     * The profile of an entity, created if there is room. A full table refuses new entities (and counts them):
+     * evicting an established baseline would let a flood of invented entities reset a victim's history (E-R5).
+     */
     Optional<Profile> profile(Entity e) {
         Profile p = profiles.get(e);
         if (p == null) {
+            if (profiles.size() >= settings.maxProfiles()) {
+                refusedProfiles++;
+                return Optional.empty();
+            }
             p = new Profile(e, Math.max(settings.timeMinSamples(), 200));
             profiles.put(e, p);
         }

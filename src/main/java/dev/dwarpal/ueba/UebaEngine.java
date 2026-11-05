@@ -1,5 +1,6 @@
 package dev.dwarpal.ueba;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayDeque;
@@ -47,11 +48,15 @@ public final class UebaEngine {
     public static final int MAX_ALERT_MEMORY = 100_000;
     public static final int MAX_WINDOW_ANOMALIES = 256;
     public static final int MAX_POLL = 100_000;
+    /** An event may claim to be at most this far ahead of the time it was written to the chain. */
+    public static final Duration MAX_FUTURE = Duration.ofMinutes(5);
+    /** Or at most this far behind it (sensor batches arrive late; backfills older than this are not baselined). */
+    public static final Duration MAX_PAST = Duration.ofDays(2);
 
     /** Counters for the SOC's own health view. */
     public record Stats(long events, long malformed, long anomalies, long alerts, long refusedAlerts,
-                        long refusedProfiles, long evictedProfiles, long quarantineDropped, long lateEvents,
-                        int profiles, Optional<String> chainProblem) {
+                        long refusedProfiles, long quarantineDropped, long lateEvents,
+                        long skewedEvents, int profiles, Optional<String> chainProblem) {
     }
 
     private record Pending(ChainedEvent event, List<Entity> entities) {
@@ -87,6 +92,7 @@ public final class UebaEngine {
     private long refusedAlerts;
     private long quarantineDropped;
     private long lateEvents;
+    private long skewedEvents;
     private String chainProblem;
 
     public UebaEngine(UebaSettings settings, PeerGroups peers, EvidenceIndex index, Consumer<Anomaly> anomalies,
@@ -151,6 +157,14 @@ public final class UebaEngine {
                     ents.add(en);
                 }
             }
+            boolean skewed = e.at().isAfter(ce.recordedAt().plus(MAX_FUTURE))
+                    || e.at().isBefore(ce.recordedAt().minus(MAX_PAST));
+            if (skewed) {
+                // A forged far-future time would move the hourly state ahead and switch volume detection off
+                // (E-R6): such events are counted, and neither judged nor learned.
+                skewedEvents++;
+                ents.clear();
+            }
             for (Entity en : ents) {
                 Optional<Baselines.Profile> p = baselines.profile(en);
                 if (p.isEmpty()) {
@@ -170,7 +184,7 @@ public final class UebaEngine {
                 flagged.remove(dropped.event().sequence());
                 quarantineDropped++;
             }
-            release();
+            release(found);
             anomalyCount += found.size();
             for (Anomaly a : found) {
                 correlate(a, raised);
@@ -251,7 +265,7 @@ public final class UebaEngine {
     public Stats stats() {
         synchronized (lock) {
             return new Stats(events, malformed, anomalyCount, alertCount, refusedAlerts, baselines.refusedProfiles,
-                    baselines.evictedProfiles(), quarantineDropped, lateEvents, baselines.size(),
+                    quarantineDropped, lateEvents, skewedEvents, baselines.size(),
                     Optional.ofNullable(chainProblem));
         }
     }
@@ -449,11 +463,9 @@ public final class UebaEngine {
                 l += settings.peerBonus();
                 why.append(String.format(Locale.ROOT, "; rare in %s (%d of %d) +%.2f", g.get(), knowing,
                         peers.size(g.get()), settings.peerBonus()));
-            } else if (fraction >= 0.5) {
-                l *= 0.5;
-                why.append(String.format(Locale.ROOT, "; common in %s (%d of %d) x0.5", g.get(), knowing,
-                        peers.size(g.get())));
             }
+            // Peers may strengthen a finding, never weaken it: a value common in a noisy group is still new for
+            // this person (E-R3).
         }
         if (l < settings.minNovelty()) {
             return;
@@ -518,7 +530,7 @@ public final class UebaEngine {
 
     // ---- learning --------------------------------------------------------------------------------------------
 
-    private void release() {
+    private void release(List<Anomaly> out) {
         while (!quarantine.isEmpty()) {
             Pending p = quarantine.peekFirst();
             if (p.event().recordedAt().plus(settings.quarantine()).isAfter(latestRecorded)) {
@@ -527,7 +539,7 @@ public final class UebaEngine {
             quarantine.removeFirst();
             boolean bad = flagged.remove(p.event().sequence());
             if (!bad) {
-                learnEvent(p);
+                learnEvent(p, out);
             }
         }
     }
@@ -536,12 +548,14 @@ public final class UebaEngine {
     public void flush() {
         synchronized (lock) {
             latestRecorded = Instant.MAX;
-            release();
+            List<Anomaly> late = new ArrayList<>();
+            release(late);
+            anomalyCount += late.size();
             latestRecorded = Instant.EPOCH;
         }
     }
 
-    private void learnEvent(Pending pending) {
+    private void learnEvent(Pending pending, List<Anomaly> out) {
         SecurityEvent e = pending.event().event();
         for (Entity en : pending.entities()) {
             Optional<Baselines.Profile> op = baselines.existing(en);
@@ -554,7 +568,7 @@ public final class UebaEngine {
             if (v != null && !v.flaggedHours.contains(h)) {
                 if (h > v.learnHour) {
                     if (v.learnHour != Long.MIN_VALUE) {
-                        v.push(v.learnCount, v.learnBytes);
+                        closeHour(p, v, pending.event(), out);
                     }
                     v.learnHour = h;
                     v.learnCount = 0;
@@ -569,8 +583,48 @@ public final class UebaEngine {
             for (String f : settings.noveltyFields()) {
                 e.field(f).filter(s -> !s.isEmpty()).ifPresent(val -> learn(p, f, val));
             }
-            p.time.learn(minuteOfDay(e.at()));
+            if (p.time.learnedHour != h) {
+                // One time sample per active hour, so one busy hour cannot outvote weeks of habits.
+                p.time.learnedHour = h;
+                p.time.learn(minuteOfDay(e.at()));
+            }
         }
+    }
+
+    /**
+     * Ends a learned hour: its count enters the window, clipped at lambda + 2 sqrt(lambda) + 1 so one hour moves the
+     * mean only a little. Once a day the mean is compared with its lowest daily level of the last 30 days; a baseline
+     * grown driftRatio times is reported as drift and may not grow further while it drifts (E-R1).
+     */
+    private void closeHour(Baselines.Profile p, Baselines.Volume v, ChainedEvent at, List<Anomaly> out) {
+        double lambda = v.meanCount();
+        int count = v.learnCount;
+        long b = v.learnBytes;
+        if (v.filled >= 3) {
+            double ref = lambda;
+            long day = Math.floorDiv(v.learnHour, 24);
+            v.snapshot(day, lambda);
+            double low = Math.max(v.minDaily(), settings.minRate());
+            if (v.dailyFilled >= 3 && lambda >= settings.driftRatio() * low) {
+                ref = low;
+                if (v.driftFiredDay != day) {
+                    v.driftFiredDay = day;
+                    double ratio = lambda / low;
+                    out.add(new Anomaly(p.entity, Anomaly.Detector.DRIFT, "drift:" + at.event().action(),
+                            cap(Math.log(ratio)), at.event().at(), List.of(at.sequence()),
+                            at.event().provenance().actionable(), technique(at.event().action()),
+                            String.format(Locale.ROOT, "baseline of %s grew to %.1f per hour, %.1f x its lowest daily"
+                                    + " level %.1f of %d days (l=ln ratio)", at.event().action(), lambda, ratio, low,
+                                    v.dailyFilled)));
+                }
+            }
+            double limit = ref + 2 * Math.sqrt(ref) + 1;
+            if (count > limit) {
+                b = (long) (b * (limit / count));
+                count = (int) Math.floor(limit);
+            }
+        }
+        v.push(count, b);
     }
 
     private void learn(Baselines.Profile p, String field, String value) {
