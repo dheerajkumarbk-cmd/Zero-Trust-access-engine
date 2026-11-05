@@ -575,8 +575,9 @@ public final class Query {
                     throw error("expected '(' after 'in'");
                 }
                 Set<String> vs = new LinkedHashSet<>();
+                int given = 0;
                 do {
-                    if (vs.size() == MAX_IN) {
+                    if (given++ == MAX_IN) {
                         throw error("at most " + MAX_IN + " values in a list");
                     }
                     vs.add(value(f, Op.IN));

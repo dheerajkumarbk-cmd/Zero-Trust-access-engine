@@ -80,6 +80,7 @@ public final class EventStore implements EventSearch {
 
     private final AuditCursor cursor;
     private final int capacity;
+    private final int maxExamined;
     private final java.util.TreeMap<Key, ChainedEvent> byTime = new java.util.TreeMap<>();
     private final ArrayDeque<Key> bySequence = new ArrayDeque<>();
     private final Map<Entity, TreeSet<Key>> byEntity = new HashMap<>();
@@ -94,11 +95,20 @@ public final class EventStore implements EventSearch {
      * @param capacity events kept in memory, 1 to {@link #MAX_CAPACITY}
      */
     public EventStore(AuditCursor cursor, int capacity) {
+        this(cursor, capacity, MAX_EXAMINED);
+    }
+
+    /** With a lower cost limit (tests, or a deployment on smaller hardware). */
+    EventStore(AuditCursor cursor, int capacity, int maxExamined) {
         this.cursor = Objects.requireNonNull(cursor, "cursor");
         if (capacity < 1 || capacity > MAX_CAPACITY) {
             throw new IllegalArgumentException("capacity: 1 to " + MAX_CAPACITY);
         }
+        if (maxExamined < 1 || maxExamined > MAX_EXAMINED) {
+            throw new IllegalArgumentException("maxExamined: 1 to " + MAX_EXAMINED);
+        }
         this.capacity = capacity;
+        this.maxExamined = maxExamined;
     }
 
     /** Reads up to {@code max} new records from the trail. */
@@ -190,7 +200,7 @@ public final class EventStore implements EventSearch {
         long examined = 0;
         boolean stopped = false;
         for (Key k : candidates(q, from, to).descendingSet()) {
-            if (++examined > MAX_EXAMINED) {
+            if (++examined > maxExamined) {
                 stopped = true;
                 break;
             }
@@ -231,7 +241,7 @@ public final class EventStore implements EventSearch {
         boolean stopped = false;
         boolean full = false;
         for (Key k : candidates(q, from, to).descendingSet()) {
-            if (++examined > MAX_EXAMINED) {
+            if (++examined > maxExamined) {
                 stopped = true;
                 break;
             }
@@ -264,7 +274,7 @@ public final class EventStore implements EventSearch {
     private Optional<String> problem(boolean stopped, Instant from) {
         List<String> p = new ArrayList<>(3);
         if (stopped) {
-            p.add("stopped after examining " + MAX_EXAMINED + " events: narrow the time range or add a field");
+            p.add("stopped after examining " + maxExamined + " events: narrow the time range or add a field");
         }
         if (evicted > 0 && !from.isAfter(evictedBefore)) {
             p.add("events up to " + evictedBefore + " are no longer in memory");
@@ -278,7 +288,7 @@ public final class EventStore implements EventSearch {
         Key lo = Key.bound(from, true);
         Key hi = Key.bound(to, true);
         NavigableSet<Key> best = byTime.navigableKeySet().subSet(lo, true, hi, false);
-        int bestSize = MAX_EXAMINED + 1;
+        int bestSize = maxExamined + 1;
         for (Query.Cmp c : q.required()) {
             if (c.op() != Query.Op.EQ) {
                 continue;

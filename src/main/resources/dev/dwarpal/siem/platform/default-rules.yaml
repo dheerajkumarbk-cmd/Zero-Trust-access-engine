@@ -1,0 +1,193 @@
+# Dwarpal correlation rules (Layer 5.2 part D).
+#
+# Rules are data: an analyst changes thresholds or adds a rule here without Java. The file is loaded with
+# safe YAML (no objects, no aliases, no duplicate keys), compiled and linted; a rule that can never fire, an
+# unknown MITRE technique or an unknown key blocks the whole file.
+#
+# 'where' uses the search language (see Query): fields such as dataset, action, outcome, category, the entity
+# kinds subject / device / ip, f.<name> for an event field whose name is also a built-in, and any other field.
+#
+# Thresholds are starting values for a small organisation (60 people in the simulation), not tuned on real logs.
+
+version: 1
+rules:
+
+  # ---- part A's rules, expressed in the language (same meaning, own ids) -----------------------------------
+
+  - id: cr-break-glass-used
+    title: Emergency (break-glass) account used
+    severity: CRITICAL
+    techniques: [T1078]
+    match: 'dataset = dwarpal.audit and action = break.glass.used'
+
+  - id: cr-honeytoken-touched
+    title: Decision on a honeytoken resource
+    severity: CRITICAL
+    techniques: [T1078]
+    match: 'dataset = dwarpal.audit and action = access.decision and f.policy = "hard-gate:honeytoken"'
+
+  - id: cr-deny-storm-subject
+    title: Many denied requests in one person's name (they are the target, not the suspect)
+    severity: MEDIUM
+    techniques: [T1110]
+    threshold:
+      where: 'dataset = dwarpal.audit and action = access.decision and outcome = failure'
+      by: subject
+      within: 15m
+      count: 5
+
+  - id: cr-deny-storm-ip
+    title: Many denied requests from one address
+    severity: HIGH
+    techniques: [T1110.004]
+    threshold:
+      where: 'dataset = dwarpal.audit and action = access.decision and outcome = failure'
+      by: ip
+      within: 1h
+      count: 10
+
+  - id: cr-spray-ip
+    title: Denied requests for many people from one address
+    severity: HIGH
+    techniques: [T1110.003]
+    threshold:
+      where: 'dataset = dwarpal.audit and action = access.decision and outcome = failure'
+      by: ip
+      within: 1h
+      distinct: subject
+      count: 5
+
+  - id: cr-mfa-fatigue
+    title: Repeated step-up (MFA) challenges for one person
+    severity: HIGH
+    techniques: [T1621]
+    threshold:
+      where: 'dataset = dwarpal.audit and action = access.decision and outcome = challenged'
+      by: subject
+      within: 30m
+      count: 5
+
+  - id: cr-pam-refused
+    title: Repeated refused privilege elevations
+    severity: MEDIUM
+    techniques: [T1548]
+    threshold:
+      where: 'dataset = dwarpal.audit and action in (elevation.refused, elevation.approval.refused)'
+      by: who
+      within: 1h
+      count: 3
+
+  # ---- endpoint -------------------------------------------------------------------------------------------
+
+  - id: encoded-powershell
+    title: PowerShell started with an encoded command
+    severity: MEDIUM
+    techniques: [T1059.001, T1027]
+    match: 'dataset = endpoint and action = process.start and process = powershell.exe and cmd ~ " -enc"'
+
+  # A6: the stolen laptop at home. The engine allows the login (Layer 2 blind spot); the endpoint shows what
+  # the thief does with it.
+  - id: stolen-laptop-collection
+    title: Encoded PowerShell, then a USB drive, then bulk file reads on one device
+    severity: HIGH
+    techniques: [T1059.001, T1052.001, T1039]
+    sequence:
+      by: device
+      within: 30m
+      steps:
+        - where: 'dataset = endpoint and action = process.start and process = powershell.exe and cmd ~ " -enc"'
+        - where: 'dataset = endpoint and action = usb.mount'
+        - where: 'dataset = endpoint and action = file.read'
+          min: 3
+
+  # A6 across sources: the same device is then allowed in by Dwarpal itself.
+  - id: stolen-laptop-access
+    title: Encoded PowerShell on a device, then that device is allowed access
+    severity: CRITICAL
+    techniques: [T1078, T1059.001]
+    sequence:
+      by: device
+      within: 15m
+      steps:
+        - where: 'dataset = endpoint and action = process.start and process = powershell.exe and cmd ~ " -enc"'
+        - where: 'dataset = dwarpal.audit and action = access.decision and outcome = success'
+
+  # ---- A8: beaconing -----------------------------------------------------------------------------------------
+
+  - id: beacon-regular-destination
+    title: Many allowed flows from one device to one destination
+    severity: HIGH
+    techniques: [T1071]
+    threshold:
+      where: 'dataset = firewall and action = network.flow and outcome = success'
+      by: [device, dst]
+      within: 1h
+      count: 30
+
+  - id: beacon-from-document-process
+    title: A process started by a document connects out repeatedly, seen by the endpoint and the firewall
+    severity: HIGH
+    techniques: [T1071]
+    sequence:
+      by: device
+      within: 20m
+      steps:
+        - where: 'dataset = endpoint and action = process.start and parent in (winword.exe, excel.exe, powerpnt.exe, outlook.exe, acrord32.exe)'
+        - where: 'dataset = endpoint and action = network.connect'
+          min: 3
+        - where: 'dataset = firewall and action = network.flow'
+          min: 3
+
+  # ---- A9: cloud exfiltration ------------------------------------------------------------------------------
+
+  - id: cloud-download-volume
+    title: Very large download volume from the cloud application
+    severity: MEDIUM
+    techniques: [T1567.002]
+    threshold:
+      where: 'dataset = cloud and action = file.download'
+      by: subject
+      within: 1h
+      sum: bytes
+      atLeast: 1000000000
+
+  - id: cloud-bulk-download-then-external-share
+    title: Bulk download, then a share with an outside address
+    severity: HIGH
+    techniques: [T1567.002]
+    sequence:
+      by: subject
+      within: 3h
+      steps:
+        - where: 'dataset = cloud and action = file.download'
+          min: 50
+        - where: 'dataset = cloud and action = share.create and share != none'
+
+  # ---- the SOC's own sources --------------------------------------------------------------------------------
+
+  - id: telemetry-refused
+    title: Endpoint batch refused (bad signature, replayed or out of order)
+    severity: MEDIUM
+    techniques: [T1562]
+    match: 'dataset = endpoint and action = telemetry.refused'
+
+  - id: telemetry-gap
+    title: Endpoint batches missing (numbers skipped)
+    severity: MEDIUM
+    techniques: [T1562, T1070]
+    match: 'dataset = endpoint and action = telemetry.gap'
+
+  - id: collector-flooded
+    title: A collector lost or refused events (flood or misconfigured source)
+    severity: HIGH
+    techniques: [T1562]
+    match: 'action in (collector.overflow, ingest.refused)'
+
+  - id: sensor-heartbeat-missing
+    title: An endpoint sensor stopped sending its heartbeat
+    severity: MEDIUM
+    techniques: [T1562]
+    absence:
+      where: 'dataset = endpoint and action = sensor.heartbeat'
+      by: device
+      within: 30m
