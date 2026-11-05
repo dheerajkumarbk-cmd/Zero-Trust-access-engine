@@ -6,7 +6,7 @@ package dev.dwarpal.crypto;
  * to vouch for a laptop's disk encryption.
  */
 public enum KeyPurpose {
-    /** Endpoint agent: signs device-posture reports. Bound to exactly one device id. */
+    /** Endpoint agent: signs device-posture reports and endpoint telemetry batches (separate message domains). Bound to exactly one device id. */
     DEVICE_AGENT,
     /** Identity provider: signs "subject X authenticated with method M at time T". */
     IDENTITY_PROVIDER,

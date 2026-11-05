@@ -24,6 +24,7 @@ public final class SignedMessages {
     public static final String BREAK_GLASS_V1 = "dwarpal/break-glass/v1";
     public static final String BREAK_GLASS_REVIEW_V1 = "dwarpal/break-glass-review/v1";
     public static final String SOC_VERDICT_V1 = "dwarpal/soc-verdict/v1";
+    public static final String ENDPOINT_TELEMETRY_V1 = "dwarpal/endpoint-telemetry/v1";
 
     /**
      * What an approver signs: this request, this person, this role, for this long. Changing any of
@@ -48,6 +49,18 @@ public final class SignedMessages {
     /** An analyst's verdict on one alert: which alert, who decided, what, and when (Layer 5). */
     public static byte[] socVerdict(String alertId, String analystId, String outcome, Instant signedAt) {
         return Canonical.encode(SOC_VERDICT_V1, alertId, analystId, outcome, signedAt.toString());
+    }
+
+    /**
+     * What a device agent signs for one batch of endpoint telemetry (with its {@link KeyPurpose#DEVICE_AGENT}
+     * key, bound to the device): the device, the batch number (strictly increasing per device, so a batch
+     * cannot be replayed or reordered), when the batch was sealed, and the SHA-256 of its body (hex), so not
+     * one line of it can be changed. The domain string keeps it apart from posture reports signed by the
+     * same key.
+     */
+    public static byte[] endpointTelemetry(String deviceId, long batch, Instant sealedAt, String bodySha256Hex) {
+        return Canonical.encode(ENDPOINT_TELEMETRY_V1, deviceId, Long.toString(batch), sealedAt.toString(),
+                bodySha256Hex);
     }
 
     private SignedMessages() {

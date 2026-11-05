@@ -1,4 +1,4 @@
-# Dwarpal threat model (STRIDE), v1.2
+# Dwarpal threat model (STRIDE), v1.3
 
 Scope: the Policy Engine core (v0.1 to v0.6) and the Policy Administrator: sessions (v0.7, v0.8) and
 privileged access (v0.8). The PEP
@@ -373,6 +373,26 @@ Red-team pass:
 | 5I-4 | Elevation (against innocent people) | An attacker floods the trail with denied requests in the CEO's name; part A raises a deny-storm alert naming the CEO; an analyst confirms it | The play denies the sending address only and adds a small watch on the CEO (x10, fading); the CEO is protected (two analysts) | `junkInTheCeosNameBlocksTheSenderButNeverLocksOutTheCeo` |
 | 5I-5 | Tampering | A What-If replayed on the live engine: the freshness gate called every old request stale and hid a dangerous change | `WhatIf` replays on `PolicyEngine.forReplay()` (drops only the clock-reading gate; live engine unchanged) | `c2_freshnessGateWouldHideTheDiff_replayUsesAReplayCopy` |
 | 5I-6 | Repudiation / tampering | Detection or analytics over the encrypted store differs from the trail it holds | Same alerts and same decision entries from the store as from memory; anchor checked | `theEncryptedStoreFeedsDetectionAndAnalyticsExactlyLikeTheTrailItHolds` |
+
+## v1.3 Layer 5.2 part 0 (shared contracts for the SOC platform)
+
+| # | STRIDE | Threat | Mitigation in code | Test |
+|---|---|---|---|---|
+| P1 | Spoofing | A collected event (syslog, cloud export) poses as Dwarpal's own verified audit record | `SecurityEvents.toAuditFields` refuses `VERIFIED_AUDIT` and the native dataset; reading refuses a `SECURITY_EVENT` record that claims either | `aCollectedEventCanNeverPoseAsDwarpalsOwnRecord` |
+| P2 | Spoofing / elevation | The unauthenticated firewall collector passes its lines off as signed endpoint telemetry, or another component writes events for a dataset | A `SECURITY_EVENT` record counts only when written by `collector:<its dataset>` | `aCollectorCanOnlyWriteItsOwnDataset` |
+| P3 | Tampering | A malformed or crafted event record is guessed into something (wrong category, smuggled entities) | Every field required and checked; entities are ids that cannot contain the separators; at most 16; refused, never guessed | `malformedSecurityEventRecordsAreRefusedNotGuessed` |
+| P4 | Info disclosure / repudiation | Event text forges lines in an analyst's view; huge values exhaust memory | Field names restricted, values sanitised and cut at 1,024 characters, at most 64 fields, immutable | `eventsAreBoundedAndTheirTextIsSafeToShow` |
+| P5 | Tampering | Collected events edited after collection | Each event is written into the keyed audit chain before anything reads it, and read back only through the keyed cursor | `aCollectedEventComesBackFromTheVerifiedChainExactlyAsItWent` |
+| P6 | Elevation (against innocent people) | Anyone on the network sends a syslog line naming the CEO and a playbook acts on it | Provenance on every event; `COLLECTED` is not `actionable`; ranked alerts carry `actionable`; rule for parts D to F: no destructive action on collected evidence alone | `eventsAreBoundedAndTheirTextIsSafeToShow`, `rankedAlertsAreBoundedAndSayWhetherAnyoneMayActOnThem` |
+| P7 | Elevation | Risk lowered by the entity's own activity or by a negative contribution | Contributions only add (weight at least 0); scores 0 to 100 with a level that must agree | `riskOnlyEverAddsAndAlwaysExplainsItself` |
+| P8 | Elevation | An unknown device ranks as harmless because nobody catalogued it | Unknown assets get the deployment's default criticality and are marked unknown | `unknownAssetsAreNeverSilentlyHarmless` |
+| P9 | Spoofing / tampering | Endpoint telemetry forged, edited, moved to another device, replayed or reused from a posture signature | Batches signed by the device agent key bound to that device over device, batch number, time and the body's SHA-256, under their own message domain | `everyEndpointBatchIsSignedByItsOwnDeviceAndNumberedInOrder` |
+
+Red-team pass on part 0: the abuse tests above were written first as probes against the contracts; none found a
+breach in the contracts as designed. One defect was found in the test code itself (a raw bidirectional-override
+character written into a test file, which the source hygiene check forbids) and replaced by an escape. Checks that
+belong to the collectors (single-use batch numbers, event time against collection time, per-source quotas) are
+part D's and must be reproduced there.
 
 ## Residual risks (accepted for this layer, scheduled)
 
