@@ -181,6 +181,9 @@ public final class AdminModule implements ConsoleModule {
 
     /** One change (or refusal) in the audit chain, with the record's own plain fields. */
     public record HistoryLine(long sequence, Instant at, String type, String actor, Map<String, String> details) {
+        public HistoryLine {
+            details = Map.copyOf(details);
+        }
     }
 
     private List<HistoryLine> history(String prefix) {

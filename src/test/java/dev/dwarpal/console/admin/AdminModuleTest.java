@@ -155,7 +155,7 @@ class AdminModuleTest {
     }
 
     @Test
-    void anOldSequenceAndAnEditedFileAreRefusedByTheInstallerNotByTheModule() {
+    void anOldSequenceIsRefusedByTheInstallerNotByTheModule() {
         String a = propose("policy/propose", ADA, fx.policyWithVersion("2026.11.08-1"));
         String b = propose("policy/propose", RAY, fx.policyWithVersion("2026.11.08-2"));
         for (String id : List.of(a, b)) {
@@ -306,7 +306,7 @@ class AdminModuleTest {
         assertTrue(body.contains("Access denied. Contact your administrator with reference: " + denied.requestId()));
         // nothing that teaches an attacker: no policy, score, signal, address, device or threshold
         for (String secret : List.of(denied.policy(), denied.policyVersion(), denied.pAttack(), denied.sourceIp(), denied.device(),
-                "pAttack", "signals", "factor", "threshold", "novelty", "reputation", "impossible", "P-90", "P-01")) {
+                "pAttack", "signals", "risk", "threshold", "novelty", "reputation", "impossible", "P-90", "P-01")) {
             if (!secret.isBlank()) {
                 assertFalse(body.contains(secret), "the page must not show: " + secret);
             }

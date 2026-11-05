@@ -217,6 +217,6 @@ final class Changes {
     private View view(Candidate c, boolean linted) {
         return new View(c.id, c.kind.name().toLowerCase(java.util.Locale.ROOT), c.sequence, c.sha256, c.proposedBy, c.at,
                 c.at.plus(TTL), c.approvals.keySet().stream().sorted().toList(), REQUIRED, linted, c.findings,
-                c.yaml);
+                linted ? c.yaml : "");
     }
 }
