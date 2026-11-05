@@ -51,6 +51,8 @@ import java.util.Set;
 public final class CaseManager implements AlertSink {
 
     public static final String ACTOR = "soc-cases";
+    /** How a LINKED timeline entry starts; the linked case's id follows. */
+    public static final String LINK_PREFIX = "shares entities with ";
 
     /** The answer to a change request; the API maps these to fixed, generic replies. */
     public enum Outcome { OK, NOT_FOUND, FORBIDDEN, CONFLICT, INVALID, UNAVAILABLE }
@@ -185,9 +187,9 @@ public final class CaseManager implements AlertSink {
             f.put("linked", other.id);
             audited("CASE_LINKED", ACTOR, now, f);
             e.links.add(other.id);
-            add(e, now, CaseView.TimelineEntry.Kind.LINKED, ACTOR, "shares entities with " + other.id);
+            add(e, now, CaseView.TimelineEntry.Kind.LINKED, ACTOR, LINK_PREFIX + other.id);
             if (other.links.size() < settings.maxLinks() && other.links.add(e.id)) {
-                add(other, now, CaseView.TimelineEntry.Kind.LINKED, ACTOR, "shares entities with " + e.id);
+                add(other, now, CaseView.TimelineEntry.Kind.LINKED, ACTOR, LINK_PREFIX + e.id);
             }
         }
     }

@@ -381,8 +381,8 @@ public final class SocApiServer implements AutoCloseable {
             case CASES -> caseList(who);
             case CASE -> visibleCase(who, p.getFirst()).map(c -> Answer.ok(SocJson.caseDetail(c), "case " + c.id()))
                     .orElseGet(() -> Answer.notFound("case not visible"));
-            case TIMELINE -> visibleCase(who, p.getFirst()).map(c -> Answer.ok(SocJson.timeline(c), "timeline " + c.id()))
-                    .orElseGet(() -> Answer.notFound("case not visible"));
+            case TIMELINE -> visibleCase(who, p.getFirst()).map(c -> Answer.ok(SocJson.timeline(c),
+                    "timeline " + c.id())).orElseGet(() -> Answer.notFound("case not visible"));
             case NOTE -> change(cases.note(p.getFirst(), who, SocJson.readNote(body)), "note on " + p.getFirst());
             case ASSIGN -> change(cases.assign(p.getFirst(), who, SocJson.readAssignment(body)),
                     "assignment of " + p.getFirst());
@@ -403,7 +403,22 @@ public final class SocApiServer implements AutoCloseable {
     }
 
     private Optional<CaseView> visibleCase(Analyst who, String caseId) {
-        return cases.canSee(who, caseId) ? cases.view(caseId) : Optional.empty();
+        return cases.canSee(who, caseId) ? cases.view(caseId).map(c -> redacted(who, c)) : Optional.empty();
+    }
+
+    /**
+     * The case as this analyst may see it: links, and timeline entries about links, only to cases they may see too
+     * (red-team finding F-R4: links leaked the ids of cases about colleagues).
+     */
+    private CaseView redacted(Analyst who, CaseView c) {
+        List<String> links = c.links().stream().filter(l -> cases.canSee(who, l)).toList();
+        List<CaseView.TimelineEntry> timeline = c.timeline().stream()
+                .filter(t -> t.kind() != CaseView.TimelineEntry.Kind.LINKED || !t.detail().startsWith(CaseManager.LINK_PREFIX)
+                        || cases.canSee(who, t.detail().substring(CaseManager.LINK_PREFIX.length())))
+                .toList();
+        return new CaseView(c.id(), c.key(), c.state(), c.priority(), c.score(), c.openedAt(), c.deadline(),
+                c.acknowledgedAt(), c.breached(), c.assignee(), c.holdsActions(), c.awaitingSecond(), c.alerts(),
+                c.entities(), c.notes(), timeline, links, c.timelineDropped());
     }
 
     private Answer queue(Analyst who) {
@@ -515,9 +530,12 @@ public final class SocApiServer implements AutoCloseable {
                 hidden++;
             }
         }
+        // Red-team finding F-R3: hidden events must not show in any number either (the count of a colleague's events
+        // is itself information about them). The audit record keeps how many were hidden.
+        long matched = hidden > 0 ? events.size() : r.matched();
+        boolean truncated = hidden > 0 ? events.size() >= s.limit() : r.truncated();
         JsonValue answer = JsonValue.object().put("events", new JsonValue.JArray(events))
-                .put("matched", JsonValue.num(r.matched())).put("truncated", JsonValue.bool(r.truncated() || hidden > 0))
-                .put("hidden", JsonValue.num(hidden)).build();
+                .put("matched", JsonValue.num(matched)).put("truncated", JsonValue.bool(truncated)).build();
         return Answer.ok(answer, "search: " + events.size() + " shown, " + hidden + " hidden, query sha256 "
                 + dev.dwarpal.crypto.Digests.sha256Hex(s.query()).substring(0, 16));
     }
