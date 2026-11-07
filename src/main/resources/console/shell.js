@@ -99,7 +99,7 @@ class DwApp extends HTMLElement {
     fill(this,
       h('a', {class: 'skip', href: '#main'}, 'Skip to content'),
       h('header', {class: 'topbar'}, h('span', {class: 'brand'}, 'DWARPAL', h('small', null, 'lab console')), h('span', {class: 'spacer'}),
-        h('span', null, this.me.person.display, ' ', h('span', {class: 'muted'}, '(' + this.me.person.roles.join(', ').toLowerCase() + ')')),
+        h('span', null, this.me.person.display, ' ', h('span', {class: 'muted'}, this.me.person.display.toLowerCase().includes('(' + this.me.person.roles[0].toLowerCase() + ')') ? '' : '(' + this.me.person.roles.join(', ').toLowerCase() + ')')),
         theme, keys, out),
       h('div', {class: 'body'}, this.nav, this.main), status);
     this.renderNav();

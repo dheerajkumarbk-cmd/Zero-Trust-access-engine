@@ -1,11 +1,13 @@
-.adm-tabs { display: flex; flex-wrap: wrap; gap: 0.25rem; margin: 0.75rem 0; }
-.adm-tabs button[aria-selected="true"] { font-weight: 700; border-bottom: 3px solid currentColor; }
-.adm-table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
-.adm-table th, .adm-table td { border: 1px solid var(--border, #8886); padding: 0.25rem 0.5rem; text-align: left; vertical-align: top; }
-.adm-msg { min-height: 1.5rem; }
-.adm-bad { color: var(--bad, #c0392b); font-weight: 600; }
-.adm-good { color: var(--good, #1e8449); font-weight: 600; }
-.adm-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0; align-items: center; }
-.adm-yaml { width: 100%; max-width: 60rem; font-family: ui-monospace, monospace; }
-.adm-card { border: 1px solid var(--border, #8886); border-radius: 6px; padding: 0.5rem 1rem; margin: 0.5rem 0; }
-.adm-ref { font-family: ui-monospace, monospace; }
+.adm-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--line); }
+.adm-tabs button { background: none; border-radius: 4px 4px 0 0; border-bottom: 2px solid transparent; color: var(--muted); }
+.adm-tabs button:hover:not(:disabled) { background: var(--bg3); color: var(--fg); }
+.adm-tabs button[aria-selected="true"] { color: var(--fg); font-weight: 600; border-bottom-color: var(--accent); }
+.adm-msg { margin: 0 0 8px; }
+.adm-msg:empty { display: none; }
+.adm-bad { color: var(--bad); font-weight: 600; }
+.adm-good { color: var(--ok); font-weight: 600; }
+.adm-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; align-items: center; }
+.adm-yaml { width: 100%; font-family: var(--mono); }
+.adm-card { background: var(--bg2); border-radius: 8px; padding: 16px; margin: 0 0 16px; }
+.adm-ref { font-family: var(--mono); font-size: 12px; line-height: 16px; }
+.adm-card th { background: var(--bg2); }
