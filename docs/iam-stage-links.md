@@ -7,6 +7,9 @@ Tick a box only when the code and its test exist. Build order: Stage 0 setup, 1 
       credential. Until Stage 6 the hook does nothing and says so.
 - [ ] **S3 -> S6 hook (leaver):** the leaver flow calls one clear hook that deletes that person's backup credential.
 - [ ] **S2 -> S6 record type:** vault events use the separate audit record type added in Stage 2 (analysts cannot read it).
+      Built in Stage 2: any record whose type starts `VAULT_` goes into the saved console trail (`ConsoleTrail`). Analysts
+      get "not found" for it and never see it listed; a lead sees only its `action` and `target` fields (plus the
+      record's own actor and time). Stage 6 must put the secret nowhere in the payload, and write `action` and `target`.
 - [ ] **S5 -> S6 gate:** the admin's passkey gates the vault only, never ordinary sign-in.
 - [ ] **S6 reminder to the user:** the admin's own sign-in cannot be recovered from the vault. Keep Dana's backup codes
       on paper, offline.

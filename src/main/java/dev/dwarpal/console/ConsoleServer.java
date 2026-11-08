@@ -98,6 +98,11 @@ public final class ConsoleServer implements AutoCloseable {
     final Clock wall;
     final ConsoleSessions sessions;
     final ConsoleAudit audit;
+    /** The saved audit trail (kept across restarts); null when this server writes into the lab's chain only. */
+    final ConsoleTrail trail;
+    /** A sensitive read repeated within a minute is one record with a count; an ordinary view, within five minutes. */
+    private final ReadWindow sensitiveReads = new ReadWindow(Duration.ofSeconds(60), 10_000);
+    private final ReadWindow views = new ReadWindow(Duration.ofMinutes(5), 10_000);
     final StreamHub hub;
     /** How long the passkey keeps confidential views open; null when this server has no passkey lock. */
     final Duration passkeyWindow;
@@ -138,7 +143,9 @@ public final class ConsoleServer implements AutoCloseable {
         this.files = StaticFiles.fromClasspath(b.staticRoot);
         this.modules = List.copyOf(b.modules);
         this.sessions = new ConsoleSessions(wall, settings);
-        this.audit = new ConsoleAudit(() -> b.auditLog.get() != null ? b.auditLog.get() : lab.world().org.audit, () -> lab.world().org.clock);
+        this.trail = b.trail;
+        this.audit = new ConsoleAudit(() -> b.auditLog.get() != null ? b.auditLog.get() : lab.world().org.audit,
+                () -> lab.world().org.clock, wall, b.trail != null);
         this.hub = new StreamHub(settings.maxStreams());
         this.passkeyWindow = b.passkeyWindow;
         this.inFlight = new Semaphore(settings.maxConcurrent());
@@ -605,11 +612,38 @@ public final class ConsoleServer implements AutoCloseable {
             audit.write("CONSOLE_WRITE", person, fields("session", tag, "route", route.pattern(), "object", object, "phase",
                     "result", "status", Integer.toString(r.status()), "detail", r.audit()));
         } else if (route.kind() == Kind.SENSITIVE && session != null) {
+            // a page left open that refreshes itself is not somebody reading again; a person reading the same thing
+            // twice within a minute is one record that says "twice"
             boolean throttled = r.status() != 200 && !refusalAudits.tryAcquire("read|" + person + "|" + r.status(),
                     wall.instant());
-            if (!throttled && !audit.write("CONSOLE_READ", person, fields("session", tag, "route", route.pattern(), "object",
-                    object, "status", Integer.toString(r.status()), "detail", r.audit()))) {
-                return Reply.error(503, "audit trail unavailable");
+            if (!throttled && !background) {
+                String key = person + "|" + tag + "|" + route.pattern() + "|" + object + "|" + r.status();
+                ReadWindow.Decision d = sensitiveReads.see(key, wall.instant());
+                if (d.record()) {
+                    Map<String, String> f = fields("session", tag, "route", route.pattern(), "object", object, "status",
+                            Integer.toString(r.status()), "detail", r.audit());
+                    if (d.repeats() > 0) {
+                        f.put("repeats", Integer.toString(d.repeats()));
+                    }
+                    if (!audit.write("CONSOLE_READ", person, f)) {
+                        sensitiveReads.undo(key);
+                        return Reply.error(503, "audit trail unavailable");
+                    }
+                }
+            }
+        } else if (route.kind() == Kind.READ && route.minimum() != null && session != null && !background
+                && ctx.exchange.getRequestMethod().equals("GET") && r.status() == 200) {
+            // an ordinary view of a working page (not the person's own account pages): the first one per window
+            String key = person + "|" + tag + "|" + route.pattern();
+            ReadWindow.Decision d = views.see(key, wall.instant());
+            if (d.record()) {
+                Map<String, String> f = fields("session", tag, "route", route.pattern());
+                if (d.repeats() > 0) {
+                    f.put("repeats", Integer.toString(d.repeats()));
+                }
+                if (!audit.write("CONSOLE_VIEW", person, f)) {
+                    views.undo(key);
+                }
             }
         }
         return r;
@@ -880,6 +914,7 @@ public final class ConsoleServer implements AutoCloseable {
         private final ConsoleAuth auth;
         private final SSLContext tls;
         private final java.util.concurrent.atomic.AtomicReference<dev.dwarpal.audit.AuditLog> auditLog = new java.util.concurrent.atomic.AtomicReference<>();
+        private ConsoleTrail trail;
         private ConsoleSettings settings = ConsoleSettings.defaults();
         private Clock wall = Clock.systemUTC();
         private InetSocketAddress address = new InetSocketAddress(InetAddress.getLoopbackAddress(), 8443);
@@ -898,6 +933,16 @@ public final class ConsoleServer implements AutoCloseable {
         /** Where the console writes its records (default: the lab's chain); tests pass a log whose sink can fail. */
         public Builder auditLog(dev.dwarpal.audit.AuditLog v) {
             auditLog.set(v);
+            return this;
+        }
+
+        /**
+         * Writes the console's records into this saved trail (real time, kept across restarts) instead of the lab's
+         * chain, and lets the audit explorer read it as its second source.
+         */
+        public Builder trail(ConsoleTrail v) {
+            trail = Objects.requireNonNull(v, "trail");
+            auditLog.set(v.log());
             return this;
         }
 

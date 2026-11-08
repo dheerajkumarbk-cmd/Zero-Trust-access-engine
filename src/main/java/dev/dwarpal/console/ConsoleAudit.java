@@ -27,6 +27,8 @@ final class ConsoleAudit {
 
     private final java.util.function.Supplier<AuditLog> log;
     private final java.util.function.Supplier<Clock> clock;
+    private final Clock real;
+    private final boolean realTimeAt;
     private final AtomicLong failures = new AtomicLong();
     private final AtomicLong written = new AtomicLong();
     private final Map<String, java.util.ArrayDeque<Activity>> recent = new java.util.HashMap<>();
@@ -35,9 +37,18 @@ final class ConsoleAudit {
     record Activity(java.time.Instant at, String what) {
     }
 
-    ConsoleAudit(java.util.function.Supplier<AuditLog> log, java.util.function.Supplier<Clock> scenarioClock) {
+    /**
+     * @param scenarioClock the lab's clock, which runs fast
+     * @param real          the real clock
+     * @param realTimeAt    true for the saved trail (a record's time is real, the scenario time is a field); false for
+     *                      the simulated chain, where the scenario time is the record's time and the real time a field
+     */
+    ConsoleAudit(java.util.function.Supplier<AuditLog> log, java.util.function.Supplier<Clock> scenarioClock, Clock real,
+                 boolean realTimeAt) {
         this.log = log;
         this.clock = scenarioClock;
+        this.real = real;
+        this.realTimeAt = realTimeAt;
     }
 
     /** True when the record is in the chain. */
@@ -47,7 +58,10 @@ final class ConsoleAudit {
             f.put(Sanitize.text(e.getKey(), 40), Sanitize.text(e.getValue() == null ? "" : e.getValue(), 300));
         }
         try {
-            java.time.Instant at = clock.get().instant();
+            java.time.Instant scenario = clock.get().instant();
+            java.time.Instant now = real.instant();
+            f.put(realTimeAt ? "scenario" : "real", (realTimeAt ? scenario : now).toString());
+            java.time.Instant at = realTimeAt ? now : scenario;
             log.get().append(type, actor(person), at, f);
             written.incrementAndGet();
             remember(type, person, f, at);

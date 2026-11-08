@@ -223,17 +223,20 @@ class LabConsoleRedTeamTest {
     @Test
     @Order(8)
     void whatTheConsoleDidIsOnTheTrailUnderTheNamesOfThePeopleWhoDidIt() throws Exception {
-        // the reset gave the lab a new chain; a login now is the first thing on it that a person did
+        // what people do on the console is kept in the saved trail (a second source of the explorer), which a reset of
+        // the simulated organisation does not touch
         Session ana = login("ana");
         openConfidential(ana, "ana");
-        HttpResponse<String> head = send("GET", "/console/api/audit/head", ana, null, false, null);
+        HttpResponse<String> head = send("GET", "/console/api/audit/head?source=console", ana, null, false, null);
         Matcher h = Pattern.compile("\"head\"[ ]*:[ ]*([0-9]+)").matcher(head.body());
         assertTrue(h.find(), head.body());
         long tail = Math.max(0, Long.parseLong(h.group(1)) - 100);
-        HttpResponse<String> r = send("GET", "/console/api/audit/records?after=" + tail + "&limit=200", ana, null, false, null);
+        HttpResponse<String> r = send("GET", "/console/api/audit/records?source=console&after=" + tail + "&limit=200", ana, null, false, null);
         assertEquals(200, r.statusCode());
         assertTrue(r.body().contains("\"actor\":\"ana\""), "the analyst's login is on the trail under her name: " + r.body());
-        assertTrue(send("GET", "/console/api/audit/verify", ana, null, false, null).body().contains("\"intact\":true"));
+        assertTrue(send("GET", "/console/api/audit/verify?source=console", ana, null, false, null).body().contains("\"intact\":true"));
+        assertTrue(send("GET", "/console/api/audit/verify", ana, null, false, null).body().contains("\"intact\":true"),
+                "the simulated chain is still intact too");
     }
 
     // ---- helpers ------------------------------------------------------------------------------------------

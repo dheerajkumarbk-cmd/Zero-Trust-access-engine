@@ -86,7 +86,7 @@ final class ConsoleRoutes {
                 c -> soc(s, c, x -> x.report(c.params.get(0)), "report"));
         // ---- the audit explorer -----------------------------------------------------------------------------------
 
-        s.route("GET", "audit/head", Kind.READ, Role.ANALYST, false, c -> auditHead(s));
+        s.route("GET", "audit/head", Kind.READ, Role.ANALYST, false, c -> auditHead(s, c));
         s.route("GET", "audit/records", Kind.READ, Role.ANALYST, false, c -> auditPage(s, c));
         s.route("GET", "audit/records/{}", Kind.SENSITIVE, Role.ANALYST, false, c -> auditRecord(s, c));
         s.route("GET", "audit/verify", Kind.SENSITIVE, Role.ANALYST, false, c -> auditVerify(s, c));
@@ -529,25 +529,80 @@ final class ConsoleRoutes {
 
     // ---- the audit explorer -----------------------------------------------------------------------------------
 
+    /** Record types of the vault (stage 6). Analysts cannot read them at all; a lead sees what was done and on whom. */
+    static final String VAULT_PREFIX = "VAULT_";
+    /** The only payload fields of a vault record a lead may see; who acted and when are the record's own actor and time. */
+    private static final List<String> VAULT_LEAD_FIELDS = List.of("action", "target");
+
     /** A lead sees every record; an analyst sees the details of the console's and the SOC API's own records. */
     private static boolean detailVisible(ConsoleAuth.Person p, String type) {
         return p.roles().contains(Role.LEAD) || type.startsWith("CONSOLE_") || type.startsWith("SOCAPI_");
     }
 
-    private static Reply auditHead(ConsoleServer s) {
-        return Reply.ok(JsonValue.object().put("head", JsonValue.num(s.world().auditView.page(0, 1, Optional.empty()).head()))
-                .build());
+    static boolean isVault(String type) {
+        return type.startsWith(VAULT_PREFIX);
+    }
+
+    /** Whether this person may know a record of this type exists at all: vault events are for leads only. */
+    static boolean listed(ConsoleAuth.Person p, String type) {
+        return !isVault(type) || p.roles().contains(Role.LEAD);
+    }
+
+    /** The part of a vault record a lead may see, as a small JSON object text; never anything else from the payload. */
+    static String vaultLeadView(String payloadJson) {
+        Map<String, String> out = new java.util.LinkedHashMap<>();
+        try {
+            if (new dev.dwarpal.wire.JsonReader().read(payloadJson) instanceof JsonValue.JObject o) {
+                for (String k : VAULT_LEAD_FIELDS) {
+                    if (o.get(k).orElse(null) instanceof JsonValue.JString v) {
+                        out.put(k, v.value());
+                    }
+                }
+            }
+        } catch (RuntimeException e) {
+            return "{}";
+        }
+        return dev.dwarpal.audit.Json.object(out);
+    }
+
+    /** The explorer reads the lab's simulated chain, or (when this run keeps one) the console's saved trail. */
+    private static Optional<LabAudit> source(ConsoleServer s, Ctx c) {
+        return switch (c.query.getOrDefault("source", "lab")) {
+            case "lab" -> Optional.of(s.world().auditView);
+            case "console" -> Optional.ofNullable(s.trail).map(ConsoleTrail::view);
+            default -> Optional.empty();
+        };
+    }
+
+    private static Reply auditHead(ConsoleServer s, Ctx c) {
+        Optional<LabAudit> view = source(s, c);
+        if (view.isEmpty()) {
+            return Reply.error(404, "not found");
+        }
+        List<JsonValue> sources = new ArrayList<>(List.of(JsonValue.str("lab")));
+        if (s.trail != null) {
+            sources.add(JsonValue.str("console"));
+        }
+        return Reply.ok(JsonValue.object().put("head", JsonValue.num(view.get().page(0, 1, Optional.empty()).head()))
+                .put("sources", new JsonValue.JArray(sources)).build());
+    }
+
+    private static JsonValue entry(LabAudit.Entry e, String summary) {
+        return JsonValue.object().put("sequence", JsonValue.num(e.sequence())).put("at", e.at().toString())
+                .put("type", e.type()).put("actor", e.actor()).put("summary", summary).put("mac", e.mac()).build();
     }
 
     private static JsonValue entry(LabAudit.Entry e, boolean detail) {
-        return JsonValue.object().put("sequence", JsonValue.num(e.sequence())).put("at", e.at().toString())
-                .put("type", e.type()).put("actor", e.actor())
-                .put("summary", detail ? e.summary() : "(details are for leads)").put("mac", e.mac()).build();
+        return entry(e, detail ? e.summary() : "(details are for leads)");
     }
 
     private static Reply auditPage(ConsoleServer s, Ctx c) {
         if (!s.auditReads.tryAcquire(c.person().id(), s.wall.instant())) {
             return Reply.error(429, "too many requests").withHeader("Retry-After", "60");
+        }
+        Optional<LabAudit> view = source(s, c);
+        if (view.isEmpty()) {
+            return Reply.error(404, "not found");
         }
         Map<String, String> q = c.query;
         long after = q.containsKey("after") ? Long.parseLong(q.get("after")) : 0;
@@ -556,10 +611,18 @@ final class ConsoleRoutes {
         if (type.isPresent() && !type.get().matches("[A-Za-z0-9_.:-]{1,64}")) {
             return Reply.error(400, "invalid request");
         }
-        LabAudit.Page page = s.world().auditView.page(after, Math.min(limit, 200), type);
+        LabAudit.Page page = view.get().page(after, Math.min(limit, 200), type);
         List<JsonValue> out = new ArrayList<>();
         for (LabAudit.Entry e : page.entries()) {
-            out.add(entry(e, detailVisible(c.person(), e.type())));
+            if (!listed(c.person(), e.type())) {
+                continue;
+            }
+            if (isVault(e.type())) {
+                String shown = view.get().record(e.sequence()).map(d -> vaultLeadView(d.payloadJson())).orElse("{}");
+                out.add(entry(e, shown));
+            } else {
+                out.add(entry(e, detailVisible(c.person(), e.type())));
+            }
         }
         return Reply.ok(JsonValue.object().put("entries", new JsonValue.JArray(out)).put("head", JsonValue.num(page.head()))
                 .put("more", JsonValue.bool(page.more())).build());
@@ -567,9 +630,16 @@ final class ConsoleRoutes {
 
     private static Reply auditRecord(ConsoleServer s, Ctx c) {
         long seq = Long.parseLong(c.params.get(0));
-        Optional<LabAudit.Detail> d = s.world().auditView.record(seq);
-        if (d.isEmpty()) {
+        Optional<LabAudit> view = source(s, c);
+        Optional<LabAudit.Detail> d = view.flatMap(v -> v.record(seq));
+        // a vault record is, for anybody who may not read it, a record that does not exist
+        if (d.isEmpty() || !listed(c.person(), d.get().entry().type())) {
             return Reply.error(404, "not found").audited("record " + seq);
+        }
+        if (isVault(d.get().entry().type())) {
+            String shown = vaultLeadView(d.get().payloadJson());
+            return Reply.ok(JsonValue.object().put("entry", entry(d.get().entry(), shown)).put("payload", JsonValue.str(shown))
+                    .put("previousMac", d.get().previousMac()).build()).audited("record " + seq + " (vault)");
         }
         boolean visible = detailVisible(c.person(), d.get().entry().type());
         return Reply.ok(JsonValue.object().put("entry", entry(d.get().entry(), visible))
@@ -582,7 +652,11 @@ final class ConsoleRoutes {
         if (!s.auditVerifies.tryAcquire(c.person().id(), s.wall.instant())) {
             return Reply.error(429, "too many requests").withHeader("Retry-After", "60");
         }
-        LabAudit.Verified v = s.world().auditView.verify();
+        Optional<LabAudit> view = source(s, c);
+        if (view.isEmpty()) {
+            return Reply.error(404, "not found");
+        }
+        LabAudit.Verified v = view.get().verify();
         return Reply.ok(JsonValue.object().put("intact", JsonValue.bool(v.intact())).put("records", JsonValue.num(v.records()))
                 .put("firstBad", JsonValue.num(v.firstBad())).put("reason", v.reason())
                 .put("anchoredSeq", v.anchoredSeq().<JsonValue>map(JsonValue::num).orElse(JsonValue.nul()))

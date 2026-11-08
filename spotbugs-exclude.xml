@@ -69,4 +69,13 @@
         <Class name="dev.dwarpal.console.admin.LabAdminServices"/>
         <Field name="people"/>
     </Match>
+    <!--
+      EI_EXPOSE_REP on ConsoleTrail.log: the audit log is a service (the single writer of the chain, synchronised inside),
+      not data. The console server must write through this one instance, so that every record joins the same chain.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+        <Class name="dev.dwarpal.console.ConsoleTrail"/>
+        <Method name="log"/>
+    </Match>
 </FindBugsFilter>

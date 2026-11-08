@@ -54,6 +54,7 @@ public final class ConsoleMain {
         int socPort = 0;
         int rotateDays = 7;
         String dbMode = "on";
+        String trailMode = "on";
         LabConfig config = LabConfig.defaults(Path.of("lab"));
         for (int i = 0; i < args.length; i += 2) {
             if (i + 1 >= args.length) {
@@ -72,6 +73,7 @@ public final class ConsoleMain {
                 case "--soc-port" -> socPort = Integer.parseInt(v);
                 case "--rotate-days" -> rotateDays = Integer.parseInt(v);
                 case "--db" -> dbMode = v;
+                case "--trail" -> trailMode = v;
                 default -> throw new IllegalArgumentException("unknown option " + args[i]);
             }
         }
@@ -115,6 +117,15 @@ public final class ConsoleMain {
             ConsoleAuth auth = new ConsoleAuth(people, Clock.systemUTC(), settings.passwordIterations(),
                     settings.pinIterations(), config.dir().resolve("console").resolve("credentials.txt"),
                     Duration.ofDays(rotateDays));
+            // what people and administrators do on the console is kept on disk, checked at every start
+            ConsoleTrail trail = switch (trailMode) {
+                case "on" -> ConsoleTrail.open(config.dir().resolve("console").resolve("trail"), Clock.systemUTC());
+                case "off" -> null;
+                default -> throw new IllegalArgumentException("--trail takes on or off");
+            };
+            out.println(trail == null ? "Audit trail on disk: switched off for this run (--trail off); records go into the lab's chain only."
+                    : "Audit trail on disk: " + trail.records() + " records from earlier runs, checked and intact ("
+                    + trail.dir().toAbsolutePath() + ").");
             ConsoleServer.Builder b = ConsoleServer.builder(lab, channel, new LabVerdictSigner(lab), auth, tls)
                     .settings(settings)
                     .passkeyLock(Duration.ofMinutes(5))
@@ -122,7 +133,10 @@ public final class ConsoleMain {
             b.module(new dev.dwarpal.console.lab.LabModule(session));
             b.module(new dev.dwarpal.console.lab.GuideModule());
             b.module(new dev.dwarpal.console.admin.AdminModule(new dev.dwarpal.console.admin.LabAdminServices(session, directory)));
-            try (ConsoleServer server = b.build().start()) {
+            if (trail != null) {
+                b.trail(trail);
+            }
+            try (trail; ConsoleServer server = b.build().start()) {
                 out.println();
                 out.println("Console: " + server.url() + "   (loopback only)");
                 out.println("Your browser must trust the lab's certificate authority: "

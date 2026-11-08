@@ -26,6 +26,10 @@ function activity(method, path) {
   return hit ? hit[1] : method === 'POST' ? 'Saving' : 'Loading';
 }
 
+function sourceQuery(source, lead) {
+  return source === 'console' ? lead + 'source=console' : '';
+}
+
 async function call(method, path, body, opts) {
   const label = opts && opts.background ? null : activity(method, path);
   const end = label ? working(label) : () => {};
@@ -159,11 +163,12 @@ export const api = {
   report: (name, opts) => get('soc/reports/' + enc(name), opts),
 
   // ---- the audit explorer
-  auditHead: () => get('audit/head'),
-  auditPage: (after, limit, type) => get('audit/records?after=' + Number(after) + '&limit=' + Number(limit) +
-    (type ? '&type=' + enc(type) : '')),
-  auditRecord: (seq) => get('audit/records/' + enc(String(seq))),
-  auditVerify: () => get('audit/verify'),
+  // source: 'lab' (the simulated organisation, the default) or 'console' (what people did on the console, kept on disk)
+  auditHead: (source) => get('audit/head' + sourceQuery(source, '?')),
+  auditPage: (after, limit, type, source) => get('audit/records?after=' + Number(after) + '&limit=' + Number(limit) +
+    (type ? '&type=' + enc(type) : '') + sourceQuery(source, '&')),
+  auditRecord: (seq, source) => get('audit/records/' + enc(String(seq)) + sourceQuery(source, '?')),
+  auditVerify: (source) => get('audit/verify' + sourceQuery(source, '?')),
 
   /** The calls a module (parts I, J) may make: only below /console/api/<id>/. */
   module(id) {

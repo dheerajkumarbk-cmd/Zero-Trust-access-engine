@@ -129,7 +129,10 @@ class LabConsoleDirectoryEndToEndTest {
     @Test
     void aPersonDisabledInTheDirectoryIsNotEnrolledAtTheNextStart() throws Exception {
         Path dir = Files.createTempDirectory("dwarpal-directory-e2e");
-        launch(dir, r -> assertEquals(200, loginStatus(r, "ben"), "ben can sign in while he is active"));
+        launch(dir, r -> {
+            assertTrue(r.log().contains("Audit trail on disk: 0 records from earlier runs"), r.log());
+            assertEquals(200, loginStatus(r, "ben"), "ben can sign in while he is active");
+        });
         TestDatabase.migrator().write(c -> {
             try (PreparedStatement s = c.prepareStatement("UPDATE directory_person SET status = ? WHERE person_id = ?")) {
                 s.setString(1, "DISABLED");
@@ -140,6 +143,8 @@ class LabConsoleDirectoryEndToEndTest {
         });
         launch(dir, r -> {
             assertTrue(r.log().contains("5 people can sign in (0 moved in by this start, 1 not enrolled)"), r.log());
+            assertFalse(r.log().contains("Audit trail on disk: 0 records"), "the first run's sign-ins were saved: " + r.log());
+            assertTrue(r.log().contains("records from earlier runs, checked and intact"), r.log());
             assertNotEquals(200, loginStatus(r, "ben"), "a disabled person cannot finish signing in");
             assertEquals(200, loginStatus(r, "ana"), "everyone else still can");
         });
