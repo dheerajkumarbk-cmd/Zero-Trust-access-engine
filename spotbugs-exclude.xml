@@ -45,4 +45,28 @@
         <Bug pattern="COMMAND_INJECTION"/>
         <Class name="dev.dwarpal.edge.DevPki"/>
     </Match>
+    <!--
+      SQL_INJECTION_JDBC and SQL_NONCONSTANT_STRING_PASSED_TO_EXECUTE in Migrator: the only text it executes is a
+      migration script shipped inside the jar (db/migrations/V###__*.sql). It is not built from anything a person types,
+      is checksummed against the value recorded when it was first applied (an edited script is refused), and runs only as
+      the migrator database user from MigrateMain or the test set-up. Proof: DirectorySourceTest (plain statements exist
+      only in Migrator and run only constants or the shipped script) and MigratorTest.
+    -->
+    <Match>
+        <Or>
+            <Bug pattern="SQL_INJECTION_JDBC"/>
+            <Bug pattern="SQL_NONCONSTANT_STRING_PASSED_TO_EXECUTE"/>
+        </Or>
+        <Class name="dev.dwarpal.directory.Migrator"/>
+    </Match>
+    <!--
+      EI_EXPOSE_REP2 on LabAdminServices.people: the field holds a service (the directory), not data. The directory is
+      thread-safe by construction (every call opens its own database connection) and is meant to be shared with the
+      launcher that built it.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="dev.dwarpal.console.admin.LabAdminServices"/>
+        <Field name="people"/>
+    </Match>
 </FindBugsFilter>

@@ -1,5 +1,11 @@
 package dev.dwarpal.console;
 
+import dev.dwarpal.directory.Database;
+import dev.dwarpal.directory.DbSettings;
+import dev.dwarpal.directory.Directory;
+import dev.dwarpal.directory.DirectoryException;
+import dev.dwarpal.directory.Migrator;
+import dev.dwarpal.directory.PostgresDirectory;
 import dev.dwarpal.edge.DevPki;
 import dev.dwarpal.edge.TlsContexts;
 import dev.dwarpal.lab.LabConfig;
@@ -25,10 +31,12 @@ import java.util.stream.Collectors;
  *
  * <pre>
  *   ConsoleMain [--dir lab] [--seed 7] [--users 60] [--speed 60] [--warmup-days 3] [--port 8443] [--soc-port 0]
- *               [--rotate-days 7]
+ *               [--rotate-days 7] [--db on|off|test]
  * </pre>
  * {@code --port} is the console's (the page you open); {@code --soc-port} is the SOC API's, which only the console
- * server calls (0 picks a free port).
+ * server calls (0 picks a free port). {@code --db on} (the default) keeps the people in the directory database, which
+ * must be set up, migrated and running; {@code --db test} uses the throw-away test database; {@code --db off} runs
+ * without a database, with the people from the people file only (the tests that do not need one).
  */
 public final class ConsoleMain {
 
@@ -45,6 +53,7 @@ public final class ConsoleMain {
         int consolePort = 8443;
         int socPort = 0;
         int rotateDays = 7;
+        String dbMode = "on";
         LabConfig config = LabConfig.defaults(Path.of("lab"));
         for (int i = 0; i < args.length; i += 2) {
             if (i + 1 >= args.length) {
@@ -62,6 +71,7 @@ public final class ConsoleMain {
                 case "--port" -> consolePort = Integer.parseInt(v);
                 case "--soc-port" -> socPort = Integer.parseInt(v);
                 case "--rotate-days" -> rotateDays = Integer.parseInt(v);
+                case "--db" -> dbMode = v;
                 default -> throw new IllegalArgumentException("unknown option " + args[i]);
             }
         }
@@ -69,6 +79,18 @@ public final class ConsoleMain {
         out.println("Dwarpal lab console: preparing certificates and the simulated organisation (" + config.users()
                 + " users, seed " + config.seed() + ")...");
         List<ConsoleAuth.Enrolment> people = DemoPeople.loadOrCreate(config.dir());
+        // the directory decides who exists and with which roles; the people file only keeps their first secrets
+        Directory directory = openDirectory(dbMode);
+        if (directory == null) {
+            out.println("Directory database: switched off for this run (--db off); the people come from the people file.");
+        } else {
+            DirectoryPeople.Result joined = DirectoryPeople.sync(directory, people, Clock.systemUTC());
+            people = joined.people();
+            Directory.Health health = directory.health();
+            out.println("Directory: " + health.server() + ", tables at version " + health.schemaVersion() + ", "
+                    + people.size() + " people can sign in (" + joined.movedIn() + " moved in by this start, "
+                    + joined.skipped() + " not enrolled).");
+        }
         ConsoleSettings settings = ConsoleSettings.defaults();
         // the session owns the world and the scenario clock and can rebuild both (reset to day zero)
         try (dev.dwarpal.lab.scenarios.LabSession session = dev.dwarpal.lab.scenarios.LabSession.open(config)) {
@@ -99,7 +121,7 @@ public final class ConsoleMain {
                     .address(new InetSocketAddress(InetAddress.getLoopbackAddress(), consolePort));
             b.module(new dev.dwarpal.console.lab.LabModule(session));
             b.module(new dev.dwarpal.console.lab.GuideModule());
-            b.module(new dev.dwarpal.console.admin.AdminModule(new dev.dwarpal.console.admin.LabAdminServices(session)));
+            b.module(new dev.dwarpal.console.admin.AdminModule(new dev.dwarpal.console.admin.LabAdminServices(session, directory)));
             try (ConsoleServer server = b.build().start()) {
                 out.println();
                 out.println("Console: " + server.url() + "   (loopback only)");
@@ -125,6 +147,35 @@ public final class ConsoleMain {
                     out.println("Stopping.");
                 }
             }
+        }
+    }
+
+    /**
+     * The directory database for this run, or null when switched off. It signs in as the low-privilege app user only
+     * (the migrator's password is never read here) and refuses to start on tables of the wrong version.
+     */
+    static Directory openDirectory(String mode) {
+        DbSettings.Target target = switch (mode) {
+            case "off" -> null;
+            case "on" -> DbSettings.Target.LAB;
+            case "test" -> DbSettings.Target.TEST;
+            default -> throw new IllegalArgumentException("--db takes on, off or test");
+        };
+        if (target == null) {
+            return null;
+        }
+        try {
+            Directory directory = new PostgresDirectory(new Database(DbSettings.fromEnvironment().app(target)));
+            int version = directory.health().schemaVersion();
+            if (version != Migrator.expectedVersion()) {
+                throw new IllegalStateException("The directory tables are at version " + version + " but this build needs "
+                        + Migrator.expectedVersion() + ". Build them first: java -cp target/classes;<postgresql jar> "
+                        + "dev.dwarpal.directory.MigrateMain");
+            }
+            return directory;
+        } catch (DirectoryException e) {
+            throw new IllegalStateException("The directory database is not available (" + e.getMessage()
+                    + "). Start the PostgreSQL service, check db/local.properties, or run with --db off.", e);
         }
     }
 }

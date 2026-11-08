@@ -18,7 +18,7 @@ import java.util.Set;
  */
 public interface ConsoleModule {
 
-    enum Role { ANALYST, LEAD, ADMIN, USER }
+    enum Role { ANALYST, LEAD, ADMIN, USER, HR }
 
     /** Who is calling: set by the host from the session, never from anything the browser sends in the request. */
     record Principal(String id, Set<Role> roles, boolean stepUpFresh) {

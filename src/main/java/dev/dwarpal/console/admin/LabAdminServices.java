@@ -4,6 +4,7 @@ import dev.dwarpal.admin.PolicyInstaller;
 import dev.dwarpal.analytics.RequestRecorder;
 import dev.dwarpal.audit.AuditRecord;
 import dev.dwarpal.crypto.KeyPurpose;
+import dev.dwarpal.directory.Directory;
 import dev.dwarpal.lab.LabWorld;
 import dev.dwarpal.lab.scenarios.LabSession;
 import dev.dwarpal.pam.PrivilegedAccessManager;
@@ -39,6 +40,7 @@ import java.util.Set;
 public final class LabAdminServices implements AdminServices {
 
     private final LabSession session;
+    private final Directory people;
     private final PlaybookCompiler compiler = new PlaybookCompiler(RuleCatalogue.reference(), ResponseSettings.defaults(),
             Set.of("ticket", "chat"), true);
     private final Object lock = new Object();
@@ -46,7 +48,18 @@ public final class LabAdminServices implements AdminServices {
     private String playbookYaml;
 
     public LabAdminServices(LabSession session) {
+        this(session, null);
+    }
+
+    /** @param people the directory database, or null when the lab runs without it */
+    public LabAdminServices(LabSession session, Directory people) {
         this.session = session;
+        this.people = people;
+    }
+
+    @Override
+    public Optional<Directory> people() {
+        return Optional.ofNullable(people);
     }
 
     private LabWorld world() {

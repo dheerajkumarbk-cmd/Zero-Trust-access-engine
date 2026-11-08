@@ -58,7 +58,7 @@ class LabConsoleRedTeamTest {
         PrintStream out = new PrintStream(bytes, true, StandardCharsets.UTF_8);
         launcher = new Thread(() -> {
             try {
-                ConsoleMain.run(new String[]{"--dir", dir.toString(), "--users", "30", "--warmup-days", "2", "--port", "0"},
+                ConsoleMain.run(new String[]{"--dir", dir.toString(), "--users", "30", "--warmup-days", "2", "--port", "0", "--db", "off"},
                         out);
             } catch (Exception e) {
                 out.println("launcher failed: " + e);

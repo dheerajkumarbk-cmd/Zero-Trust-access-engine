@@ -9,6 +9,8 @@ import dev.dwarpal.crypto.Ed25519;
 import dev.dwarpal.crypto.KeyPurpose;
 import dev.dwarpal.crypto.SignatureProof;
 import dev.dwarpal.crypto.SignedMessages;
+import dev.dwarpal.directory.Directory;
+import dev.dwarpal.directory.DirectoryPerson;
 import dev.dwarpal.domain.AuthMethod;
 import dev.dwarpal.domain.AuthenticationContext;
 import dev.dwarpal.lab.scenarios.RuleSandbox;
@@ -60,6 +62,7 @@ import java.util.Set;
  *   POST lab/reset                       ADMIN, step-up  the lab back to day zero
  *   GET  sessions, devices               ADMIN  who was decided about, from where, on what, and isolations
  *   GET  decisions/{reference}           ADMIN  one decision with the engine's full reasoning
+ *   GET  directory                       ADMIN  the people in the directory database (read-only; no database console)
  * </pre>
  */
 public final class AdminModule implements ConsoleModule {
@@ -122,6 +125,7 @@ public final class AdminModule implements ConsoleModule {
         routes.get("sessions", Role.ADMIN, ModuleKit.guard(Role.ADMIN, this::sessions));
         routes.get("devices", Role.ADMIN, ModuleKit.guard(Role.ADMIN, this::devices));
         routes.get("decisions/{}", Role.ADMIN, ModuleKit.guard(Role.ADMIN, this::decision));
+        routes.get("directory", Role.ADMIN, ModuleKit.guard(Role.ADMIN, this::directory));
     }
 
     // ---- the person's own page ------------------------------------------------------------------------
@@ -131,6 +135,25 @@ public final class AdminModule implements ConsoleModule {
                 "stepUpFresh", r.who().stepUpFresh()));
     }
 
+
+    // ---- the directory --------------------------------------------------------------------------------
+
+    /** Everyone in the directory database, read-only. There is deliberately no query box and no database console. */
+    private Response directory(Request r, List<String> p) {
+        Optional<Directory> directory = services.people();
+        if (directory.isEmpty()) {
+            return ModuleKit.json(Map.of("available", false,
+                    "note", "The directory database is switched off for this run, so the people come from the lab's people file."));
+        }
+        List<DirectoryPerson> people = directory.get().people();
+        Directory.Health health = directory.get().health();
+        long active = people.stream().filter(x -> x.status() == DirectoryPerson.Status.ACTIVE).count();
+        return ModuleKit.json(Map.of("available", true,
+                "note", "The directory is the list of who exists, what they do and which console roles they hold. This page only reads it.",
+                "server", health.server(), "schemaVersion", health.schemaVersion(),
+                "counts", Map.of("people", people.size(), "active", active, "disabled", people.size() - active),
+                "people", people));
+    }
     private List<Decisions.Row> rows() {
         return Decisions.rows(services.recentAudit(MAX_RECORDS));
     }

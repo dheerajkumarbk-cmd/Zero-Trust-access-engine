@@ -51,7 +51,8 @@ public final class ModuleKit {
     /** ANALYST below LEAD below ADMIN; USER stands apart (an ordinary person is no analyst). */
     public static boolean atLeast(Principal who, Role minimum) {
         return switch (minimum) {
-            case USER -> who.has(Role.USER) || who.has(Role.ANALYST) || who.has(Role.LEAD) || who.has(Role.ADMIN);
+            case USER -> who.has(Role.USER) || who.has(Role.ANALYST) || who.has(Role.LEAD) || who.has(Role.ADMIN) || who.has(Role.HR);
+            case HR -> who.has(Role.HR);
             case ANALYST -> who.has(Role.ANALYST) || who.has(Role.LEAD) || who.has(Role.ADMIN);
             case LEAD -> who.has(Role.LEAD) || who.has(Role.ADMIN);
             case ADMIN -> who.has(Role.ADMIN);

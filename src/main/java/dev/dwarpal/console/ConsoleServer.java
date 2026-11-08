@@ -317,6 +317,7 @@ public final class ConsoleServer implements AutoCloseable {
                     || roles.contains(ConsoleModule.Role.ADMIN);
             case LEAD -> roles.contains(ConsoleModule.Role.LEAD) || roles.contains(ConsoleModule.Role.ADMIN);
             case ADMIN -> roles.contains(ConsoleModule.Role.ADMIN);
+            case HR -> roles.contains(ConsoleModule.Role.HR);
         };
     }
 
@@ -327,6 +328,7 @@ public final class ConsoleServer implements AutoCloseable {
             case ANALYST -> roles.contains(ConsoleModule.Role.ANALYST) || roles.contains(ConsoleModule.Role.LEAD);
             case LEAD -> roles.contains(ConsoleModule.Role.LEAD);
             case ADMIN -> roles.contains(ConsoleModule.Role.ADMIN);
+            case HR -> roles.contains(ConsoleModule.Role.HR);
         };
     }
 

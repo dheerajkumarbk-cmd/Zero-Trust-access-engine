@@ -182,6 +182,14 @@ final class AdminFixture implements AdminServices {
 
     boolean resetCalled;
 
+    /** The directory the page reads; null means the lab runs without its database. */
+    dev.dwarpal.directory.Directory people;
+
+    @Override
+    public java.util.Optional<dev.dwarpal.directory.Directory> people() {
+        return java.util.Optional.ofNullable(people);
+    }
+
     @Override
     public boolean resetting() {
         return false;

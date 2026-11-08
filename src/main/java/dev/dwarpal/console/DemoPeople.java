@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * The people of the lab console: the three analysts of the SOC (ana, ben, cleo), an administrator (dana) and an
+ * The people of the lab console: the three analysts of the SOC (ana, ben, cleo), an administrator (dana), an HR officer (hana) and an
  * ordinary user (uma). Passwords and security-key PINs are random, made once and kept in {@code <lab>/console/people.txt}
  * (owner-only), because a lab that changes every password at each start is a lab nobody logs in to. They are printed by
  * the launcher for the owner and are never in the repository.
@@ -28,7 +28,7 @@ public final class DemoPeople {
     private DemoPeople() {
     }
 
-    /** The five demo people, with fresh random secrets. */
+    /** The six demo people, with fresh random secrets. */
     public static List<Enrolment> fresh() {
         List<Enrolment> out = new ArrayList<>();
         out.add(enrol("ana", "Ana (analyst)", Set.of(Role.ANALYST)));
@@ -36,6 +36,7 @@ public final class DemoPeople {
         out.add(enrol("cleo", "Cleo (SOC lead)", Set.of(Role.LEAD, Role.ANALYST)));
         out.add(enrol("dana", "Dana (administrator)", Set.of(Role.ADMIN)));
         out.add(enrol("uma", "Uma (user)", Set.of(Role.USER)));
+        out.add(enrol("hana", "Hana (HR)", Set.of(Role.HR)));
         return out;
     }
 
@@ -51,6 +52,32 @@ public final class DemoPeople {
         return sb.toString();
     }
 
+    private static String line(Enrolment e) {
+        return e.person().id() + '|' + e.person().display() + '|'
+                + String.join(",", e.person().roles().stream().map(Enum::name).sorted().toList()) + '|'
+                + e.password() + '|' + e.pin() + '\n';
+    }
+
+    /**
+     * A lab made before a demo person existed has no line for them: add one, with fresh random secrets, and leave every
+     * other line exactly as it is.
+     */
+    private static void addMissing(Path file) throws IOException {
+        String text = Files.readString(file, StandardCharsets.UTF_8);
+        StringBuilder added = new StringBuilder();
+        for (Enrolment e : fresh()) {
+            boolean present = text.lines().anyMatch(l -> l.startsWith(e.person().id() + "|"));
+            if (!present) {
+                added.append(line(e));
+            }
+        }
+        if (added.length() > 0) {
+            String lead = text.isEmpty() || text.endsWith("\n") ? "" : "\n";
+            Files.writeString(file, text + lead + added, StandardCharsets.UTF_8);
+            OwnerOnly.restrict(file);
+        }
+    }
+
     /** Reads {@code <lab>/console/people.txt}, making it (owner-only) on the first start. */
     public static List<Enrolment> loadOrCreate(Path labDir) throws IOException {
         Path dir = labDir.resolve("console");
@@ -60,12 +87,12 @@ public final class DemoPeople {
         if (!Files.isRegularFile(file)) {
             StringBuilder sb = new StringBuilder("# id|display name|roles|password|security-key PIN  (lab secrets, owner only)\n");
             for (Enrolment e : fresh()) {
-                sb.append(e.person().id()).append('|').append(e.person().display()).append('|')
-                        .append(String.join(",", e.person().roles().stream().map(Enum::name).sorted().toList())).append('|')
-                        .append(e.password()).append('|').append(e.pin()).append('\n');
+                sb.append(line(e));
             }
             Files.writeString(file, sb.toString(), StandardCharsets.UTF_8);
             OwnerOnly.restrict(file);
+        } else {
+            addMissing(file);
         }
         List<Enrolment> out = new ArrayList<>();
         for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {

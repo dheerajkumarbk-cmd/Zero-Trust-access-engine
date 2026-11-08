@@ -4,6 +4,7 @@ import dev.dwarpal.admin.PolicyInstaller;
 import dev.dwarpal.analytics.RequestRecorder;
 import dev.dwarpal.audit.AuditRecord;
 import dev.dwarpal.crypto.KeyPurpose;
+import dev.dwarpal.directory.Directory;
 import dev.dwarpal.pam.PrivilegedAccessManager;
 import dev.dwarpal.pip.AttributeDirectory;
 import dev.dwarpal.risk.SignalSnapshot;
@@ -49,6 +50,11 @@ public interface AdminServices {
     SignalSnapshot signals();
 
     Clock clock();
+
+    /** The directory of people, when the lab runs with its database; empty when the database is switched off. */
+    default Optional<Directory> people() {
+        return Optional.empty();
+    }
 
     /** The newest {@code max} records of the audit chain, oldest first. */
     List<AuditRecord> recentAudit(int max);

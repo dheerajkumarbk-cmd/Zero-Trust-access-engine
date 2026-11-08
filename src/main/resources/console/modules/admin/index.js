@@ -204,6 +204,19 @@ function view(root, shell) {
     return m ? (Number(m[1] || 0) * 60 + Number(m[2] || 0) + Number(m[3] || 0) / 60) : 0;
   }
 
+  // ---- the directory (read only: no query box, no database console) --------------------------------
+  async function directory(box) {
+    const r = await call(api.get('directory'));
+    if (!r) return;
+    box.append(el('p', {}, r.note));
+    if (!r.available) return;
+    box.append(
+      el('p', { class: 'adm-ref' }, r.server + ', tables at version ' + r.schemaVersion),
+      el('p', {}, r.counts.people + ' people: ' + r.counts.active + ' active, ' + r.counts.disabled + ' disabled.'),
+      table(['Person', 'Name', 'Department', 'Job', 'Console roles', 'Status', 'Source', 'Added'],
+        r.people.map((p) => [p.id, p.displayName, p.department, p.businessRole, p.consoleRoles.join(', '), p.status, p.source, p.createdAt.replace('T', ' ').slice(0, 16) + ' UTC'])));
+  }
+
   // ---- sessions and devices -----------------------------------------------------------------------
   async function sessions(box) {
     const s = await call(api.get('sessions'));
@@ -258,6 +271,7 @@ function view(root, shell) {
       addTab('policy', 'Policy', policy);
       addTab('playbooks', 'Playbooks', playbooks);
       addTab('pam', 'Privileged access', pam);
+      addTab('directory', 'Directory', directory);
       addTab('sessions', 'Sessions and devices', sessions);
       addTab('lab', 'Lab', labBox);
     }
