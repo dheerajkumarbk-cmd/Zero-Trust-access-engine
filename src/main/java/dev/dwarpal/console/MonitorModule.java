@@ -19,8 +19,9 @@ import java.util.function.Supplier;
  *   GET vault   LEAD only: the limited vault log (who, when, on whom, what kind of action; never the secret)
  * </pre>
  * Each administrator watches the other one, and an administrator is never shown their own actions here as "the other's".
- * A person who may not use a view gets "not found" for it, as for any vault record elsewhere. Vault records never appear in
- * the administrators' list, and the vault view shows only the two fields a lead may see.
+ * A person who may not use a view gets "not found" for it, as for any vault record elsewhere. A vault record of the other administrator shows
+ * in their list as what it is (the action and on whom), never the reason or the secret; the vault view shows only those two
+ * fields as well.
  */
 public final class MonitorModule implements ConsoleModule {
 
@@ -76,7 +77,7 @@ public final class MonitorModule implements ConsoleModule {
             if (rows.size() == SHOWN) {
                 break;
             }
-            if (!others.contains(a.actor()) || ConsoleRoutes.isVault(a.type()) || "CONSOLE_VIEW".equals(a.type())) {
+            if (!others.contains(a.actor()) || "CONSOLE_VIEW".equals(a.type())) {
                 continue;
             }
             Map<String, Object> row = new LinkedHashMap<>();
@@ -84,7 +85,7 @@ public final class MonitorModule implements ConsoleModule {
             row.put("at", a.at().toString());
             row.put("actor", a.actor());
             row.put("type", a.type());
-            row.put("what", what(a.payloadJson()));
+            row.put("what", ConsoleRoutes.isVault(a.type()) ? what(ConsoleRoutes.vaultLeadView(a.payloadJson())) : what(a.payloadJson()));
             rows.add(row);
         }
         return ModuleKit.json(Map.of("administrators", others, "actions", rows));

@@ -100,6 +100,14 @@ public interface ConsoleModule {
     /** The lowest role that sees the module at all. */
     Role minimum();
 
+    /**
+     * A hidden module does not exist for anybody below its minimum role: its pages and calls answer a plain "not found"
+     * (never "forbidden", which would say it is there), and it is in no list.
+     */
+    default boolean hidden() {
+        return false;
+    }
+
     void routes(Routes routes);
 
     /** What a module may do besides answering a request: both go through the console, never around it. */
@@ -115,6 +123,11 @@ public interface ConsoleModule {
          * they sign in with, the console takes the new roles and ends their open sessions, so the change is real at once.
          */
         default void rolesChanged(String personId, Set<String> roles) {
+        }
+
+        /** Leaves a notice for a person (what happened and to whom, never a secret). False if it could not be kept. */
+        default boolean notify(String personId, String text) {
+            return false;
         }
 
         /** One record of the audit trail as a module may read it. Vault records are in it too: the module decides what shows. */

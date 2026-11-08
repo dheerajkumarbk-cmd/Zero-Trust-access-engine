@@ -78,4 +78,12 @@
         <Class name="dev.dwarpal.console.ConsoleTrail"/>
         <Method name="log"/>
     </Match>
+    <!--
+      EI_EXPOSE_REP2 in VaultModule: the module exists to drive the one Vault service it is handed at start-up, and it
+      keeps it privately; nothing returns it. Proof: VaultTest and VaultEndToEndTest.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="dev.dwarpal.console.vault.VaultModule"/>
+    </Match>
 </FindBugsFilter>

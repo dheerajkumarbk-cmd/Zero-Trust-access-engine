@@ -232,6 +232,7 @@ class DwApp extends HTMLElement {
     this.main = h('main', {id: 'main', tabindex: -1});
     const status = document.createElement('dw-statusbar');
     status.ctx = {shell: this.shell};
+    this.noticeBtn = h('button', {type: 'button', title: 'What happened on your account that you should know', on: {click: () => this.showNotices()}}, 'Notices');
     const keys = h('button', {type: 'button', title: 'Keyboard shortcuts', on: {click: () => this.help()}}, '?');
     const words = h('button', {type: 'button', title: 'What the short words mean', on: {click: () => glossary(this.me.passkeyNeeded)}}, 'Glossary');
     const out = h('button', {type: 'button', on: {click: () => this.logout()}}, 'Sign out');
@@ -239,8 +240,9 @@ class DwApp extends HTMLElement {
       h('a', {class: 'skip', href: '#main'}, 'Skip to content'),
       h('header', {class: 'topbar'}, h('span', {class: 'brand'}, 'Dwarpal'), h('span', {class: 'spacer'}),
         h('a', {class: 'who', href: '#/profile', title: 'Your profile'}, this.me.person.display),
-        words, keys, out),
+        this.noticeBtn, words, keys, out),
       h('div', {class: 'body'}, this.nav, this.main), status);
+    this.setNotices(this.me.notices);
     this.renderNav();
     explain(this.main);
   }
@@ -292,6 +294,7 @@ class DwApp extends HTMLElement {
     });
     const every = (ms, fn) => this.timers.push(setInterval(() => fn().catch(() => {}), ms));
     this.timers.push(setInterval(() => this.tickUnlock(), 1000));
+    every(30000, () => this.refreshNotices());
     every(15000, async () => {
       Object.assign(this.lab, await api.lab({background: true}));
       this.events.dispatchEvent(new CustomEvent('live', {detail: {name: 'lab', data: this.lab}}));
@@ -317,6 +320,44 @@ class DwApp extends HTMLElement {
       toast(this.newAlerts === 1 ? 'A new alert was raised.' : this.newAlerts + ' new alerts were raised.', '', {href: '#/queue?at=queue', text: 'Open the queue'});
       this.newAlerts = 0;
     }, 1500);
+  }
+
+  // ---- notices ------------------------------------------------------------------------------------------
+  /** The Notices button says how many are unread, and nothing more when there are none. */
+  setNotices(n) {
+    this.unreadNotices = n || 0;
+    if (this.noticeBtn) this.noticeBtn.textContent = this.unreadNotices ? 'Notices (' + this.unreadNotices + ')' : 'Notices';
+  }
+
+  async refreshNotices() {
+    const r = await api.notices({background: true});
+    this.setNotices(r.unread);
+  }
+
+  /** The person's notices, newest first, with a way to mark them read. */
+  async showNotices() {
+    const r = await api.notices();
+    this.setNotices(r.unread);
+    const dlg = h('dialog', {'aria-labelledby': 'nt-title'});
+    const close = () => {
+      dlg.close();
+      dlg.remove();
+    };
+    dlg.addEventListener('cancel', close);
+    const stamp = (iso) => String(iso).split('T').join(' ').split('.')[0].split('Z')[0] + ' UTC';
+    dlg.append(h('h1', {id: 'nt-title'}, 'Notices'),
+      r.notices.length
+        ? h('ul', {class: 'plain'}, r.notices.map((n) => h('li', {}, h('span', {class: 'note'}, stamp(n.at) + (n.read ? '' : '  (new)')), h('br'), n.text)))
+        : h('p', {class: 'note'}, 'Nothing yet.'),
+      h('div', {class: 'row'},
+        h('button', {type: 'button', class: 'primary', on: {click: async () => {
+          const x = await api.readNotices();
+          this.setNotices(x.unread);
+          close();
+        }}}, 'Mark all as read'),
+        h('button', {type: 'button', on: {click: close}}, 'Close')));
+    document.body.append(dlg);
+    dlg.showModal();
   }
 
   stopLive() {

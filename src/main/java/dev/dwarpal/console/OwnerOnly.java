@@ -12,12 +12,12 @@ import java.util.EnumSet;
 import java.util.List;
 
 /** Owner-only access for the files that hold demo secrets: POSIX 700/600, or an ACL that names only the owner. */
-final class OwnerOnly {
+public final class OwnerOnly {
 
     private OwnerOnly() {
     }
 
-    static void restrict(Path path) throws IOException {
+    public static void restrict(Path path) throws IOException {
         if (path.getFileSystem().supportedFileAttributeViews().contains("posix")) {
             Files.setPosixFilePermissions(path, PosixFilePermissions.fromString(
                     Files.isDirectory(path) ? "rwx------" : "rw-------"));

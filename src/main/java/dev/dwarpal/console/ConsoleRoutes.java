@@ -73,6 +73,8 @@ final class ConsoleRoutes {
         s.route("POST", "session/recover", Kind.PUBLIC, null, false, c -> recover(s, c));
         s.route("POST", "session/recover/code", Kind.PUBLIC, null, false, c -> recoverCode(s, c));
         s.route("POST", "session/unlock", Kind.READ, null, false, c -> unlock(s, c));
+        s.route("GET", "notices", Kind.READ, null, false, c -> notices(s, c));
+        s.route("POST", "notices/read", Kind.READ, null, false, c -> noticesRead(s, c));
         s.route("POST", "session/passkey/challenge", Kind.READ, null, false, c -> passkeyChallenge(s, c));
         s.route("POST", "session/lock", Kind.READ, null, false, c -> lock(s, c));
         s.route("POST", "session/elevate", Kind.WRITE, null, false, c -> startElevation(s, c));
@@ -430,6 +432,29 @@ final class ConsoleRoutes {
         return Reply.ok(JsonValue.object().put("ok", JsonValue.bool(true)).build());
     }
 
+    /** The person's own notices, newest first. */
+    private static Reply notices(ConsoleServer s, Ctx c) {
+        List<JsonValue> out = new ArrayList<>();
+        for (NoticeBoard.Notice n : s.notices.of(c.person().id(), 50)) {
+            out.add(JsonValue.object().put("id", n.id()).put("at", n.at().toString()).put("read", JsonValue.bool(n.read()))
+                    .put("text", n.text()).build());
+        }
+        return Reply.ok(JsonValue.object().put("unread", JsonValue.num(s.notices.unread(c.person().id())))
+                .put("notices", new JsonValue.JArray(out)).build());
+    }
+
+    /** Marks one notice, or all of them when no id is sent, as read. Only the person's own are ever touched. */
+    private static Reply noticesRead(ConsoleServer s, Ctx c) {
+        String id;
+        try {
+            id = c.fields(Set.of("id")).text("id", 32);
+        } catch (dev.dwarpal.wire.JsonException all) {
+            id = null;
+        }
+        s.notices.markRead(c.person().id(), id);
+        return Reply.ok(JsonValue.object().put("unread", JsonValue.num(s.notices.unread(c.person().id()))).build());
+    }
+
     private static Reply recoverCode(ConsoleServer s, Ctx c) {
         Ctx.Fields f = c.fields(Set.of("user", "code"));
         String user = f.text("user", 128);
@@ -529,6 +554,7 @@ final class ConsoleRoutes {
                 .put("unlocked", JsonValue.bool(s.sessions.unlocked(x)))
                 .put("unlockedSeconds", JsonValue.num(s.sessions.unlockedSeconds(x)))
                 .put("auditSeconds", JsonValue.num(s.sessions.auditSeconds(x)))
+                .put("notices", JsonValue.num(s.notices.unread(x.person.id())))
                 .put("elevationAllowed", JsonValue.bool(ConsoleServer.satisfiesModule(x.person.roles(), Role.LEAD)))
                 .put("elevation", elevationJson(s, x))
                 .put("signing", JsonValue.object().put("notice", s.signer.notice()).build());

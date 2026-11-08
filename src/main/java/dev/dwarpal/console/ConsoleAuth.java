@@ -97,6 +97,28 @@ public final class ConsoleAuth {
     private record Pending(String subject, String password, WebAuthn.Challenge challenge, Instant expiresAt, String source) {
     }
 
+    /**
+     * The emergency password of the vault, as the recovery sees it: accepted only while an administrator has switched it on,
+     * and used up when the person has set a new password and PIN.
+     */
+    public interface Emergency {
+        /** True while this person's emergency password is switched on and this is it. */
+        boolean accepts(String user, String code);
+
+        /** The person set new secrets with it: it is used up (and replaced by a new, switched-off one). */
+        void used(String user);
+    }
+
+    /** What a recovery ticket carries when the emergency password opened it, so that it is told apart from a backup code. */
+    private static final String EMERGENCY_MARK = "emergency:";
+
+    private volatile Emergency emergency;
+
+    /** Plugs the vault's emergency passwords into the recovery. */
+    public void emergency(Emergency e) {
+        this.emergency = e;
+    }
+
     /** Proof that a backup code was right, held only until the new password and PIN arrive. */
     private record Recovery(String subject, String code, Instant expiresAt, String source) {
     }
@@ -397,6 +419,10 @@ public final class ConsoleAuth {
         }
         CredentialStore.Entry e = wellFormed(user) ? entries.get(user) : null;
         String match = e == null ? null : e.codes().stream().filter(c -> opens(c, code)).findFirst().orElse(null);
+        Emergency vault = emergency;
+        if (match == null && e != null && vault != null && vault.accepts(user, code)) {
+            match = EMERGENCY_MARK + code;
+        }
         Instant now = clock.instant();
         recoveries.values().removeIf(r -> !now.isBefore(r.expiresAt()));
         if (match == null || recoveries.size() >= MAX_PENDING) {
@@ -431,7 +457,10 @@ public final class ConsoleAuth {
         }
         recoveries.remove(ticket);
         CredentialStore.Entry e = entries.get(r.subject());
-        if (e == null || !e.codes().contains(r.code())) {
+        boolean byEmergency = r.code().startsWith(EMERGENCY_MARK);
+        Emergency vault = emergency;
+        if (e == null || (byEmergency ? vault == null || !vault.accepts(r.subject(), r.code().substring(EMERGENCY_MARK.length()))
+                : !e.codes().contains(r.code()))) {
             return Changed.of(Change.DENIED);
         }
         Instant now = clock.instant();
@@ -440,8 +469,12 @@ public final class ConsoleAuth {
         byte[] pin = pinHash(newPin, salt, pinIterations);
         List<String> left = new ArrayList<>(e.codes());
         left.remove(r.code());
-        return update(r.subject(), x -> x.password(h.iterations(), h.salt(), h.hash(), now).pin(text(salt), text(pin), now)
+        Changed saved = update(r.subject(), x -> x.password(h.iterations(), h.salt(), h.hash(), now).pin(text(salt), text(pin), now)
                 .backupCodes(left), true);
+        if (byEmergency && saved.status() == Change.OK) {
+            vault.used(r.subject());
+        }
+        return saved;
     }
 
     /** True when the password or the PIN has lasted its full term: until it changes, the person can do nothing else. */

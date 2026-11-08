@@ -129,6 +129,9 @@ export const api = {
     return r;
   },
   /** A fresh challenge for the person's device to sign (when the console uses device passkeys). */
+  /** The person's notices (what happened on their account, never a secret), and marking them read (one, or all). */
+  notices: (opts) => get('notices', opts),
+  readNotices: (id) => post('notices/read', id ? {id} : {}),
   passkeyChallenge: () => post('session/passkey/challenge', {}),
   /** The first half of registering a device passkey: password and PIN prove who asks, the server answers with a challenge. */
   passkeyBegin: (password, pin) => post('profile/passkey/begin', {password, pin}),

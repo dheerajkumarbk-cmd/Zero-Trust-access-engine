@@ -7,7 +7,8 @@ import dev.dwarpal.directory.DirectoryException;
 import dev.dwarpal.directory.Migrator;
 import dev.dwarpal.console.access.AccessApi;
 import dev.dwarpal.console.access.AccessModule;
-import dev.dwarpal.directory.CredentialLifecycle;
+import dev.dwarpal.console.vault.Vault;
+import dev.dwarpal.console.vault.VaultModule;
 import dev.dwarpal.directory.PostgresAccess;
 import dev.dwarpal.directory.PostgresDirectory;
 import dev.dwarpal.edge.DevPki;
@@ -90,8 +91,11 @@ public final class ConsoleMain {
         // the directory decides who exists and with which roles; the people file only keeps their first secrets
         Database database = openDatabase(dbMode);
         Directory directory = database == null ? null : new PostgresDirectory(database);
+        // the vault: emergency passwords sealed with AES-256-GCM, the key in a folder of its own
+        Path consoleDir = config.dir().resolve("console");
+        Vault vault = Vault.open(consoleDir.resolve("vault"), consoleDir.resolve("vault-key"), Clock.systemUTC());
         AccessApi accessApi = database == null ? null
-                : new AccessApi(new PostgresAccess(database), directory, CredentialLifecycle.NONE);
+                : new AccessApi(new PostgresAccess(database), directory, vault);
         if (directory == null) {
             out.println("Directory database: switched off for this run (--db off); the people come from the people file.");
         } else {
@@ -125,6 +129,7 @@ public final class ConsoleMain {
             };
             SocChannel channel = new DelegatedSocChannel(pki, () -> lab.world().socApiUrl(),
                     () -> lab.world().delegationIssuer(), analysts, Duration.ofSeconds(10));
+            vault.ensure(people.stream().map(e -> e.person().id()).toList());
             ConsoleAuth auth = new ConsoleAuth(people, Clock.systemUTC(), settings.passwordIterations(),
                     settings.pinIterations(), config.dir().resolve("console").resolve("credentials.txt"),
                     Duration.ofDays(rotateDays));
@@ -160,7 +165,11 @@ public final class ConsoleMain {
                 b.module(new AccessModule(accessApi));
             }
             List<ConsoleAuth.Enrolment> enrolled = people;
-            b.module(new MonitorModule(() -> administratorIds(directory, enrolled)));
+            b.module(new MonitorModule(() -> idsWithRole(directory, enrolled, "ADMIN")));
+            auth.emergency(vault);
+            b.noticesFile(consoleDir.resolve("notices.txt"));
+            b.module(new VaultModule(vault, () -> activePeople(directory, enrolled), () -> idsWithRole(directory, enrolled, "ADMIN"),
+                    () -> idsWithRole(directory, enrolled, "LEAD")));
             if (trail != null) {
                 b.trail(trail);
             }
@@ -192,20 +201,37 @@ public final class ConsoleMain {
         }
     }
 
-    /** The people who are administrators now: the directory when there is one, else the people file. */
-    static java.util.Set<String> administratorIds(Directory directory, List<ConsoleAuth.Enrolment> people) {
+    /** The people who hold this console role now ("ADMIN", "LEAD"): the directory when there is one, else the people file. */
+    static java.util.Set<String> idsWithRole(Directory directory, List<ConsoleAuth.Enrolment> people, String role) {
         java.util.Set<String> out = new java.util.TreeSet<>();
         if (directory != null) {
             for (dev.dwarpal.directory.DirectoryPerson p : directory.people()) {
-                if (p.status() == dev.dwarpal.directory.DirectoryPerson.Status.ACTIVE && p.consoleRoles().contains("ADMIN")) {
+                if (p.status() == dev.dwarpal.directory.DirectoryPerson.Status.ACTIVE && p.consoleRoles().contains(role)) {
                     out.add(p.id());
                 }
             }
         } else {
             for (ConsoleAuth.Enrolment e : people) {
-                if (e.person().roles().contains(ConsoleModule.Role.ADMIN)) {
+                if (e.person().roles().contains(ConsoleModule.Role.valueOf(role))) {
                     out.add(e.person().id());
                 }
+            }
+        }
+        return out;
+    }
+
+    /** The people who exist now and can have an emergency password. */
+    static List<VaultModule.Person> activePeople(Directory directory, List<ConsoleAuth.Enrolment> people) {
+        List<VaultModule.Person> out = new java.util.ArrayList<>();
+        if (directory != null) {
+            for (dev.dwarpal.directory.DirectoryPerson p : directory.people()) {
+                if (p.status() == dev.dwarpal.directory.DirectoryPerson.Status.ACTIVE) {
+                    out.add(new VaultModule.Person(p.id(), p.displayName(), p.department()));
+                }
+            }
+        } else {
+            for (ConsoleAuth.Enrolment e : people) {
+                out.add(new VaultModule.Person(e.person().id(), e.person().display(), ""));
             }
         }
         return out;

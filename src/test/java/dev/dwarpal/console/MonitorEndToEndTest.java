@@ -62,9 +62,10 @@ class MonitorEndToEndTest {
     }
 
     @Test
-    void vaultRecordsNeverShowToAnAdministratorAndTheLeadSeesOnlyWhoWhenOnWhom() throws Exception {
+    void theOtherAdministratorSeesAVaultActionButNeverItsSecretOrReasonAndTheLeadSeesOnlyWhoWhenOnWhom() throws Exception {
         Resp spector = f.get("/console/api/monitor/admins", f.login("spector"));
-        assertFalse(spector.body().contains("VAULT_") || spector.body().contains("hunter2"), spector.body());
+        assertTrue(spector.body().contains("VAULT_REVEAL") && spector.body().contains("action: reveal; target: uma"), spector.body());
+        assertFalse(spector.body().contains("hunter2") || spector.body().contains("locked out"), spector.body());
         Resp vault = f.get("/console/api/monitor/vault", f.login("cleo"));
         assertEquals(200, vault.status());
         assertTrue(vault.body().contains("\"who\":\"dana\"") && vault.body().contains("\"action\":\"reveal\"")

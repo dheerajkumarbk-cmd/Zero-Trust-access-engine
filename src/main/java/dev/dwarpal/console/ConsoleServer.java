@@ -106,6 +106,11 @@ public final class ConsoleServer implements AutoCloseable {
         }
 
         @Override
+        public boolean notify(String personId, String text) {
+            return notices.post(personId, text);
+        }
+
+        @Override
         public List<AuditRow> auditTail(int max) {
             dev.dwarpal.lab.LabAudit view = trail != null ? trail.view() : world().auditView;
             int want = Math.max(1, Math.min(max, 2_000));
@@ -159,6 +164,8 @@ public final class ConsoleServer implements AutoCloseable {
     };
     /** The saved audit trail (kept across restarts); null when this server writes into the lab's chain only. */
     final ConsoleTrail trail;
+    /** Short notices for people; what happened, never a secret. */
+    final NoticeBoard notices;
     /** A sensitive read repeated within a minute is one record with a count; an ordinary view, within five minutes. */
     private final ReadWindow sensitiveReads = new ReadWindow(Duration.ofSeconds(60), 10_000);
     private final ReadWindow views = new ReadWindow(Duration.ofMinutes(5), 10_000);
@@ -209,6 +216,7 @@ public final class ConsoleServer implements AutoCloseable {
         this.modules = List.copyOf(b.modules);
         this.sessions = new ConsoleSessions(wall, settings);
         this.trail = b.trail;
+        this.notices = b.noticesFile != null ? NoticeBoard.open(b.noticesFile, wall) : NoticeBoard.inMemory(wall);
         this.audit = new ConsoleAudit(() -> b.auditLog.get() != null ? b.auditLog.get() : lab.world().org.audit,
                 () -> lab.world().org.clock, wall, b.trail != null);
         this.hub = new StreamHub(settings.maxStreams());
@@ -381,6 +389,15 @@ public final class ConsoleServer implements AutoCloseable {
         return modules;
     }
 
+    private boolean hiddenModule(String id) {
+        for (ConsoleModule m : modules) {
+            if (m.id().equals(id) && m.hidden()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * The meaning of a module's {@code minimum}: hierarchical, ANALYST below LEAD below ADMIN, and USER (any signed-in
      * person) separate and lowest. Built-in SOC and audit routes use {@link #satisfies} instead, which keeps an
@@ -504,6 +521,9 @@ public final class ConsoleServer implements AutoCloseable {
             }
             ConsoleSessions.Found f = sessions.find(cookie(ex), source, agent);
             if (f.lookup() != ConsoleSessions.Lookup.OK || !satisfiesModule(f.session().person.roles(), m.get().minimum())) {
+                if (m.get().hidden()) {
+                    return Reply.error(404, "not found");
+                }
                 return Reply.error(f.lookup() == ConsoleSessions.Lookup.OK ? 403 : 401,
                         f.lookup() == ConsoleSessions.Lookup.OK ? "forbidden" : "login required");
             }
@@ -604,6 +624,16 @@ public final class ConsoleServer implements AutoCloseable {
                     session.csrf.getBytes(StandardCharsets.UTF_8))) {
                 return audited403(session, "csrf", route, "anti-forgery token missing or wrong");
             }
+        }
+        if (route.minimum() != null && route.moduleId() != null && !satisfiesModule(session.person.roles(), route.minimum())
+                && hiddenModule(route.moduleId())) {
+            // a hidden module does not exist for this person: the same answer as for a route that is not there, and the record
+            // does not name the route
+            if (refusalAudits.tryAcquire("hidden|" + session.person.id(), wall.instant())) {
+                audit.write("CONSOLE_REFUSED", session.person.id(), fields("session", session.tag(), "route", "(not found)",
+                        "why", "role"));
+            }
+            return Reply.error(404, "not found");
         }
         if (route.minimum() != null && !(route.moduleId() != null ? satisfiesModule(session.person.roles(), route.minimum())
                 : satisfies(session.person.roles(), route.minimum()))) {
@@ -1011,6 +1041,7 @@ public final class ConsoleServer implements AutoCloseable {
         private final SSLContext tls;
         private final java.util.concurrent.atomic.AtomicReference<dev.dwarpal.audit.AuditLog> auditLog = new java.util.concurrent.atomic.AtomicReference<>();
         private ConsoleTrail trail;
+        private java.nio.file.Path noticesFile;
         private ConsoleSettings settings = ConsoleSettings.defaults();
         private Clock wall = Clock.systemUTC();
         private InetSocketAddress address = new InetSocketAddress(InetAddress.getLoopbackAddress(), 8443);
@@ -1032,6 +1063,12 @@ public final class ConsoleServer implements AutoCloseable {
         /** Where the console writes its records (default: the lab's chain); tests pass a log whose sink can fail. */
         public Builder auditLog(dev.dwarpal.audit.AuditLog v) {
             auditLog.set(v);
+            return this;
+        }
+
+        /** Keeps people's notices in this file (owner-only) instead of only for this run. */
+        public Builder noticesFile(java.nio.file.Path v) {
+            noticesFile = Objects.requireNonNull(v, "noticesFile");
             return this;
         }
 

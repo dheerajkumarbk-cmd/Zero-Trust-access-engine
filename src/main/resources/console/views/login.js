@@ -30,7 +30,7 @@ class DwLogin extends HTMLElement {
     const go = h('button', {type: 'submit', class: 'primary'}, 'Continue');
     const form = h('form', {class: 'stack', method: 'dialog'},
       h('label', {for: 'li-user'}, 'User'), user, h('label', {for: 'li-pw'}, 'Password'), pw, msg, h('div', {class: 'row'}, go,
-        h('button', {type: 'button', class: 'link', on: {click: () => this.recover('')}}, 'Use a backup code')));
+        h('button', {type: 'button', class: 'link', on: {click: () => this.recover('')}}, 'Use a backup code or an emergency password')));
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       go.disabled = true;
@@ -81,7 +81,7 @@ class DwLogin extends HTMLElement {
     const go = h('button', {type: 'submit', class: 'primary'}, 'Check code');
     const back = h('button', {type: 'button', on: {click: () => this.step1('')}}, 'Back');
     const form = h('form', {class: 'stack', method: 'dialog'}, h('label', {for: 'rc-user'}, 'User'), user,
-      h('label', {for: 'rc-code'}, 'Backup code'), code, msg, h('div', {class: 'row'}, go, back));
+      h('label', {for: 'rc-code'}, 'Backup code or emergency password'), code, msg, h('div', {class: 'row'}, go, back));
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       go.disabled = true;
@@ -95,8 +95,8 @@ class DwLogin extends HTMLElement {
         go.disabled = false;
       }
     });
-    fill(this.card, h('div', null, h('h1', null, 'Use a backup code'),
-      h('p', {class: 'note'}, 'Enter your user and one of your codes. The next step sets a new password and PIN.'), form));
+    fill(this.card, h('div', null, h('h1', null, 'Use a backup code or an emergency password'),
+      h('p', {class: 'note'}, 'Enter your user and one of your codes, or the emergency password an administrator gave you. The next step sets a new password and PIN.'), form));
     user.focus();
   }
 

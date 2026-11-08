@@ -31,22 +31,24 @@ account than the requester, and one account can never approve its own request. S
 
 ## Still to build
 
-- [ ] **S3 -> S6 hook (joiner):** the joiner flow calls one clear hook that creates the new person's switched-off backup
+- [x] **S3 -> S6 hook (joiner):** the joiner flow calls one clear hook that creates the new person's switched-off backup
       credential. Until Stage 6 the hook does nothing and says so.
       Built in Stage 3: `CredentialLifecycle.personCreated(personId)`, called by `AccessApi.saveJoiner` after the person
-      is saved, and (Step A) after an approved "create an administrator account". `ConsoleMain` passes
-      `CredentialLifecycle.NONE`; Stage 6 passes the real one and ticks this box.
-- [ ] **S3 -> S6 hook (leaver):** the leaver flow calls one clear hook that deletes that person's backup credential.
+      is saved, and (Step A) after an approved "create an administrator account". Built in Stage 6: `ConsoleMain` passes
+      the `Vault`, which makes the new person's switched-off emergency password (and at every start for people who have none).
+- [x] **S3 -> S6 hook (leaver):** the leaver flow calls one clear hook that deletes that person's backup credential.
       Built in Stage 3: `CredentialLifecycle.personRemoved(personId)`, called by `AccessApi.submitLeaver` after the
-      removal committed and the person's sessions were ended. Same swap in Stage 6.
-- [ ] **S3 -> S6 first sign-in of a joiner:** until Stage 6 a joiner gets first secrets at the lab's next start
+      removal committed and the person's sessions were ended. Built in Stage 6: the `Vault` deletes their emergency password
+      (and an administrator's own entry). Test: `VaultTest`.
+- [ ] **S3 -> S6 first sign-in of a joiner (not part of Stage 6 as asked, left as it was):** until Stage 6 a joiner gets first secrets at the lab's next start
       (`DirectoryPeople.sync` with `DemoPeople.issue`, written to the owner-only people file like the demo people). Stage 6
       replaces this with the switched-off backup credential and a first-sign-in flow. A new administrator account made by
       the privileged change is in the same position.
-- [ ] **S2 -> S6 record type:** vault events use the separate audit record type added in Stage 2 (analysts cannot read it).
+- [x] **S2 -> S6 record type:** vault events use the separate audit record type added in Stage 2 (analysts cannot read it).
       Built in Stage 2: any record whose type starts `VAULT_` goes into the saved console trail (`ConsoleTrail`). Analysts
       get "not found" for it and never see it listed; a lead sees only its `action` and `target` fields (plus the
-      record's own actor and time). Stage 6 must put the secret nowhere in the payload, and write `action` and `target`.
+      record's own actor and time). Built in Stage 6: every vault call writes a `VAULT_` record with `action`, `target`, the
+      reason and the elevation id, never a secret. Tests: `VaultEndToEndTest`, `MonitorEndToEndTest`.
 - [x] **S4 monitoring:** each administrator sees the other administrator's actions on the monitoring page; Cleo sees the
       limited vault log (who, when, on whom, never the secret). The records an administrator needs are already written
       by Stage 3 and Step A (`ACCESS_*`, `ELEVATION_*`, with before and after).
@@ -64,12 +66,18 @@ account than the requester, and one account can never approve its own request. S
       (software authenticator with real CBOR and signatures), `CborTest`, and a browser run with Edge's virtual authenticator.
 - [x] **S5 -> S6 gate:** the administrator's passkey gates the vault and the elevation, never ordinary sign-in
       (the sign-in itself still asks only for password and security-key PIN).
-- [ ] **S6 elevation for the vault and emergency passwords:** an emergency password activation and a vault reveal need an
+- [x] **S6 elevation for the vault and emergency passwords:** an emergency password activation and a vault reveal need an
       elevation (PIN, passkey, reason). The OTHER administrator is only NOTIFIED (no approval, because an emergency cannot
       wait), and so is Cleo.
-- [ ] **S6 cross-administrator recovery:** if one administrator is locked out, the other runs the emergency recovery for
+      Built in Stage 6: the vault (`VaultModule`, hidden: a plain "not found" for everybody but the administrators, in no menu
+      or list, Guide or Glossary: test `VaultNotMentionedTest`). Every call needs an open elevation; every call about a person
+      also needs a fresh password and PIN, the passkey again and a reason. The emergency password is sealed with AES-256-GCM
+      (`VaultStore`, key in its own folder), is switched off until an administrator switches it on, and then opens only the
+      recovery page, once; the person sets a new password and PIN and it is replaced. Notices (`NoticeBoard`, the Notices
+      button) go to the other administrator and the leads on every vault action, and to the person when it is switched on or used.
+- [x] **S6 cross-administrator recovery:** if one administrator is locked out, the other runs the emergency recovery for
       them, with Cleo notified. This replaces the earlier "keep backup codes on paper" workaround.
-- [ ] **S5 -> S6 emergency password:** the person's own passkey stays required when an emergency password is used.
+- [x] **S5 -> S6 emergency password:** the person's own passkey stays required when an emergency password is used.
 
 ## Rules to test (all stages)
 
