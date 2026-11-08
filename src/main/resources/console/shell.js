@@ -1,8 +1,9 @@
 // The shell: login, navigation built from /console/api/modules, routing, the live feed, keyboard, step-up, status bar.
-import {api, ApiError} from './api.js';
+import {api, ApiError, setUnlocker} from './api.js';
 import {h, fill, unavailable} from './dom.js';
-import {getPref, setPref} from './prefs.js';
 import {lists} from './table.js';
+import {toast} from './toast.js';
+import {explain, glossary} from './glossary.js';
 import './views/login.js';
 import './views/statusbar.js';
 import './views/overview.js';
@@ -13,16 +14,20 @@ import './views/entity.js';
 import './views/response.js';
 import './views/audit.js';
 import './views/attack.js';
+import './views/scans.js';
+import './views/profile.js';
+import './views/home.js';
 
 const BUILT_IN = {
   overview: 'dw-overview', queue: 'dw-queue', cases: 'dw-cases', hunt: 'dw-hunt', entity: 'dw-entity',
-  response: 'dw-response', audit: 'dw-audit', attack: 'dw-attack',
+  response: 'dw-response', audit: 'dw-audit', attack: 'dw-attack', scans: 'dw-scans', home: 'dw-home',
 };
 
-function applyTheme() {
-  const t = getPref('theme', 'auto');
-  if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
-  else document.documentElement.removeAttribute('data-theme');
+/** One opening of confidential data. Browsing Audit records or running Hunt searches stays one opening; anything else is a new one. */
+function place(hash) {
+  const path = hash.replace(/^#\/?/, '').split('?')[0];
+  const first = path.split('/')[0];
+  return first === 'audit' || first === 'hunt' ? first : path;
 }
 
 class DwApp extends HTMLElement {
@@ -39,8 +44,13 @@ class DwApp extends HTMLElement {
   }
 
   connectedCallback() {
-    applyTheme();
-    window.addEventListener('hashchange', () => this.route());
+    setUnlocker(() => this.needUnlock());
+    window.addEventListener('dw:unlock', () => this.needUnlock().then(() => this.route()).catch(() => {}));
+    window.addEventListener('dw:change-due', () => this.mustChange());
+    window.addEventListener('hashchange', () => this.moved());
+    window.addEventListener('pagehide', () => {
+      if (this.me && this.me.passkeyNeeded) api.lockOnExit();
+    });
     window.addEventListener('keydown', (e) => this.key(e));
     window.addEventListener('dw:session-ended', () => this.ended('Your session ended. Sign in again.'));
     this.boot();
@@ -50,7 +60,11 @@ class DwApp extends HTMLElement {
   get shell() {
     const self = this;
     return {
-      api, events: this.events, navigate: (hash) => self.navigate(hash), needStepUp: () => self.needStepUp(),
+      api, events: this.events, navigate: (hash) => self.navigate(hash), needStepUp: () => self.needStepUp(), lock: () => self.lock(), landing: () => self.landing(),
+      spot: (name) => self.spot(name),
+      refreshMe: async () => {
+        self.me = await api.me({background: true});
+      },
       get lab() { return self.lab; }, get me() { return self.me; },
     };
   }
@@ -84,8 +98,46 @@ class DwApp extends HTMLElement {
     Object.assign(this.lab, lab, {feed: 'connecting'});
     this.buildFrame();
     this.startLive();
-    if (!location.hash || location.hash === '#' || location.hash === '#/') location.hash = '#/' + (this.modules[0] ? this.modules[0].id : 'overview');
+    this.place = place(location.hash);
+    await this.lock();
+    if (this.me.changeDue) this.mustChange();
+    else if (!location.hash || location.hash === '#' || location.hash === '#/') location.hash = this.landing();
     else this.route();
+  }
+
+  /** Where a person starts: the first thing their role may open. */
+  landing() {
+    const first = this.modules[0];
+    if (!first) return '#/profile';
+    return first.kind === 'module' ? '#/m/' + first.id : '#/' + first.id;
+  }
+
+  mustChange() {
+    if (location.hash.startsWith('#/profile/')) this.route();
+    else this.navigate('#/profile?at=password');
+  }
+
+  /** Like the search in a phone's settings: scroll to one box on the page, make it flash, and put the cursor in it. */
+  spot(name) {
+    clearTimeout(this.spotTimer);
+    let tries = 0;
+    const look = () => {
+      const box = this.main.querySelector('[data-spot="' + CSS.escape(name) + '"]');
+      // a page still loading moves its boxes, so wait until it has settled
+      if ((!box || this.main.querySelector('[aria-busy]')) && ++tries < 40) {
+        this.spotTimer = setTimeout(look, 100);
+        return;
+      }
+      if (!box) return;
+      const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      box.scrollIntoView({block: 'center', behavior: still ? 'auto' : 'smooth'});
+      box.classList.remove('spot-on');
+      box.getBoundingClientRect(); // starts the flash again if this box was the last one too
+      box.classList.add('spot-on');
+      box.querySelector('input, textarea')?.focus({preventScroll: true});
+      setTimeout(() => box.classList.remove('spot-on'), 1600);
+    };
+    this.spotTimer = setTimeout(look, 60);
   }
 
   buildFrame() {
@@ -93,33 +145,43 @@ class DwApp extends HTMLElement {
     this.main = h('main', {id: 'main', tabindex: -1});
     const status = document.createElement('dw-statusbar');
     status.ctx = {shell: this.shell};
-    const theme = h('button', {type: 'button', title: 'Theme: automatic, dark or light', on: {click: () => this.cycleTheme()}}, 'Theme');
     const keys = h('button', {type: 'button', title: 'Keyboard shortcuts', on: {click: () => this.help()}}, '?');
+    const words = h('button', {type: 'button', title: 'What the short words mean', on: {click: () => glossary(this.me.passkeyNeeded)}}, 'Glossary');
     const out = h('button', {type: 'button', on: {click: () => this.logout()}}, 'Sign out');
     fill(this,
       h('a', {class: 'skip', href: '#main'}, 'Skip to content'),
-      h('header', {class: 'topbar'}, h('span', {class: 'brand'}, 'DWARPAL', h('small', null, 'lab console')), h('span', {class: 'spacer'}),
-        h('span', null, this.me.person.display, ' ', h('span', {class: 'muted'}, this.me.person.display.toLowerCase().includes('(' + this.me.person.roles[0].toLowerCase() + ')') ? '' : '(' + this.me.person.roles.join(', ').toLowerCase() + ')')),
-        theme, keys, out),
+      h('header', {class: 'topbar'}, h('span', {class: 'brand'}, 'Dwarpal'), h('span', {class: 'spacer'}),
+        h('a', {class: 'who', href: '#/profile', title: 'Your profile'}, this.me.person.display),
+        words, keys, out),
       h('div', {class: 'body'}, this.nav, this.main), status);
     this.renderNav();
+    explain(this.main);
   }
 
   renderNav() {
     const builtIn = this.modules.filter((m) => m.kind === 'builtin');
     const extra = this.modules.filter((m) => m.kind !== 'builtin');
     fill(this.nav,
-      builtIn.length ? h('h2', null, 'SOC') : null,
+      builtIn.length ? h('h2', null, builtIn.some((m) => m.id === 'overview') ? 'SOC' : 'Your space') : null,
       builtIn.map((m) => h('a', {href: '#/' + m.id, 'data-id': m.id}, m.title)),
       extra.length ? h('h2', null, 'More') : null,
-      extra.map((m) => h('a', {href: '#/m/' + m.id, 'data-id': 'm/' + m.id}, m.title)));
+      extra.map((m) => h('a', {href: '#/m/' + m.id, 'data-id': 'm/' + m.id}, m.title)),
+      h('h2', null, 'Account'), h('a', {href: '#/profile', 'data-id': 'profile'}, 'Profile'));
   }
 
-  cycleTheme() {
-    const order = ['auto', 'dark', 'light'];
-    const next = order[(order.indexOf(getPref('theme', 'auto')) + 1) % order.length];
-    setPref('theme', next);
-    applyTheme();
+  /** The foot of each page: only links this person's role can open. */
+  footer() {
+    const can = (id) => this.modules.some((m) => m.id === id);
+    const go = (id, text, hash) => (can(id) ? h('a', {href: hash || '#/' + id}, text) : null);
+    const group = (title, ...links) => (links.some(Boolean) ? h('div', {class: 'foot-col'}, h('h2', null, title), links) : null);
+    return h('footer', {class: 'foot'},
+      h('div', {class: 'foot-top'},
+        h('div', null, h('div', {class: 'brand'}, 'Dwarpal'), h('p', {class: 'foot-line'}, 'A Zero Trust gate and security operations centre, built on NIST SP 800-207. Every request is checked, every action is recorded.')),
+        h('div', {class: 'foot-cols'},
+          group('Work', go('queue', 'Alert queue'), go('cases', 'Cases'), go('response', 'Response'), go('scans', 'Scans')),
+          group('Reports', go('overview', 'Daily report', '#/overview?at=report'), go('audit', 'Audit explorer'), go('attack', 'ATT&CK map'), go('hunt', 'Hunt')),
+          group('Help', h('button', {type: 'button', on: {click: () => glossary(this.me.passkeyNeeded)}}, 'Glossary'), go('guide', 'Guide', '#/m/guide'), go('lab', 'Scenario lab', '#/m/lab'), h('a', {href: '#/profile'}, 'Profile')))),
+      h('div', {class: 'foot-end'}, h('span', null, 'Dwarpal, a college project built at home.'), h('span', null, 'Times are scenario time (UTC).')));
   }
 
   // ---- live feed ----------------------------------------------------------------------------------------
@@ -127,6 +189,7 @@ class DwApp extends HTMLElement {
     this.stopLive();
     this.closeStream = api.openStream((name, data) => {
       if (name === 'lab.tick' && data) Object.assign(this.lab, data);
+      this.announce(name);
       this.events.dispatchEvent(new CustomEvent('live', {detail: {name, data}}));
     }, (state) => {
       this.lab.feed = state;
@@ -139,8 +202,26 @@ class DwApp extends HTMLElement {
       this.events.dispatchEvent(new CustomEvent('live', {detail: {name: 'lab', data: this.lab}}));
     });
     every(60000, async () => {
+      const open = this.me.unlocked;
       this.me = await api.me({background: true});
+      // left open and unused: take the data off the screen, unless the person is typing
+      if (open && !this.me.unlocked && !document.querySelector('dialog[open]') && !document.activeElement?.closest('input,textarea')) this.route();
     });
+  }
+
+  /** Live events the person should hear about, gathered so that a burst of alerts is one notice. */
+  announce(name) {
+    if (name === 'isolation.changed' && Date.now() - (this.isolationNotice || 0) > 30000) {
+      this.isolationNotice = Date.now();
+      toast('A device isolation changed.', '', {href: '#/response?at=isolations', text: 'See Response'});
+    }
+    if (name !== 'alert.new') return;
+    this.newAlerts = (this.newAlerts || 0) + 1;
+    clearTimeout(this.alertNotice);
+    this.alertNotice = setTimeout(() => {
+      toast(this.newAlerts === 1 ? 'A new alert was raised.' : this.newAlerts + ' new alerts were raised.', '', {href: '#/queue?at=queue', text: 'Open the queue'});
+      this.newAlerts = 0;
+    }, 1500);
   }
 
   stopLive() {
@@ -159,6 +240,25 @@ class DwApp extends HTMLElement {
   }
 
   // ---- routing ------------------------------------------------------------------------------------------
+  /** Leaving a page closes whatever the passkey opened, before the next page can ask for anything. */
+  async moved() {
+    const next = place(location.hash);
+    const left = next !== this.place;
+    this.place = next;
+    if (left) await this.lock();
+    this.route();
+  }
+
+  async lock() {
+    if (!this.me || !this.me.passkeyNeeded) return;
+    try {
+      await api.lock();
+      this.me.unlocked = false;
+    } catch (e) {
+      // the server closes it by itself after a few minutes without use
+    }
+  }
+
   navigate(hash) {
     if (location.hash === hash) this.route();
     else location.hash = hash;
@@ -186,21 +286,27 @@ class DwApp extends HTMLElement {
     });
     const params = new URLSearchParams(query);
     const id = parts[0] || 'overview';
+    clearTimeout(this.spotTimer);
+    if (params.get('at')) this.spot(params.get('at'));
     for (const a of this.nav.querySelectorAll('a')) {
       const key = a.getAttribute('data-id');
       const cur = key === id || (id === 'case' && key === 'queue') || (id === 'm' && key === 'm/' + parts[1]);
       if (cur) a.setAttribute('aria-current', 'page');
       else a.removeAttribute('aria-current');
     }
+    if (this.me.changeDue && id !== 'profile') {
+      this.mustChange();
+      return;
+    }
     if (id === 'm') return this.mountModule(parts[1]);
-    const tag = id === 'case' ? 'dw-case' : BUILT_IN[id];
-    if (!tag || (id !== 'case' && !this.modules.some((m) => m.id === id))) {
-      fill(this.main, h('h1', null, 'Not found'), h('p', {class: 'note'}, 'There is no view called "' + id + '" for your role.'));
+    const tag = id === 'case' ? 'dw-case' : id === 'profile' ? 'dw-profile' : BUILT_IN[id];
+    if (!tag || (id !== 'case' && id !== 'profile' && !this.modules.some((m) => m.id === id))) {
+      fill(this.main, h('div', null, h('h1', null, 'Not found'), h('p', {class: 'note'}, 'There is no view called "' + id + '" for your role.')), this.footer());
       return;
     }
     const el = document.createElement(tag);
     el.ctx = {shell: this.shell, args: parts.slice(1), params};
-    fill(this.main, el);
+    fill(this.main, el, this.footer());
     this.main.scrollTo(0, 0);
     if (this.focusHuntNext && id === 'hunt') {
       this.focusHuntNext = false;
@@ -211,15 +317,15 @@ class DwApp extends HTMLElement {
   async mountModule(id) {
     const meta = this.modules.find((m) => m.id === id && m.kind === 'module');
     if (!meta || !/^[a-z][a-z0-9-]{1,31}$/.test(id)) {
-      fill(this.main, h('h1', null, 'Not found'));
+      fill(this.main, h('div', null, h('h1', null, 'Not found')), this.footer());
       return;
     }
     const root = h('div', {class: 'module-root'});
-    fill(this.main, h('p', {class: 'note'}, 'Loading ' + meta.title + '...'));
+    fill(this.main, h('div', null, h('p', {class: 'note'}, 'Loading ' + meta.title + '...')));
     try {
       const mod = await import('/console/modules/' + id + '/index.js');
       const def = mod.default;
-      fill(this.main, root);
+      fill(this.main, root, this.footer());
       const self = this;
       const moduleShell = {
         api: api.module(id), needStepUp: () => self.needStepUp(), navigate: (hash) => self.navigate(hash),
@@ -228,8 +334,55 @@ class DwApp extends HTMLElement {
       const cleanup = await def.view(root, moduleShell);
       this.moduleCleanup = typeof cleanup === 'function' ? cleanup : null;
     } catch (e) {
-      fill(this.main, unavailable(e));
+      fill(this.main, h('div', null, unavailable(e)), this.footer());
     }
+  }
+
+  // ---- passkey ------------------------------------------------------------------------------------------
+  /** Resolves once confidential views are open. A person with no passkey yet is sent to make one. */
+  needUnlock() {
+    if (this.unlocking) return this.unlocking;
+    this.unlocking = new Promise((resolve, reject) => {
+      const done = (ok) => {
+        dlg.close();
+        dlg.remove();
+        this.unlocking = null;
+        if (ok) resolve(true);
+        else reject(new ApiError(423, 'passkey required'));
+      };
+      const dlg = h('dialog', {'aria-labelledby': 'pk-title'});
+      dlg.addEventListener('cancel', () => done(false));
+      if (!this.me.passkeySet) {
+        dlg.append(h('h1', {id: 'pk-title'}, 'Set your passkey first'),
+          h('p', {class: 'note'}, 'Confidential views need a passkey of your own. Set one now, then come back.'),
+          h('div', {class: 'row'}, h('button', {type: 'button', class: 'primary', on: {click: () => {
+            done(false);
+            this.navigate('#/profile?at=passkey');
+          }}}, 'Set my passkey'), h('button', {type: 'button', on: {click: () => done(false)}}, 'Cancel')));
+      } else {
+        const key = h('input', {type: 'password', id: 'pk-key', autocomplete: 'off', required: true, spellcheck: false});
+        const msg = h('p', {class: 'note', role: 'alert'});
+        const form = h('form', {class: 'stack', method: 'dialog'}, h('h1', {id: 'pk-title'}, 'Enter your passkey'),
+          h('p', {class: 'note'}, 'This is confidential. It locks again as soon as you close it or leave this page.'),
+          h('label', {for: 'pk-key'}, 'Passkey'), key, msg,
+          h('div', {class: 'row'}, h('button', {type: 'submit', class: 'primary'}, 'Open'), h('button', {type: 'button', on: {click: () => done(false)}}, 'Cancel')));
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          msg.textContent = '';
+          try {
+            await api.unlock(key.value);
+            done(true);
+          } catch (err) {
+            msg.textContent = err.status === 429 ? 'Too many attempts. Try again in ' + (err.retryAfter || 5) + ' s.' : 'That is not your passkey.';
+            key.value = '';
+          }
+        });
+        dlg.append(form);
+      }
+      document.body.append(dlg);
+      dlg.showModal();
+    });
+    return this.unlocking;
   }
 
   // ---- step-up ------------------------------------------------------------------------------------------

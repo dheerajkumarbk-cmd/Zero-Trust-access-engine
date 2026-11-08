@@ -589,7 +589,8 @@ public final class CorrelationEngine {
                     if (!k.absent && k.newest + window < clock - settings.lateness().toMillis()) {
                         k.absent = true;
                         Entry last = k.entries.getLast();
-                        fire(c.event().at(), k.values, List.of(last), 1, "nothing for " + rule.within()
+                        // the time the silence was noticed: the event that moved the clock may itself be hours old
+                        fire(Instant.ofEpochMilli(clock), k.values, List.of(last), 1, "nothing for " + rule.within()
                                 + " after the last event");
                     }
                     continue;
@@ -614,7 +615,9 @@ public final class CorrelationEngine {
             if (seqs.size() > Alert.MAX_EVIDENCE) {
                 seqs = seqs.subList(seqs.size() - Alert.MAX_EVIDENCE, seqs.size());
             }
-            Instant raisedAt = evidence.stream().map(Entry::recordedAt).max(Comparator.naturalOrder()).orElseThrow();
+            // an absence has no newest evidence: its only record is the last sign of life, long before the alert
+            Instant raisedAt = rule.kind() == RuleBook.Kind.ABSENCE ? eventTime
+                    : evidence.stream().map(Entry::recordedAt).max(Comparator.naturalOrder()).orElseThrow();
             if (n > settings.maxAlertsPerHour()) {
                 suppressed.incrementAndGet();
                 if (floodHours.add(hour)) {

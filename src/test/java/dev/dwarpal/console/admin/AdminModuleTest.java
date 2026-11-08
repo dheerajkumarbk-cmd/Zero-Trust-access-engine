@@ -305,7 +305,7 @@ class AdminModuleTest {
     // ---- why was I denied ----------------------------------------------------------------------------
 
     @Test
-    void theRequestersPageUsesTheEnginesOwnWordsAndRevealsNoInternals() {
+    void theRequestersPageGivesAReasonAndRevealsNoInternals() {
         List<Decisions.Row> rows = Decisions.rows(fx.recentAudit(100_000));
         Decisions.Row denied = rows.stream().filter(r -> r.outcome().equals("DENY")).findFirst().orElseThrow();
         Principal me = new Principal(denied.subject(), Set.of(Role.USER), false);
@@ -315,6 +315,7 @@ class AdminModuleTest {
         String body = list.body();
         assertTrue(body.contains(denied.requestId()));
         assertTrue(body.contains("Access denied. Contact your administrator with reference: " + denied.requestId()));
+        assertTrue(body.contains(Decisions.reason(denied)), "a person is told why");
         // nothing that teaches an attacker: no policy, score, signal, address, device or threshold
         for (String secret : List.of(denied.policy(), denied.policyVersion(), denied.pAttack(), denied.sourceIp(), denied.device(),
                 "pAttack", "signals", "risk", "threshold", "novelty", "reputation", "impossible", "P-90", "P-01")) {
@@ -324,6 +325,22 @@ class AdminModuleTest {
         }
         assertEquals(200, routes.call("GET", "me/decisions/" + denied.requestId(), me, "").status());
         assertFalse(routes.call("GET", "me/decisions/" + denied.requestId(), me, "").body().contains(denied.sourceIp()));
+    }
+
+    @Test
+    void everyReasonIsPlainAndNamesNoCheck() {
+        Decisions.Row denied = Decisions.rows(fx.recentAudit(100_000)).stream().filter(r -> r.outcome().equals("DENY")).findFirst().orElseThrow();
+        for (String policy : List.of("default", "unknown-subject", "unknown-resource", "P-03-confidential-needs-attested-health",
+                "hard-gate:revoked-device", "fail-closed", "engine-error", "audit-failure", "P-90-very-high-risk", "P-01-employees-internal-apps")) {
+            Decisions.Row r = new Decisions.Row(denied.sequence(), denied.requestId(), denied.at(), denied.subject(), denied.device(),
+                    denied.resource(), denied.action(), "DENY", false, false, policy, denied.policyVersion(), denied.sourceIp(),
+                    denied.pAttack(), denied.signals(), denied.reasons());
+            String reason = Decisions.reason(r).toLowerCase(java.util.Locale.ROOT);
+            assertFalse(reason.isBlank());
+            for (String word : List.of("policy", "risk", "score", "threshold", "signal", "country", "travel", "p-", "hard-gate")) {
+                assertFalse(reason.contains(word), policy + " gave: " + reason);
+            }
+        }
     }
 
     @Test

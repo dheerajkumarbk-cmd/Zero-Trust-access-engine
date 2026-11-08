@@ -12,7 +12,7 @@ import java.util.Map;
  *
  * <pre>
  *   GET walkthroughs       every walkthrough
- *   GET walkthroughs/{id}  one, with its scenario (A1 to A9, L5, L6, QUIET)
+ *   GET walkthroughs/{id}  one, with its scenario (A1 to A10, L5, L6, QUIET)
  * </pre>
  */
 public final class GuideModule implements ConsoleModule {

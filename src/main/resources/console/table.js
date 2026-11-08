@@ -18,14 +18,34 @@ export const lists = {
   },
 };
 
+/** A second scroll bar above a table that is too wide. A canvas sets its width: the console has no inline styles. */
+function topScroll(wrap) {
+  const ruler = h('canvas', {height: 1});
+  const bar = h('div', {class: 'topscroll', hidden: true}, ruler);
+  const measure = () => {
+    const wide = wrap.scrollWidth > wrap.clientWidth + 1;
+    bar.hidden = !wide;
+    if (wide) ruler.width = wrap.scrollWidth;
+  };
+  new ResizeObserver(measure).observe(wrap);
+  bar.addEventListener('scroll', () => {
+    wrap.scrollLeft = bar.scrollLeft;
+  });
+  wrap.addEventListener('scroll', () => {
+    bar.scrollLeft = wrap.scrollLeft;
+  });
+  return bar;
+}
+
 /**
  * columns: [{head, cell(row) -> node|string, cls}]. onOpen(row) is called for a click on a row's main link or Enter.
  * Returns {el, select(i), rows}. The table registers itself as the keyboard list until removed from the page.
  */
 export function table(columns, rows, opts = {}) {
   const body = h('tbody');
-  const el = h('div', {class: 'tablewrap'}, h('table', {class: 'dense'},
+  const wrap = h('div', {class: 'tablewrap'}, h('table', {class: 'dense'},
     h('thead', null, h('tr', null, columns.map((c) => h('th', {class: c.cls || '', scope: 'col'}, c.head)))), body));
+  const el = h('div', null, topScroll(wrap), wrap);
   const trs = [];
   let index = -1;
   rows.forEach((row, i) => {

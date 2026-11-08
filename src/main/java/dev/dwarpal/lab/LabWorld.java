@@ -72,6 +72,7 @@ import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.GeneralSecurityException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -160,6 +161,12 @@ public final class LabWorld implements AutoCloseable {
     public final InMemoryAssetCatalog assets;
     public final DevPki pki;
     public final HeadAnchor anchor;
+    /**
+     * How long a call from the console to the SOC API may take is a fact about these two programs, not about the story
+     * the lab is telling. So its clock starts at scenario time and then ticks in real seconds: at 60x, or during a
+     * fast-forward, scenario time would expire an assertion before it had crossed the loopback.
+     */
+    private final Clock delegationClock;
     public final LabAudit auditView;
     public final SocApiServer socApi;
     public final String ceo;
@@ -185,12 +192,28 @@ public final class LabWorld implements AutoCloseable {
     private final Map<String, Long> batchNumbers = new java.util.HashMap<>();
     private int injectedPending;
     private long anchored;
+    private final LabLock directory;
+    private final Set<String> stoppedSensors = new HashSet<>();
+    private boolean heartbeats;
 
-    private LabWorld(LabConfig config, DevPki pki) throws IOException {
+    /** A sensor's "I am alive" when no other work is due. Shorter than the 30 minutes of sensor-heartbeat-missing. */
+    private static final Duration HEARTBEAT = Duration.ofMinutes(25);
+
+    /** A device's sensor stops: from {@code at} on it sends nothing, not even its heartbeat. */
+    public record SensorStop(String deviceId, Instant at) {
+    }
+
+    /** Every sensor's turn to send its heartbeat. */
+    private record HeartbeatRound() {
+    }
+
+    private LabWorld(LabConfig config, DevPki pki, LabLock directory) throws IOException {
         this.config = config;
         this.pki = pki;
+        this.directory = directory;
         Files.createDirectories(config.dir().resolve("connectors"));
         org = SimOrganisation.create(config.seed(), config.users());
+        delegationClock = Clock.offset(Clock.systemUTC(), Duration.between(Instant.now(), org.clock.instant()));
         // the chain starts again with every lab (state is not persisted yet), so the anchor of an earlier run goes
         Path anchorFile = config.dir().resolve("audit.anchor");
         Files.deleteIfExists(anchorFile);
@@ -293,7 +316,7 @@ public final class LabWorld implements AutoCloseable {
                     .address(new InetSocketAddress(InetAddress.getLoopbackAddress(), config.port()))
                     .clock(org.clock)
                     .delegation(TlsContexts.component("console").getName(javax.security.auth.x500.X500Principal.RFC2253),
-                            new Delegation.Verifier(org.keys, org.clock, 100_000))
+                            new Delegation.Verifier(org.keys, delegationClock, 100_000))
                     .callers(ANALYSTS.stream().map(a -> SocCaller.component(a.id(), a)).toList())
                     .settings(SocApiSettings.defaults()).search(store).risk(ueba)
                     .reports((name, now) -> name.equals("daily") ? Optional.of(dailyReport().text()) : Optional.empty())
@@ -305,8 +328,18 @@ public final class LabWorld implements AutoCloseable {
 
     /** Makes (or reuses) the lab certificates and builds the world; nothing runs until {@link #advanceTo}. */
     public static LabWorld create(LabConfig config) throws IOException, InterruptedException {
-        DevPki pki = LabPki.ensure(config.dir(), CERTIFICATES, Instant.now());
-        return new LabWorld(config, pki);
+        LabLock directory = LabLock.acquire(config.dir());
+        boolean started = false;
+        try {
+            DevPki pki = LabPki.ensure(config.dir(), CERTIFICATES, Instant.now());
+            LabWorld world = new LabWorld(config, pki, directory);
+            started = true;
+            return world;
+        } finally {
+            if (!started) {
+                directory.close();
+            }
+        }
     }
 
     private static List<RiskScorer> withWatchlist(SimOrganisation org) {
@@ -405,6 +438,7 @@ public final class LabWorld implements AutoCloseable {
                 Instant at = switch (o) {
                     case SimOrganisation.Step s -> s.at();
                     case SimTelemetry.Item i -> i.at();
+                    case SensorStop s -> s.at();
                     default -> throw new IllegalArgumentException("not a scripted item");
                 };
                 if (at.isBefore(now)) {
@@ -423,6 +457,26 @@ public final class LabWorld implements AutoCloseable {
             script.addAll(tail);
             flushed = false;
             return add.size();
+        }
+    }
+
+    /**
+     * Starts the sensors' heartbeats, from now to the end of the script. Called once the warm-up is over: the rounds are
+     * for the live lab, and thousands of them in a warm-up would only slow the start and fill the trail.
+     */
+    public void startHeartbeats() {
+        synchronized (lock) {
+            if (heartbeats) {
+                return;
+            }
+            heartbeats = true;
+            List<Timed> tail = new ArrayList<>(script.subList(next, script.size()));
+            for (Instant at = org.clock.instant().plus(HEARTBEAT); at.isBefore(scriptEnd); at = at.plus(HEARTBEAT)) {
+                tail.add(new Timed(at, new HeartbeatRound()));
+            }
+            tail.sort(Comparator.comparing(Timed::at));
+            script.subList(next, script.size()).clear();
+            script.addAll(tail);
         }
     }
 
@@ -447,21 +501,35 @@ public final class LabWorld implements AutoCloseable {
             }
             case SimTelemetry.EndpointBatch b -> {
                 org.clock.set(t.at());
-                endpoint.offer(renumbered(b), b.at());
+                if (!stoppedSensors.contains(b.deviceId())) {
+                    endpoint.offer(renumbered(b.deviceId(), b.keyId(), b.at(), b.body()), b.at());
+                    pump(t.at());
+                }
+            }
+            case SensorStop s -> stoppedSensors.add(s.deviceId());
+            case HeartbeatRound r -> {
+                org.clock.set(t.at());
+                for (SimOrganisation.User u : org.users) {
+                    if (!stoppedSensors.contains(u.laptop())) {
+                        String body = "{\"ts\":\"" + t.at() + "\",\"device\":\"" + u.laptop()
+                                + "\",\"type\":\"sensor.heartbeat\"}\n";
+                        endpoint.offer(renumbered(u.laptop(), "agent-" + u.laptop(), t.at(), body), t.at());
+                    }
+                }
                 pump(t.at());
             }
             default -> throw new IllegalStateException("unknown script item");
         }
     }
 
-    /** The batch with the next number for its device, signed by that device's agent key (see {@link #inject}). */
-    private EndpointCollector.Batch renumbered(SimTelemetry.EndpointBatch b) {
-        SimOrganisation.User u = org.users.stream().filter(x -> x.laptop().equals(b.deviceId())).findFirst()
+    /** A batch with the next number for its device, signed by that device's agent key (see {@link #inject}). */
+    private EndpointCollector.Batch renumbered(String deviceId, String keyId, Instant at, String body) {
+        SimOrganisation.User u = org.users.stream().filter(x -> x.laptop().equals(deviceId)).findFirst()
                 .orElseThrow(() -> new IllegalStateException("endpoint batch for an unknown device"));
-        long number = batchNumbers.merge(b.deviceId(), 1L, Long::sum);
-        byte[] msg = dev.dwarpal.crypto.SignedMessages.endpointTelemetry(b.deviceId(), number, b.at(),
-                dev.dwarpal.crypto.Digests.sha256Hex(b.body()));
-        return new EndpointCollector.Batch(b.deviceId(), b.keyId(), number, b.at(), b.body(),
+        long number = batchNumbers.merge(deviceId, 1L, Long::sum);
+        byte[] msg = dev.dwarpal.crypto.SignedMessages.endpointTelemetry(deviceId, number, at,
+                dev.dwarpal.crypto.Digests.sha256Hex(body));
+        return new EndpointCollector.Batch(deviceId, keyId, number, at, body,
                 dev.dwarpal.crypto.Ed25519.sign(u.laptopKey().getPrivate(), msg));
     }
 
@@ -561,7 +629,12 @@ public final class LabWorld implements AutoCloseable {
      * Hold it in the console process only.
      */
     public Delegation.Issuer delegationIssuer() {
-        return new Delegation.Issuer(org.consoleKey.getPrivate(), SimOrganisation.CONSOLE_KEY_ID, org.clock);
+        return new Delegation.Issuer(org.consoleKey.getPrivate(), SimOrganisation.CONSOLE_KEY_ID, delegationClock);
+    }
+
+    /** The clock of the console's assertions to the SOC API. */
+    public Clock delegationClock() {
+        return delegationClock;
     }
 
     /** The https address of the SOC API. */
@@ -571,6 +644,10 @@ public final class LabWorld implements AutoCloseable {
 
     @Override
     public void close() {
-        socApi.close();
+        try {
+            socApi.close();
+        } finally {
+            directory.close();
+        }
     }
 }

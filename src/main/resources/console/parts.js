@@ -6,7 +6,7 @@ import {PRIORITY} from './format.js';
 
 export function priority(p) {
   const info = PRIORITY[p] || {label: String(p), glyph: '?'};
-  return h('span', {class: 'pri pri-' + String(p).toLowerCase(), title: info.label}, info.glyph + ' ' + info.label);
+  return h('span', {class: 'pri pri-' + String(p).toLowerCase()}, info.glyph + ' ' + info.label);
 }
 
 export function flag(text, kind) {

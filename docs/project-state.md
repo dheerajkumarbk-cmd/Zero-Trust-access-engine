@@ -8,7 +8,7 @@
 | Platform | Java 25 LTS (Temurin 25.0.5), Maven 3.9, no Docker, runs on an 8 GB laptop |
 | Size | 318 main classes (43,688 lines), 163 test files (31,043 lines), 1174 tests |
 | Layers complete | Layer 1 (core decision engine), Layer 2 (behavioural risk scorers), Layer 3 (Policy Administrator: A sessions, B privileged access), Layer 4 (enforcement points: engine API, ZTNA gateway, web gateway, SaaS data guard), Layer 5 (SOC loop: first round, encrypted audit store and detection, case and response loop, analytics; second round, the SOC platform: SIEM platform, UEBA and prioritisation, SOAR with device isolation, SOC API) |
-| Next | Hybrid post-quantum signatures after the submission; persistence of lab state, sensor heartbeats, container file and a static replay site (see the Layer 6 report, section 7) |
+| Next | Hybrid post-quantum signatures after the submission; persistence of lab state, container file and a static replay site (see the Layer 6 report, section 7) |
 
 The name: a *dvārapāla* (Sanskrit, "door guardian") is the guardian figure at a temple gate who
 decides who may pass. Dwarpal does the same for every access request.

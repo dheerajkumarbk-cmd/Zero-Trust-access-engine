@@ -25,6 +25,7 @@ import java.util.stream.Collectors;
  *
  * <pre>
  *   ConsoleMain [--dir lab] [--seed 7] [--users 60] [--speed 60] [--warmup-days 3] [--port 8443] [--soc-port 0]
+ *               [--rotate-days 7]
  * </pre>
  * {@code --port} is the console's (the page you open); {@code --soc-port} is the SOC API's, which only the console
  * server calls (0 picks a free port).
@@ -43,6 +44,7 @@ public final class ConsoleMain {
         System.setProperty("sun.net.httpserver.maxReqTime", "30");
         int consolePort = 8443;
         int socPort = 0;
+        int rotateDays = 7;
         LabConfig config = LabConfig.defaults(Path.of("lab"));
         for (int i = 0; i < args.length; i += 2) {
             if (i + 1 >= args.length) {
@@ -59,6 +61,7 @@ public final class ConsoleMain {
                 case "--warmup-days" -> config = config.withWarmupDays(Integer.parseInt(v));
                 case "--port" -> consolePort = Integer.parseInt(v);
                 case "--soc-port" -> socPort = Integer.parseInt(v);
+                case "--rotate-days" -> rotateDays = Integer.parseInt(v);
                 default -> throw new IllegalArgumentException("unknown option " + args[i]);
             }
         }
@@ -88,9 +91,11 @@ public final class ConsoleMain {
             SocChannel channel = new DelegatedSocChannel(pki, () -> lab.world().socApiUrl(),
                     () -> lab.world().delegationIssuer(), analysts, Duration.ofSeconds(10));
             ConsoleAuth auth = new ConsoleAuth(people, Clock.systemUTC(), settings.passwordIterations(),
-                    settings.pinIterations());
+                    settings.pinIterations(), config.dir().resolve("console").resolve("credentials.txt"),
+                    Duration.ofDays(rotateDays));
             ConsoleServer.Builder b = ConsoleServer.builder(lab, channel, new LabVerdictSigner(lab), auth, tls)
                     .settings(settings)
+                    .passkeyLock(Duration.ofMinutes(5))
                     .address(new InetSocketAddress(InetAddress.getLoopbackAddress(), consolePort));
             b.module(new dev.dwarpal.console.lab.LabModule(session));
             b.module(new dev.dwarpal.console.lab.GuideModule());
@@ -103,7 +108,9 @@ public final class ConsoleMain {
                 out.println("Demo logins (password and security-key PIN), kept in "
                         + config.dir().resolve("console").resolve("people.txt").toAbsolutePath() + ":");
                 for (ConsoleAuth.Enrolment e : people) {
-                    out.println("  " + e.person().id() + "  " + e.person().roles() + "  password " + e.password() + "  PIN "
+                    out.println(auth.hasOwnSecrets(e.person().id())
+                            ? "  " + e.person().id() + "  " + e.person().roles() + "  has chosen their own password and PIN"
+                            : "  " + e.person().id() + "  " + e.person().roles() + "  password " + e.password() + "  PIN "
                             + e.pin());
                 }
                 out.println("Scenario speed " + config.speed() + "x. Stop with Ctrl+C.");

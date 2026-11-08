@@ -1,6 +1,6 @@
 // Response: isolated devices and their acknowledgements, and what the playbooks have held back.
 import {api} from '../api.js';
-import {h, fill, link, panel, note} from '../dom.js';
+import {h, fill, link, cream, spot, note} from '../dom.js';
 import {DwView} from '../view.js';
 import {table} from '../table.js';
 import {flag} from '../parts.js';
@@ -25,13 +25,20 @@ class DwResponse extends DwView {
       {head: 'Cases', cell: (i) => h('span', null, i.cases.flatMap((c, k) => [k ? ', ' : null, link('#/case/' + encodeURIComponent(c), c)]))},
     ], iso.isolations, {onOpen: (i) => this.shell.navigate('#/entity/device/' + encodeURIComponent(i.device))});
     fill(this, this.title('Response'),
+      cream('How to respond', h('ol', {class: 'steps'},
+        h('li', null, 'Open the ', link('#/queue', 'Alert queue'), ' and open a case.'),
+        h('li', null, 'Under Alerts and evidence, read Why this rank and check the evidence links.'),
+        h('li', null, 'Under Decide, choose True positive, False positive or Benign, then sign it. You cannot decide a case about yourself.'),
+        h('li', null, 'A true positive on an alert marked "the SOC may act on this" starts its playbook, which may isolate the device. Some actions wait for a second analyst.'),
+        h('li', null, 'Come back here to watch the isolation and the sensor\'s acknowledgement.')),
+        note('Alerts backed only by collected evidence never trigger a destructive action: the decision and any action stay with you.')),
       h('div', {class: 'cards'},
         card(metrics.isolation.isolated, 'devices isolated'), card(metrics.isolation.overdue, 'acknowledgements overdue'),
         card(r.awaitingSecondAnalyst, 'verdicts awaiting a second analyst'), card(r.heldBack, 'actions held back by guard rails'),
         card(r.refusedVerdicts, 'verdicts refused'), card(r.notifyFailures, 'notification failures')),
-      panel('Isolations', iso.isolations.length ? t.el : h('p', {class: 'empty'}, 'No isolation involves a case you may see.'),
-        note('An isolation is only done on a signed verdict and takes effect when the device\'s sensor acknowledges it with its own signature; unacknowledged commands are sent again.')),
-      panel('Playbooks', h('p', null, 'Version ', h('code', null, r.playbookVersion), ' (sequence ' + r.playbookSequence + '). Whether the playbooks ran in watch-only or full mode is reported with each verdict, on the case page.')));
+      spot('isolations', cream('Isolations', iso.isolations.length ? t.el : h('p', {class: 'empty'}, 'No isolation involves a case you may see.'),
+        note('An isolation is only done on a signed verdict and takes effect when the device\'s sensor acknowledges it with its own signature; unacknowledged commands are sent again.'))),
+      cream('Playbooks', h('p', null, 'Version ', h('code', null, r.playbookVersion), ' (sequence ' + r.playbookSequence + '). Whether the playbooks ran in watch-only or full mode is reported with each verdict, on the case page.')));
   }
 }
 

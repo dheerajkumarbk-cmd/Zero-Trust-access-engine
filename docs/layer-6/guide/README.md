@@ -18,3 +18,4 @@ Launch a scenario in the console under Lab, Scenarios, then follow its path.
 | [L5](L5.md) | Quarter-end download (harmless) |
 | [L6](L6.md) | Administrator's signed PowerShell (harmless) |
 | [QUIET](QUIET.md) | quiet day |
+| [A10](A10.md) | Endpoint sensor switched off |

@@ -106,7 +106,16 @@ public final class ScenarioCatalog {
                             + "download a little (six hours of scenario time).",
                     "No incident: at most a few P3 or P4 notes about activity outside a person's usual hours. This is "
                             + "what normal looks like, so the others stand out.",
-                    360, List.of(), "P3", List.of(), Cast.NOBODY, Plans::quiet));
+                    360, List.of(), "P3", List.of(), Cast.NOBODY, Plans::quiet),
+            def("A10", Scenario.Kind.ATTACK, "Endpoint sensor switched off", List.of("T1562 Impair Defenses"),
+                    "An attacker who already controls the laptop stops its security sensor, so that nothing it does "
+                            + "next is recorded.",
+                    "No login and no file activity gives this away. Every sensor sends a signed heartbeat. After 30 "
+                            + "minutes of silence, plus the two hours the SOC allows for late events, it raises "
+                            + "'sensor-heartbeat-missing' for this laptop. Silence "
+                            + "proves nothing by itself, so a human checks the laptop.",
+                    160, List.of(), "P4", List.of(new Scenario.Expect("sensor-heartbeat-missing", "P4", false, "D")),
+                    Cast.ANYONE, Plans::a10));
 
     private ScenarioCatalog() {
     }

@@ -5,6 +5,7 @@ import {DwView} from '../view.js';
 import {table} from '../table.js';
 import {priority, flag, entityLink, evidence, provenance} from '../parts.js';
 import {when, ago, num, whenSec} from '../format.js';
+import {toast} from '../toast.js';
 
 const KINDS = ['subject', 'device', 'ip', 'session', 'resource'];
 
@@ -17,11 +18,16 @@ class DwEntity extends DwView {
 
   lookup(kind, id) {
     const k = h('select', {id: 'ek', 'aria-label': 'Kind'}, KINDS.map((x) => h('option', {value: x, selected: x === kind}, x)));
-    const i = h('input', {type: 'text', id: 'ei', value: id || '', placeholder: 'id, e.g. u-014 or laptop-14', 'aria-label': 'Identifier', spellcheck: false});
+    const i = h('input', {type: 'text', id: 'ei', value: id || '', placeholder: 'id, for example u14 or laptop-u14', 'aria-label': 'Identifier', spellcheck: false});
     const form = h('form', {method: 'dialog'}, h('div', {class: 'row'}, k, h('div', {class: 'grow'}, i), h('button', {type: 'submit', class: 'primary'}, 'Look up')));
     form.addEventListener('submit', (e) => {
       e.preventDefault();
-      if (i.value.trim()) this.shell.navigate('#/entity/' + encodeURIComponent(k.value) + '/' + encodeURIComponent(i.value.trim()));
+      if (!i.value.trim()) {
+        toast('Type an id to look up.', 'bad');
+        return;
+      }
+      toast('Showing ' + k.value + ' ' + i.value.trim() + '.');
+      this.shell.navigate('#/entity/' + encodeURIComponent(k.value) + '/' + encodeURIComponent(i.value.trim()));
     });
     return form;
   }

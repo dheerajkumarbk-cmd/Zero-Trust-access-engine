@@ -98,7 +98,7 @@ class LabModuleTest {
     @Order(4)
     void scenariosAndStatusAreReadable() {
         JsonValue.JObject s = json(routes.call("GET", "scenarios", ANALYST, ""));
-        assertTrue(s.get("scenarios").orElseThrow() instanceof JsonValue.JArray a && a.size() == 12);
+        assertTrue(s.get("scenarios").orElseThrow() instanceof JsonValue.JArray a && a.size() == 13);
         JsonValue.JObject st = json(routes.call("GET", "status", ANALYST, ""));
         assertEquals("PAUSED", text(st.get("state").orElseThrow()));
         assertTrue(st.get("openByPriority").isPresent());

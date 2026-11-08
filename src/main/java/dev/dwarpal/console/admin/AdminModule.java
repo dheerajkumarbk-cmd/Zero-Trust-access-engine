@@ -138,8 +138,8 @@ public final class AdminModule implements ConsoleModule {
     private Response myDecisions(Request r, List<String> p) {
         List<Decisions.Explanation> mine = Decisions.about(rows(), r.who().id(), 20).stream()
                 .map(Decisions::explain).toList();
-        return ModuleKit.json(Map.of("decisions", mine, "note", "Only your own requests are shown. For your safety "
-                + "the reasons behind a decision are not shown here; an administrator can look them up from the reference."));
+        return ModuleKit.json(Map.of("decisions", mine, "note", "Only your own requests are shown, each with its "
+                + "reason in plain words. The checks behind a reason stay private; an administrator can look them up from the reference."));
     }
 
     private Response myDecision(Request r, List<String> p) {

@@ -165,7 +165,18 @@ public final class Walkthroughs {
                             "Open the Overview: sources healthy, no breached SLA from this run."),
                     List.of(),
                     List.of("A normal day's volume and its baseline noise: analysts learn what quiet looks like before judging what is loud."),
-                    List.of("Even a quiet day produces low-priority notes; priorities exist to keep them out of the way.")));
+                    List.of("Even a quiet day produces low-priority notes; priorities exist to keep them out of the way.")),
+            new Walkthrough("A10", "A10 Endpoint sensor switched off",
+                    "Nothing happens, and that is the finding: a laptop's signed heartbeat stops.",
+                    List.of(START,
+                            "Fast-forward three hours: the SOC waits two hours for late events before it calls a sensor silent.",
+                            "Open the Alert queue and filter by the laptop. Find 'sensor-heartbeat-missing' and open the case.",
+                            "Open Hunt: dataset = endpoint and action = sensor.heartbeat and device = <laptop>. The last heartbeat is when the sensor stopped.",
+                            "Decide as an analyst: a laptop that is simply off looks the same, so check it before calling this an attack."),
+                    List.of("T1562 Impair Defenses (defense evasion)"),
+                    List.of("Endpoint products (for example Microsoft Defender for Endpoint or CrowdStrike Falcon) report sensors that stopped checking in, and most offer tamper protection to stop this happening."),
+                    List.of("A missing signal can be a finding: the rule fires on what did not arrive.",
+                            "The alert fires once for each silence, and again only if the laptop comes back and then goes quiet.")));
 
     private Walkthroughs() {
     }

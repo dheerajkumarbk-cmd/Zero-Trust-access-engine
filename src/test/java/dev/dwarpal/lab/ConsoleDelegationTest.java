@@ -113,22 +113,29 @@ class ConsoleDelegationTest {
     }
 
     @Test
+    void scenarioTimeRushingAheadDoesNotExpireACallOnItsWay() throws Exception {
+        String sent = issuer.header("ana", "GET", "/v1/queue", null);
+        w.advanceTo(w.now().plusSeconds(Delegation.MAX_LIFETIME_SECONDS + 130));
+        assertEquals(200, send(console, "GET", "/v1/queue", null, sent).statusCode(), "a busy lab must not refuse the analyst");
+    }
+
+    @Test
     void anAssertionLapsesAndAForgedOneIsRefused() throws Exception {
-        String old = issuer.header("ana", "GET", "/v1/queue", null);
-        Instant before = w.now();
-        w.advanceTo(before.plusSeconds(Delegation.MAX_LIFETIME_SECONDS + 130));
+        Instant longAgo = w.delegationClock().instant().minusSeconds(Delegation.MAX_LIFETIME_SECONDS + 130);
+        String old = new Delegation.Issuer(w.org.consoleKey.getPrivate(), SimOrganisation.CONSOLE_KEY_ID,
+                Clock.fixed(longAgo, ZoneOffset.UTC)).header("ana", "GET", "/v1/queue", null);
         assertEquals(403, send(console, "GET", "/v1/queue", null, old).statusCode(), "expired");
 
         // signed with a key the ring does not trust for delegation
         KeyPair rogue = Ed25519.generateKeyPair();
-        Delegation.Issuer forged = new Delegation.Issuer(rogue.getPrivate(), SimOrganisation.CONSOLE_KEY_ID, w.org.clock);
+        Delegation.Issuer forged = new Delegation.Issuer(rogue.getPrivate(), SimOrganisation.CONSOLE_KEY_ID, w.delegationClock());
         assertEquals(403, send(console, "GET", "/v1/queue", null, forged.header("ana", "GET", "/v1/queue", null))
                 .statusCode(), "right key id, wrong key");
-        Delegation.Issuer unknown = new Delegation.Issuer(rogue.getPrivate(), "somebody", w.org.clock);
+        Delegation.Issuer unknown = new Delegation.Issuer(rogue.getPrivate(), "somebody", w.delegationClock());
         assertEquals(403, send(console, "GET", "/v1/queue", null, unknown.header("ana", "GET", "/v1/queue", null))
                 .statusCode(), "unknown key id");
         // an analyst's own signing key is not a delegation key
-        Delegation.Issuer asAnalyst = new Delegation.Issuer(w.org.consoleKey.getPrivate(), "soc-ana", w.org.clock);
+        Delegation.Issuer asAnalyst = new Delegation.Issuer(w.org.consoleKey.getPrivate(), "soc-ana", w.delegationClock());
         assertEquals(403, send(console, "GET", "/v1/queue", null, asAnalyst.header("ana", "GET", "/v1/queue", null))
                 .statusCode(), "key of another purpose");
     }

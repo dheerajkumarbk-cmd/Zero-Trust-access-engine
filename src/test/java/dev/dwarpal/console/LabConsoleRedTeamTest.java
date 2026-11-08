@@ -158,10 +158,21 @@ class LabConsoleRedTeamTest {
         assertRefused(send("POST", "/console/api/lab/launch/anything", dana, base, true, "{}"), "an administrator launches no attacks");
     }
 
+    /** Confidential views need the person's own passkey on the real launcher. */
+    private static void openConfidential(Session s, String id) throws Exception {
+        String[] who = people.get(id);
+        HttpResponse<String> r = send("POST", "/console/api/profile/passkey", s, base, true,
+                "{\"password\":\"" + who[0] + "\",\"pin\":\"" + who[1] + "\",\"passkey\":\"red-team-passkey\"}");
+        assertEquals(200, r.statusCode(), r.body());
+        r = send("POST", "/console/api/session/unlock", s, base, true, "{\"passkey\":\"red-team-passkey\"}");
+        assertEquals(200, r.statusCode(), r.body());
+    }
+
     @Test
     @Order(5)
     void theRunExportCarriesNoKeyPasswordOrCertificate() throws Exception {
         Session cleo = login("cleo");
+        openConfidential(cleo, "cleo");
         HttpResponse<String> export = send("GET", "/console/api/lab/export", cleo, null, false, null);
         assertEquals(200, export.statusCode(), export.body().substring(0, Math.min(200, export.body().length())));
         String body = export.body();
@@ -214,6 +225,7 @@ class LabConsoleRedTeamTest {
     void whatTheConsoleDidIsOnTheTrailUnderTheNamesOfThePeopleWhoDidIt() throws Exception {
         // the reset gave the lab a new chain; a login now is the first thing on it that a person did
         Session ana = login("ana");
+        openConfidential(ana, "ana");
         HttpResponse<String> head = send("GET", "/console/api/audit/head", ana, null, false, null);
         Matcher h = Pattern.compile("\"head\"[ ]*:[ ]*([0-9]+)").matcher(head.body());
         assertTrue(h.find(), head.body());

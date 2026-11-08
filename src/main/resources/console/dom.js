@@ -55,8 +55,25 @@ export function panel(title, ...kids) {
   return h('section', {class: 'panel'}, title ? h('h2', null, title) : null, ...kids);
 }
 
+/** Names a box, so that a link ending in ?at=name can scroll to it and make it flash. */
+export function spot(name, el) {
+  el.setAttribute('data-spot', name);
+  return el;
+}
+
+/** A panel on warm paper instead of the green ground. */
+export function cream(title, ...kids) {
+  const el = panel(title, ...kids);
+  el.classList.add('cream');
+  return el;
+}
+
 /** What a failed load looks like: it says "unavailable", never an empty list that could pass for "nothing wrong". */
 export function unavailable(err) {
+  if (err && err.status === 423) {
+    return h('div', {class: 'locked'}, h('strong', null, 'Locked. '), 'This is confidential. Enter your passkey to open it.',
+      h('div', null, h('button', {type: 'button', on: {click: () => window.dispatchEvent(new CustomEvent('dw:unlock'))}}, 'Enter passkey')));
+  }
   const msg = err && err.message ? err.message : 'unknown error';
   return h('div', {class: 'unavailable', role: 'alert'}, h('strong', null, 'Unavailable. '),
     'This data could not be loaded (', msg, '). Do not read an empty page as "nothing is wrong".');

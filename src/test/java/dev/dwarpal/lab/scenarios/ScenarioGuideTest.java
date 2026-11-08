@@ -34,8 +34,9 @@ class ScenarioGuideTest {
         dir = Files.createTempDirectory("dwarpal-guide-test");
         world = LabWorld.create(LabConfig.defaults(dir).withPort(0));
         world.warmUp(3);
+        world.startHeartbeats();
         long[] wall = {0};
-        ScenarioRunner runner = new ScenarioRunner(() -> wall[0] += 10_000);
+        ScenarioRunner runner = new ScenarioRunner(() -> wall[0] += 30_000);
         for (Scenario s : ScenarioCatalog.all()) {
             ScenarioRunner.Launch l = runner.launch(world, s.id(), "tester", true);
             world.advanceTo(l.endsAt().plus(Duration.ofHours(3)));

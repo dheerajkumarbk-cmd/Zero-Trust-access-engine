@@ -147,7 +147,7 @@ public final class SocReport {
     public String text() {
         String nl = System.lineSeparator();
         StringBuilder b = new StringBuilder();
-        b.append("Data: ").append(source.statement()).append(nl);
+        b.append(source.statement()).append(nl);
         b.append("Dwarpal daily SOC report for ").append(day).append(" (UTC)").append(nl).append(nl);
         b.append("Alerts by priority:");
         for (Priority p : Priority.values()) {

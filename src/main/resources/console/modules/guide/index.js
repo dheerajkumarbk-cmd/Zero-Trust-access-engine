@@ -28,10 +28,10 @@ function view(root, shell) {
       body.append(el('h2', {}, w.title), el('p', {}, w.summary),
         el('h3', {}, 'What the attacker does'), el('p', {}, s.attacker),
         el('h3', {}, 'What the defender should see'), el('p', {}, s.defender),
-        section('Your path through the console', w.steps, true),
-        section('MITRE ATT&CK', w.mitre, false),
-        section('In a commercial product', w.commercial, false),
-        section('What to notice', w.notice, false));
+        ...[section('Your path through the console', w.steps, true),
+          section('MITRE ATT&CK', w.mitre, false),
+          section('In a commercial product', w.commercial, false),
+          section('What to notice', w.notice, false)].flat().filter(Boolean));
     } catch (e) {
       fail(e);
     }

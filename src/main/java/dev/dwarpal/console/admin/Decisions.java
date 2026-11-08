@@ -16,10 +16,11 @@ import java.util.Optional;
  * Reads the engine's {@code ACCESS_DECISION} records from the audit chain and explains them, once for the person who
  * was decided about and once for an administrator.
  *
- * <p>The person's view is the engine's own rule: {@code Decision.userMessage()} says nothing about which signal fired,
- * because "denied: new country" teaches an attacker which VPN exit to choose. So this page gives the outcome, the
- * reference, the time, the resource and what to do next, and nothing else: no policy name, no score, no factor, no
- * threshold, no address, no other person's data. The administrator's view has the record's full reasoning.
+ * <p>The person's view gives the outcome, a reason in plain words, the reference, the time, the resource and what to do
+ * next. A person is owed the reason; an attacker must not learn the method. So the reason says what kind of thing stopped
+ * the request, and never which signal fired: "denied: new country" would teach an attacker which VPN exit to choose. There
+ * is no policy name, score, factor, threshold, address or other person's data here. The administrator's view has the
+ * record's full reasoning.
  */
 final class Decisions {
 
@@ -33,8 +34,8 @@ final class Decisions {
     }
 
     /** What the person who was decided about may see. */
-    record Explanation(String reference, Instant at, String outcome, String message, String resource, String action,
-                       List<String> whatToDo) {
+    record Explanation(String reference, Instant at, String outcome, String message, String reason, String resource,
+                       String action, List<String> whatToDo) {
     }
 
     private Decisions() {
@@ -122,6 +123,32 @@ final class Decisions {
         };
     }
 
+    /** Why, as the person sees it: the kind of thing that decided this, never which check or signal. */
+    static String reason(Row r) {
+        String policy = r.policy();
+        return switch (shown(r)) {
+            case "ALLOW" -> "Your role allows this.";
+            case "ALLOW_LIMITED" -> "You can use this with limits, because of the device you used.";
+            case "STEP_UP" -> "This needs you to confirm who you are before it goes ahead.";
+            default -> {
+                if (policy.equals("default")) {
+                    yield "Your role does not give you access to this.";
+                } else if (policy.equals("unknown-subject")) {
+                    yield "Your account was not found in the company directory.";
+                } else if (policy.equals("unknown-resource")) {
+                    yield "This is not something the company lists for access.";
+                } else if (policy.startsWith("P-03")) {
+                    yield "This needs a healthy company device, and yours could not be confirmed.";
+                } else if (policy.startsWith("hard-gate:")) {
+                    yield "Access from this account or device is blocked for now.";
+                } else if (policy.equals("fail-closed") || policy.equals("engine-error") || policy.equals("audit-failure")) {
+                    yield "A safety check could not run, so the request was refused. This is not your fault.";
+                }
+                yield "This request did not look like your usual activity, so it was stopped as a precaution.";
+            }
+        };
+    }
+
     static Explanation explain(Row r) {
         List<String> todo = switch (shown(r)) {
             case "ALLOW" -> List.of("Nothing: this request was allowed.");
@@ -131,6 +158,6 @@ final class Decisions {
             default -> List.of("Contact your administrator and quote the reference.",
                     "Please do not keep trying: repeated attempts can lock the account.");
         };
-        return new Explanation(r.requestId(), r.at(), shown(r), message(r), r.resource(), r.action(), todo);
+        return new Explanation(r.requestId(), r.at(), shown(r), message(r), reason(r), r.resource(), r.action(), todo);
     }
 }

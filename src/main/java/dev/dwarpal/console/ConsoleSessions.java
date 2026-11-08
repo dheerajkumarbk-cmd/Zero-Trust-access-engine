@@ -35,6 +35,7 @@ final class ConsoleSessions {
         final String agent;
         volatile Instant lastSeen;
         volatile Instant stepUpAt;
+        volatile Instant unlockedUntil;
 
         Session(String id, long order, ConsoleAuth.Person person, String csrf, Instant createdAt, String source,
                 String agent, Instant stepUpAt) {
@@ -126,8 +127,24 @@ final class ConsoleSessions {
         Instant now = clock.instant();
         Session s = new Session(token(), old.order, old.person, token(), old.createdAt, old.source, old.agent, now);
         s.lastSeen = now;
+        s.unlockedUntil = old.unlockedUntil;
         sessions.put(s.id, s);
         return Optional.of(s);
+    }
+
+    /** Confidential views stay open for this long after the passkey, and each use of them extends it. */
+    void unlock(Session s, java.time.Duration window) {
+        s.unlockedUntil = clock.instant().plus(window);
+    }
+
+    /** Closes confidential views at once: the next one needs the passkey again. */
+    void lock(Session s) {
+        s.unlockedUntil = null;
+    }
+
+    boolean unlocked(Session s) {
+        Instant t = s.unlockedUntil;
+        return t != null && clock.instant().isBefore(t);
     }
 
     boolean stepUpFresh(Session s) {

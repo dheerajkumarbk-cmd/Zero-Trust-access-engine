@@ -9,9 +9,9 @@ import {getPref, setPref} from '../prefs.js';
 
 const WINDOWS = [['1 hour', 3600], ['6 hours', 6 * 3600], ['24 hours', 86400], ['3 days', 3 * 86400], ['7 days', 7 * 86400], ['31 days', 31 * 86400]];
 const EXAMPLES = [
-  ['Firewall denials', 'dataset = firewall and outcome = FAILURE'],
+  ['Firewall denials', 'dataset = firewall and action = network.flow and outcome = FAILURE'],
   ['Everything from one address', 'ip = 185.220.101.4'],
-  ['Failed logins by user', 'action ~ login and outcome = FAILURE | count by subject'],
+  ['Refused access by user', 'action = access.decision and outcome = FAILURE | count by subject'],
   ['Events by dataset', '* | count by dataset'],
   ['Endpoint events on a device', 'dataset = endpoint and device = laptop-1'],
   ['Outcomes by action', 'dataset = firewall | count by action, outcome'],

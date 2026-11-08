@@ -169,6 +169,15 @@ final class ConsoleFixture implements AutoCloseable {
         return raw("GET", path, h, null);
     }
 
+    /** What an open page sends when it refreshes itself, as opposed to something the person did. */
+    Resp backgroundGet(String path, Sess s) throws IOException, InterruptedException {
+        Map<String, String> h = new LinkedHashMap<>();
+        h.put("User-Agent", UA);
+        h.put("Cookie", ConsoleServer.COOKIE + "=" + s.cookie());
+        h.put(ConsoleServer.BACKGROUND_HEADER, "1");
+        return raw("GET", path, h, null);
+    }
+
     /** A well-formed write: cookie, anti-forgery token, own Origin, JSON. */
     Resp post(String path, Sess s, String body) throws IOException, InterruptedException {
         Map<String, String> h = new LinkedHashMap<>();

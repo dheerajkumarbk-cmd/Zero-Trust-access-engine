@@ -28,7 +28,12 @@ final class ConsoleRoutes {
     static final List<String[]> BUILT_IN = List.of(
             new String[]{"overview", "Overview"}, new String[]{"queue", "Alert queue"}, new String[]{"cases", "Cases"},
             new String[]{"hunt", "Hunt"}, new String[]{"entity", "Entity"}, new String[]{"response", "Response"},
-            new String[]{"audit", "Audit explorer"}, new String[]{"attack", "ATT&CK"});
+            new String[]{"audit", "Audit explorer"}, new String[]{"attack", "ATT&CK"},
+            new String[]{"scans", "Scans"});
+
+    /** Views of confidential data: with a passkey lock on the server, these answer only after the person's passkey. */
+    static final Set<String> CONFIDENTIAL = Set.of("soc/cases/{}", "soc/cases/{}/timeline", "soc/risk/{}/{}", "soc/search",
+            "soc/reports/{}", "audit/records", "audit/records/{}", "lab/export");
 
     private static final int MAX_NOTE = 2_000;
     private static final Set<Integer> PASS = Set.of(200, 400, 403, 404, 409, 429, 503);
@@ -42,10 +47,21 @@ final class ConsoleRoutes {
         s.route("POST", "session/verify", Kind.PUBLIC, null, false, c -> verify(s, c));
         s.route("POST", "session/stepup", Kind.READ, null, false, c -> stepUp(s, c));
         s.route("POST", "session/logout", Kind.READ, null, false, c -> logout(s, c));
+        s.route("POST", "session/recover", Kind.PUBLIC, null, false, c -> recover(s, c));
+        s.route("POST", "session/recover/code", Kind.PUBLIC, null, false, c -> recoverCode(s, c));
+        s.route("POST", "session/unlock", Kind.READ, null, false, c -> unlock(s, c));
+        s.route("POST", "session/lock", Kind.READ, null, false, c -> lock(s, c));
         s.route("GET", "session/list", Kind.READ, null, false, c -> sessionList(s, c));
         s.route("POST", "session/revoke", Kind.READ, null, false, c -> revoke(s, c));
+        // ---- one's own sign-in
+        s.route("GET", "profile", Kind.READ, null, false, c -> profile(s, c));
+        s.route("POST", "profile/password", Kind.WRITE, null, false, c -> changePassword(s, c));
+        s.route("POST", "profile/pin", Kind.WRITE, null, false, c -> changePin(s, c));
+        s.route("POST", "profile/passkey", Kind.WRITE, null, false, c -> setPasskey(s, c));
+        s.route("POST", "profile/backup-codes", Kind.WRITE, null, false, c -> backupCodes(s, c));
         // ---- identity, modules, lab, stream
         s.route("GET", "me", Kind.READ, null, false, c -> me(s, c));
+        s.route("GET", "me/activity", Kind.READ, null, false, c -> activity(s, c));
         s.route("GET", "modules", Kind.READ, null, false, c -> modules(s, c));
         s.route("GET", "lab", Kind.READ, null, false, c -> Reply.rawJson(200, labJson(s, true)));
         s.route("GET", "stream", Kind.READ, null, false, c -> stream(s, c));
@@ -170,6 +186,150 @@ final class ConsoleRoutes {
                 .withCookie(ConsoleServer.sessionCookie(fresh.get().id));
     }
 
+    // ---- one's own sign-in ---------------------------------------------------------------------------------------
+
+    private static Reply profile(ConsoleServer s, Ctx c) {
+        ConsoleAuth.Standing t = s.auth.standing(c.person().id());
+        return Reply.ok(JsonValue.object().put("person", person(c.person()))
+                .put("passwordChanged", t.passwordChanged().toString()).put("pinChanged", t.pinChanged().toString())
+                .put("changeBy", t.changeBy().toString()).put("changeDue", JsonValue.bool(t.due()))
+                .put("rotationDays", JsonValue.num(t.rotationDays())).put("passkeySet", JsonValue.bool(t.passkeySet()))
+                .put("passkeyNeeded", JsonValue.bool(needsPasskey(c.person())))
+                .put("passkeyLock", JsonValue.bool(s.passkeyWindow != null))
+                .put("unlocked", JsonValue.bool(s.sessions.unlocked(c.session)))
+                .put("backupCodesLeft", JsonValue.num(t.backupCodesLeft())).build());
+    }
+
+    private static Reply changed(ConsoleServer s, Ctx c, ConsoleAuth.Changed r, String what, boolean endOthers) {
+        return switch (r.status()) {
+            case OK -> {
+                if (endOthers) {
+                    endSessions(s, c.person().id(), c.session.id);
+                }
+                yield Reply.ok(JsonValue.object().put("ok", JsonValue.bool(true)).build()).audited(what + " changed");
+            }
+            case LOCKED -> locked(r.retryAfterSeconds());
+            case WEAK -> Reply.error(400, "the new value is too short, too simple or the same as the old one").audited("weak " + what);
+            case DENIED -> Reply.error(401, "wrong password or PIN").audited("wrong proof for " + what);
+            case UNAVAILABLE -> Reply.error(503, "unavailable").audited("the credentials file could not be written");
+        };
+    }
+
+    /** A changed secret means any other open session may be the person who stole the old one. */
+    private static void endSessions(ConsoleServer s, String person, String keep) {
+        for (ConsoleSessions.Session x : s.sessions.of(person)) {
+            if (!x.id.equals(keep)) {
+                s.sessions.end(x.id);
+                s.hub.closeSession(x.id);
+            }
+        }
+    }
+
+    private static Reply changePassword(ConsoleServer s, Ctx c) {
+        Ctx.Fields f = c.fields(Set.of("password", "pin", "newPassword"));
+        return changed(s, c, s.auth.changePassword(c.person().id(), f.text("password", 1024), f.text("pin", 64),
+                f.text("newPassword", 1024), c.source), "password", true);
+    }
+
+    private static Reply changePin(ConsoleServer s, Ctx c) {
+        Ctx.Fields f = c.fields(Set.of("password", "pin", "newPin"));
+        return changed(s, c, s.auth.changePin(c.person().id(), f.text("password", 1024), f.text("pin", 64),
+                f.text("newPin", 64), c.source), "PIN", true);
+    }
+
+    /** Only people whose role opens confidential views have anything for a passkey to protect. */
+    private static boolean needsPasskey(ConsoleAuth.Person p) {
+        return ConsoleServer.satisfiesModule(p.roles(), Role.ANALYST);
+    }
+
+    private static Reply setPasskey(ConsoleServer s, Ctx c) {
+        if (!needsPasskey(c.person())) {
+            return Reply.error(403, "your role opens nothing confidential, so it needs no passkey");
+        }
+        Ctx.Fields f = c.fields(Set.of("password", "pin", "passkey"));
+        return changed(s, c, s.auth.setPasskey(c.person().id(), f.text("password", 1024), f.text("pin", 64),
+                f.text("passkey", 1024), c.source), "passkey", false);
+    }
+
+    private static Reply backupCodes(ConsoleServer s, Ctx c) {
+        Ctx.Fields f = c.fields(Set.of("password", "pin"));
+        ConsoleAuth.Changed[] result = new ConsoleAuth.Changed[1];
+        Optional<List<String>> codes = s.auth.newBackupCodes(c.person().id(), f.text("password", 1024), f.text("pin", 64),
+                c.source, result);
+        if (codes.isEmpty()) {
+            return changed(s, c, result[0], "backup codes", false);
+        }
+        List<JsonValue> out = new ArrayList<>();
+        codes.get().forEach(x -> out.add(JsonValue.str(x)));
+        return Reply.ok(JsonValue.object().put("codes", new JsonValue.JArray(out)).build()).audited("new backup codes");
+    }
+
+    private static Reply unlock(ConsoleServer s, Ctx c) {
+        if (s.passkeyWindow == null) {
+            return Reply.error(404, "not found");
+        }
+        ConsoleAuth.Authenticated a = s.auth.unlock(c.person().id(), c.fields(Set.of("passkey")).text("passkey", 1024), c.source);
+        if (a.status() != ConsoleAuth.Status.OK) {
+            s.audit.write("CONSOLE_UNLOCK_FAILED", c.person().id(), ConsoleServer.fields("session", c.session.tag()));
+            return a.status() == ConsoleAuth.Status.LOCKED ? locked(a.retryAfterSeconds()) : Reply.error(401, "wrong passkey");
+        }
+        s.sessions.unlock(c.session, s.passkeyWindow);
+        if (!s.audit.write("CONSOLE_UNLOCK", c.person().id(), ConsoleServer.fields("session", c.session.tag()))) {
+            return Reply.error(503, "audit trail unavailable");
+        }
+        return Reply.ok(JsonValue.object().put("ok", JsonValue.bool(true)).build());
+    }
+
+    /** Closes confidential views now. The page calls this whenever a person leaves one. */
+    private static Reply lock(ConsoleServer s, Ctx c) {
+        if (s.sessions.unlocked(c.session)) {
+            s.sessions.lock(c.session);
+            s.audit.write("CONSOLE_LOCK", c.person().id(), ConsoleServer.fields("session", c.session.tag()));
+        }
+        return Reply.ok(JsonValue.object().put("ok", JsonValue.bool(true)).build());
+    }
+
+    private static Reply recoverCode(ConsoleServer s, Ctx c) {
+        Ctx.Fields f = c.fields(Set.of("user", "code"));
+        String user = f.text("user", 128);
+        ConsoleAuth.Recovering r = s.auth.checkBackupCode(user, f.text("code", 64), c.source);
+        return switch (r.status()) {
+            case OK -> Reply.ok(JsonValue.object().put("ticket", r.ticket())
+                    .put("expiresInSeconds", JsonValue.num(ConsoleAuth.RECOVERY_VALID.toSeconds())).build());
+            case LOCKED -> {
+                loginFailed(s, user, c, "backup code locked");
+                yield locked(r.retryAfterSeconds());
+            }
+            default -> {
+                loginFailed(s, user, c, "wrong backup code");
+                yield Reply.error(401, "recovery failed");
+            }
+        };
+    }
+
+    private static Reply recover(ConsoleServer s, Ctx c) {
+        Ctx.Fields f = c.fields(Set.of("ticket", "newPassword", "newPin"));
+        String ticket = f.text("ticket", 64);
+        Optional<String> who = s.auth.recoveryOf(ticket);
+        ConsoleAuth.Changed r = s.auth.recover(ticket, f.text("newPassword", 1024), f.text("newPin", 64), c.source);
+        switch (r.status()) {
+            case OK -> {
+                endSessions(s, who.orElseThrow(), "");
+                s.audit.write("CONSOLE_RECOVERED", who.orElseThrow(), ConsoleServer.fields("source", c.source));
+                return Reply.ok(JsonValue.object().put("ok", JsonValue.bool(true)).build());
+            }
+            case WEAK -> {
+                return Reply.error(400, "the new password or PIN is too short or too simple");
+            }
+            case UNAVAILABLE -> {
+                return Reply.error(503, "unavailable");
+            }
+            default -> {
+                return Reply.error(401, "recovery failed");
+            }
+        }
+    }
+
     private static Reply logout(ConsoleServer s, Ctx c) {
         s.sessions.end(c.session.id);
         s.hub.closeSession(c.session.id);
@@ -221,13 +381,30 @@ final class ConsoleRoutes {
                 .put("absoluteExpiresAt", s.sessions.absoluteUntil(x).toString())
                 .put("stepUpFresh", JsonValue.bool(s.sessions.stepUpFresh(x)))
                 .put("stepUpUntil", s.sessions.stepUpUntil(x).toString())
+                .put("changeDue", JsonValue.bool(s.auth.changeDue(x.person.id())))
+                .put("passkeySet", JsonValue.bool(s.auth.standing(x.person.id()).passkeySet()))
+                .put("passkeyNeeded", JsonValue.bool(needsPasskey(x.person)))
+                .put("unlocked", JsonValue.bool(s.sessions.unlocked(x)))
                 .put("signing", JsonValue.object().put("notice", s.signer.notice()).build());
         return Reply.ok(b.build());
+    }
+
+    /** Sign-ins and changes to the person's own account, and nobody else's. */
+    private static Reply activity(ConsoleServer s, Ctx c) {
+        List<JsonValue> out = new ArrayList<>();
+        for (ConsoleAudit.Activity a : s.audit.activity(c.person().id())) {
+            out.add(JsonValue.object().put("at", a.at().toString()).put("what", a.what()).build());
+        }
+        return Reply.ok(JsonValue.object().put("activity", new JsonValue.JArray(out)).build());
     }
 
     private static Reply modules(ConsoleServer s, Ctx c) {
         List<JsonValue> out = new ArrayList<>();
         Set<Role> roles = c.person().roles();
+        if (!needsPasskey(c.person())) {
+            out.add(JsonValue.object().put("id", "home").put("title", "Home").put("requires", Role.USER.name())
+                    .put("kind", "builtin").build());
+        }
         if (ConsoleServer.satisfies(roles, Role.ANALYST)) {
             for (String[] m : BUILT_IN) {
                 out.add(JsonValue.object().put("id", m[0]).put("title", m[1]).put("requires", Role.ANALYST.name())

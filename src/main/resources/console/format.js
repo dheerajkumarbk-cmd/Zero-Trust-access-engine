@@ -13,6 +13,9 @@ export function whenSec(iso) {
   return Number.isNaN(d.getTime()) ? String(iso) : d.toISOString().slice(0, 19).replace('T', ' ') + 'Z';
 }
 
+/** A whole count with thousands separated: 3,861. */
+export const count = (n) => Number(n).toLocaleString('en-US', {maximumFractionDigits: 0});
+
 export function span(ms) {
   const neg = ms < 0;
   let s = Math.floor(Math.abs(ms) / 1000);

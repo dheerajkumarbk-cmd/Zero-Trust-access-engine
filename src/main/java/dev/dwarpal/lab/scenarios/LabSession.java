@@ -40,6 +40,7 @@ public final class LabSession implements AutoCloseable {
         LabWorld w = LabWorld.create(config);
         try {
             w.warmUp(config.warmupDays());
+            w.startHeartbeats();
             LabRunner r = new LabRunner(w, config.speed()).start();
             return new LabSession(config, w, r, new ScenarioRunner());
         } catch (RuntimeException | Error e) {
@@ -107,6 +108,7 @@ public final class LabSession implements AutoCloseable {
         world.close();
         LabWorld fresh = LabWorld.create(config);
         fresh.warmUp(config.warmupDays());
+        fresh.startHeartbeats();
         LabRunner r = new LabRunner(fresh, speed).start();
         if (!wasRunning) {
             r.pause();

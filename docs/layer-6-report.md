@@ -104,7 +104,7 @@ Each part ran its own red team and fixed what succeeded (details in `docs/layer-
 
 * The lab starts again from day zero on every restart (certificates, logins and seed are kept). Rebuilding cases,
   risk and isolations from the audit trail touches six components; the run export keeps a run meanwhile.
-* Sensor heartbeats are not simulated, so `sensor-heartbeat-missing` stays silent.
+* Sensor heartbeats run only in the live lab, not during the warm-up. The new scenario A10 switches one sensor off to raise `sensor-heartbeat-missing`.
 * The screens have been run in a simulated page and over HTTPS but not looked at by eye in a real browser by the build
   sessions: layout, themes and shortcuts need one look (runbook: import `lab/pki/ca.pem`).
 * Not built (after the submission, per the plan): the container file, a remote-access recipe for a friend, a static

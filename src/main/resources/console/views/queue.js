@@ -1,6 +1,6 @@
 // The alert queue (open cases ranked P1 to P4) and the case list (all cases). Every row says why it has its rank.
 import {api} from '../api.js';
-import {h, fill, link, panel, note} from '../dom.js';
+import {h, fill, link, panel, spot, note} from '../dom.js';
 import {DwView} from '../view.js';
 import {table} from '../table.js';
 import {priority, flag, entityLink, caseDetail, reasons, pool} from '../parts.js';
@@ -64,9 +64,11 @@ export class DwQueue extends DwView {
     this.tbl = t;
     fill(this,
       this.title(this.all ? 'Cases' : 'Alert queue', h('span', {class: 'muted'}, 'P1 ' + counts.P1 + ' / P2 ' + counts.P2 + ' / P3 ' + counts.P3 + ' / P4 ' + counts.P4)),
+      note(this.all ? 'Every case, open and closed: use this to look back. ' + this.rows.filter((r) => r.state.toLowerCase() !== 'open').length + ' of ' + this.rows.length + ' are no longer open; until a case is closed, this list matches the Alert queue.'
+        : 'The work to do now: open cases only. A closed case leaves this list and stays in Cases.'),
       note('Ranked by priority, then score. Keys: j / k move, Enter opens. Reasons load for the first ' + AUTO_WHY + ' rows and for the row you select (each case read is recorded in the audit trail).'),
       h('div', {class: 'row'}, h('div', {class: 'grow'}, search)),
-      shown.length ? t.el : h('p', {class: 'empty'}, this.rows.length ? 'No case matches the filter.'
+      shown.length ? spot('queue', t.el) : h('p', {class: 'empty'}, this.rows.length ? 'No case matches the filter.'
         : this.all ? 'The SOC API reports no cases you may see.' : 'The SOC API reports an empty queue for you.'));
     this.fillWhy(shown, t);
   }

@@ -778,6 +778,10 @@ public final class SocApiServer implements AutoCloseable {
         ex.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
         ex.getResponseHeaders().set("Cache-Control", "no-store");
         ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        if (a.status() == 413) {
+            // the body was left unread, so this connection cannot carry another request: say so, or the caller reuses it and hangs
+            ex.getResponseHeaders().set("Connection", "close");
+        }
         ex.sendResponseHeaders(a.status(), bytes.length);
         try (OutputStream out = ex.getResponseBody()) {
             out.write(bytes);

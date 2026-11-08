@@ -60,6 +60,10 @@ function view(root, shell) {
     const speed = el('input', { id: 'lab-speed', type: 'number', min: 1, max: 3600, value: 60 });
     const minutes = el('select', { 'aria-label': 'fast-forward' },
       [10, 30, 60, 120, 360].map((m) => el('option', { value: m }, m >= 60 ? m / 60 + ' h' : m + ' min')));
+    const roles = shell.me.person.roles;
+    if (!roles.includes('LEAD') && !roles.includes('ADMIN')) {
+      return el('p', {}, 'The clock runs by itself. Pause, speed and fast-forward are for SOC leads.');
+    }
     return el('div', { class: 'lab-controls' },
       button('Pause', () => act(api.post('control/pause', {}), drawStatus)),
       button('Resume', () => act(api.post('control/resume', {}), drawStatus)),
@@ -78,7 +82,7 @@ function view(root, shell) {
           if (lastLaunch) showReport(lastLaunch);
         });
       }),
-      button('Reset to day zero', async () => {
+      !roles.includes('ADMIN') ? null : button('Reset to day zero', async () => {
         if (!window.confirm('Reset the lab? All cases, risk and launched scenarios are forgotten.')) return;
         const ok = await act(shell.needStepUp());
         if (ok === null) return;
@@ -229,7 +233,7 @@ function view(root, shell) {
 
   // ---- page -------------------------------------------------------------------------------------------
   root.append(el('h2', {}, 'Scenario lab'),
-    el('p', {}, 'Launch an attack on the simulated company, then follow it through the analyst console. Sixty people, all made up.'),
+    el('p', {}, 'Launch an attack on the simulated company, then follow it through the analyst console. Everyone in it is made up.'),
     status, controls(), message,
     el('h3', {}, 'Scenarios'), scenarios, result, journal,
     el('h3', {}, 'Write your own rule or playbook'), sandbox,

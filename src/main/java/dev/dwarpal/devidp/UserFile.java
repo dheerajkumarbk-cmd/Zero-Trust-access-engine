@@ -127,6 +127,32 @@ public final class UserFile {
         }
     }
 
+    /** A salted hash of a new password. The password array is wiped afterwards. */
+    public record Hashed(int iterations, String salt, String hash) {
+    }
+
+    public static Hashed hash(char[] password, int iterations) {
+        try {
+            byte[] salt = new byte[SALT_BYTES];
+            RANDOM.nextBytes(salt);
+            Base64.Encoder b64 = Base64.getEncoder();
+            return new Hashed(iterations, b64.encodeToString(salt), b64.encodeToString(derive(password, salt, iterations)));
+        } finally {
+            Arrays.fill(password, (char) 0);
+        }
+    }
+
+    /** The same file with one person's password replaced. */
+    public UserFile withPassword(String subjectId, Hashed h) {
+        User old = users.get(subjectId);
+        if (old == null) {
+            throw new IllegalArgumentException("unknown user");
+        }
+        Map<String, User> next = new HashMap<>(users);
+        next.put(subjectId, new User(subjectId, h.iterations(), h.salt(), h.hash(), old.credentialId(), old.credentialKey()));
+        return new UserFile(next);
+    }
+
     public Optional<User> user(String subjectId) {
         return Optional.ofNullable(users.get(subjectId));
     }

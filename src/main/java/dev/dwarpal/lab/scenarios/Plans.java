@@ -176,6 +176,12 @@ final class Plans {
         return plan(c, items, List.of(u.laptop()));
     }
 
+    /** A10: the sensor on the person's laptop is switched off, so its heartbeat stops. */
+    static Plan a10(Context c) {
+        String laptop = c.target().laptop();
+        return plan(c, new ArrayList<>(List.of(new LabWorld.SensorStop(laptop, c.start()))), List.of(laptop));
+    }
+
     /** L6: an IT administrator runs the signed backup script, as every working day. */
     static Plan l6(Context c) {
         SimOrganisation.User u = c.target();
@@ -222,7 +228,8 @@ final class Plans {
     private static Plan plan(Context c, List<Object> items, List<String> devices) {
         Instant last = c.start();
         for (Object o : items) {
-            Instant at = o instanceof SimOrganisation.Step s ? s.at() : ((SimTelemetry.Item) o).at();
+            Instant at = o instanceof SimOrganisation.Step s ? s.at() : o instanceof LabWorld.SensorStop x ? x.at()
+                    : ((SimTelemetry.Item) o).at();
             if (at.isAfter(last)) {
                 last = at;
             }

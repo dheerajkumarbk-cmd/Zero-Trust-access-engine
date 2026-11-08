@@ -17,7 +17,7 @@ and the SIEM loop get their own rows when they are built.
 | T7 | Spoofing | Device self-reports healthy posture | `AssuranceLevel` | `selfReportedHealthIsNotEnough...` |
 | T8 | Elevation | Signal outage becomes silent ALLOW | `FailMode` has no fail-open | `unavailableSignalFailsClosed...` |
 | T9 | Elevation | Engine bug / stack overflow yields ALLOW or a crash | Stage errors and `StackOverflowError` -> DENY | `unexpectedEngineError...`, `stackOverflowInACondition...` |
-| T10 | Info disclosure | Reason teaches attacker what to evade | Generic `userMessage()` | `userMessageNeverReveals...` |
+| T10 | Info disclosure | Reason teaches attacker what to evade | Generic `userMessage()`; the console adds only the kind of reason, never the signal or check | `userMessageNeverReveals...` |
 | T11 | Elevation | Reassuring evidence lowers a mandatory control | Monotonic outcome; policy effect is a floor | `reassuringEvidenceCannotLoosen...` |
 | T12 | Tampering | One noisy scorer dominates | Per-factor cap | `oneFactorCannotDominate` |
 | T13 | Tampering | Caller mutates collections after construction | Unmodifiable copies | `ImmutabilityTest` |

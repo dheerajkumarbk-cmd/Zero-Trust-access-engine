@@ -50,6 +50,7 @@ function view(root, shell) {
       box.append(el('article', { class: 'adm-card' },
         el('h3', {}, d.outcome),
         el('p', {}, d.message),
+        el('p', {}, 'Reason: ' + d.reason),
         el('p', {}, 'When: ' + d.at + '   Resource: ' + d.resource + '   Action: ' + d.action),
         el('p', { class: 'adm-ref' }, 'Reference: ' + d.reference),
         el('ul', {}, d.whatToDo.map((t) => el('li', {}, t)))));

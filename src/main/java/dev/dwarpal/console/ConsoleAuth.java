@@ -10,14 +10,18 @@ import dev.dwarpal.devidp.WebAuthn;
 import dev.dwarpal.domain.Validate;
 
 import javax.crypto.SecretKeyFactory;
+import java.io.IOException;
 import javax.crypto.spec.PBEKeySpec;
+import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -76,7 +80,29 @@ public final class ConsoleAuth {
         }
     }
 
+    /** How a change of one's own secrets ended. WEAK: the new value breaks the rules, nothing was checked or changed. */
+    public enum Change { OK, DENIED, LOCKED, WEAK, UNAVAILABLE }
+
+    public record Changed(Change status, long retryAfterSeconds) {
+        static Changed of(Change c) {
+            return new Changed(c, 0);
+        }
+    }
+
+    /** What the Profile page shows about a person's sign-in. */
+    public record Standing(Instant passwordChanged, Instant pinChanged, Instant changeBy, boolean due, boolean passkeySet,
+                           int backupCodesLeft, long rotationDays) {
+    }
+
     private record Pending(String subject, String password, WebAuthn.Challenge challenge, Instant expiresAt, String source) {
+    }
+
+    /** Proof that a backup code was right, held only until the new password and PIN arrive. */
+    private record Recovery(String subject, String code, Instant expiresAt, String source) {
+    }
+
+    /** The first step of recovery: a ticket for the second step, or why there is none. */
+    public record Recovering(Change status, String ticket, long retryAfterSeconds) {
     }
 
     private record Card(Person person, SoftwareAuthenticator key, byte[] pinSalt, byte[] pinHash) {
@@ -84,40 +110,86 @@ public final class ConsoleAuth {
 
     static final String RP_ID = "dwarpal.localhost";
     static final Duration LOGIN_VALID = Duration.ofMinutes(2);
+    static final Duration RECOVERY_VALID = Duration.ofMinutes(5);
     private static final int MAX_PENDING = 1_000;
     private static final int MAX_PENDING_PER_SOURCE = 20;
     private static final WebAuthn.Assertion BOGUS = new WebAuthn.Assertion("cred-none", "AAAA", "AAAA", "AAAA");
     private static final SecureRandom RANDOM = new SecureRandom();
+    public static final Duration WEEKLY = Duration.ofDays(7);
+    public static final int MIN_PASSWORD = 12;
+    public static final int MIN_PIN = 6;
+    public static final int MIN_PASSKEY = 10;
+    public static final int BACKUP_CODES = 10;
+    private static final String CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+    private static final int CODE_GROUPS = 3;
+    private static final int CODE_GROUP = 5;
 
     private final Clock clock;
     private final LoginThrottle throttle;
     private final DevIdentityProvider idp;
     private final Map<String, Card> cards;
+    private final Map<String, CredentialStore.Entry> entries = new ConcurrentHashMap<>();
+    private final CredentialStore store;
+    private final Duration rotation;
+    private final int passwordIterations;
+    private volatile UserFile users;
     private final int pinIterations;
     private final Card dummy;
     private final Map<String, Pending> pending = new ConcurrentHashMap<>();
+    private final Map<String, Recovery> recoveries = new ConcurrentHashMap<>();
 
     /** Enrols the people and starts the identity provider that will vouch for them. */
     public ConsoleAuth(List<Enrolment> people, Clock clock, int passwordIterations, int pinIterations) {
+        this(people, clock, passwordIterations, pinIterations, null, WEEKLY);
+    }
+
+    /**
+     * @param store    where people's own changes are kept across restarts; null keeps them in memory only
+     * @param rotation how long a password or PIN lasts before it must be changed
+     */
+    public ConsoleAuth(List<Enrolment> people, Clock clock, int passwordIterations, int pinIterations, Path store,
+                       Duration rotation) {
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.store = new CredentialStore(store);
+        this.rotation = Objects.requireNonNull(rotation, "rotation");
+        this.passwordIterations = passwordIterations;
+        Map<String, CredentialStore.Entry> saved;
+        try {
+            saved = this.store.load();
+        } catch (IOException e) {
+            throw new IllegalStateException("the credentials file cannot be read", e);
+        }
         this.throttle = new LoginThrottle(clock);
         this.pinIterations = pinIterations;
         Map<String, Card> built = new LinkedHashMap<>();
+        Instant first = clock.instant();
         StringBuilder users = new StringBuilder();
         for (Enrolment e : people) {
             SoftwareAuthenticator key = SoftwareAuthenticator.register(RP_ID);
             users.append(UserFile.line(e.person().id(), e.password().toCharArray(), passwordIterations, key.credentialId(),
                     key.publicKey())).append('\n');
-            byte[] salt = randomBytes(16);
-            Card card = new Card(e.person(), key, salt, pinHash(e.pin(), salt, pinIterations));
+            CredentialStore.Entry entry = saved.getOrDefault(e.person().id(), CredentialStore.Entry.fresh(first));
+            entries.put(e.person().id(), entry);
+            byte[] salt = entry.pinHash().isEmpty() ? randomBytes(16) : Base64.getDecoder().decode(entry.pinSalt());
+            byte[] pinHash = entry.pinHash().isEmpty() ? pinHash(e.pin(), salt, pinIterations)
+                    : Base64.getDecoder().decode(entry.pinHash());
+            Card card = new Card(e.person(), key, salt, pinHash);
             if (built.putIfAbsent(e.person().id(), card) != null) {
                 throw new IllegalArgumentException("two people with the same id");
             }
         }
-        this.cards = Map.copyOf(built);
+        this.cards = new ConcurrentHashMap<>(built);
         byte[] salt = randomBytes(16);
         this.dummy = new Card(null, null, salt, pinHash("000000", salt, pinIterations));
-        this.idp = new DevIdentityProvider(UserFile.parse(users.toString()), Ed25519.generateKeyPair(), "console-idp", RP_ID,
+        UserFile file = UserFile.parse(users.toString());
+        for (Map.Entry<String, CredentialStore.Entry> e : entries.entrySet()) {
+            if (!e.getValue().passwordHash().isEmpty()) {
+                file = file.withPassword(e.getKey(), new UserFile.Hashed(e.getValue().passwordIterations(),
+                        e.getValue().passwordSalt(), e.getValue().passwordHash()));
+            }
+        }
+        this.users = file;
+        this.idp = new DevIdentityProvider(file, Ed25519.generateKeyPair(), "console-idp", RP_ID,
                 clock, (report, proof) -> {
                     // failures are audited by the console itself; the lab has no policy administrator to report to
                 });
@@ -192,6 +264,243 @@ public final class ConsoleAuth {
         }
         throttle.success(subject, source);
         return new Authenticated(Status.OK, card.person(), 0, subject);
+    }
+
+    // ---- one's own secrets ----------------------------------------------------------------------------------------
+
+    public Changed changePassword(String subject, String current, String pin, String fresh, String source) {
+        if (!strongPassword(subject, fresh) || fresh.equals(current)) {
+            return Changed.of(Change.WEAK);
+        }
+        Changed proof = prove(subject, current, pin, source);
+        if (proof.status() != Change.OK) {
+            return proof;
+        }
+        Instant now = clock.instant();
+        UserFile.Hashed h = UserFile.hash(fresh.toCharArray(), passwordIterations);
+        return update(subject, e -> e.password(h.iterations(), h.salt(), h.hash(), now), true);
+    }
+
+    public Changed changePin(String subject, String password, String current, String fresh, String source) {
+        if (!strongPin(fresh) || fresh.equals(current)) {
+            return Changed.of(Change.WEAK);
+        }
+        Changed proof = prove(subject, password, current, source);
+        if (proof.status() != Change.OK) {
+            return proof;
+        }
+        Instant now = clock.instant();
+        byte[] salt = randomBytes(16);
+        byte[] hash = pinHash(fresh, salt, pinIterations);
+        return update(subject, e -> e.pin(text(salt), text(hash), now), true);
+    }
+
+    /** Sets or replaces the passkey that opens confidential views. Password and PIN prove who is asking. */
+    public Changed setPasskey(String subject, String password, String pin, String passkey, String source) {
+        if (passkey.length() < MIN_PASSKEY || passkey.length() > 128 || passkey.equals(password) || passkey.equals(pin)) {
+            return Changed.of(Change.WEAK);
+        }
+        Changed proof = prove(subject, password, pin, source);
+        if (proof.status() != Change.OK) {
+            return proof;
+        }
+        byte[] salt = randomBytes(16);
+        byte[] hash = pinHash(passkey, salt, passwordIterations);
+        return update(subject, e -> e.passkey(text(salt), text(hash)), false);
+    }
+
+    /** Is this the person's passkey? Wrong guesses cost the same growing wait as wrong passwords. */
+    public Authenticated unlock(String subject, String passkey, String source) {
+        String account = "passkey:" + subject;
+        long wait = throttle.retryAfterSeconds(account, source);
+        if (wait > 0) {
+            return new Authenticated(Status.LOCKED, null, wait, subject);
+        }
+        CredentialStore.Entry e = entries.get(subject);
+        boolean set = e != null && !e.passkeyHash().isEmpty();
+        byte[] salt = set ? Base64.getDecoder().decode(e.passkeySalt()) : randomBytes(16);
+        byte[] made = pinHash(passkey.length() > 128 ? "" : passkey, salt, passwordIterations);
+        if (set && MessageDigest.isEqual(made, Base64.getDecoder().decode(e.passkeyHash()))) {
+            throttle.success(account, source);
+            return new Authenticated(Status.OK, cards.get(subject).person(), 0, subject);
+        }
+        throttle.failure(account, source);
+        long after = throttle.retryAfterSeconds(account, source);
+        return after > 0 ? new Authenticated(Status.LOCKED, null, after, subject) : Authenticated.failed(subject);
+    }
+
+    /** Ten new one-use codes, shown once; older ones stop working. Only their hashes are kept. */
+    public Optional<List<String>> newBackupCodes(String subject, String password, String pin, String source, Changed[] result) {
+        Changed proof = prove(subject, password, pin, source);
+        result[0] = proof;
+        if (proof.status() != Change.OK) {
+            return Optional.empty();
+        }
+        List<String> plain = new ArrayList<>();
+        List<String> kept = new ArrayList<>();
+        for (int i = 0; i < BACKUP_CODES; i++) {
+            String code = newCode();
+            plain.add(code);
+            kept.add(sealed(code));
+        }
+        result[0] = update(subject, e -> e.backupCodes(kept), false);
+        return result[0].status() == Change.OK ? Optional.of(List.copyOf(plain)) : Optional.empty();
+    }
+
+    /**
+     * Recovery, step one: for a person who lost control of their password or PIN. A right code earns a short-lived ticket
+     * for step two and nothing else; the code itself is used up only when new secrets are saved. Wrong guesses cost the
+     * same growing wait as wrong passwords.
+     */
+    public Recovering checkBackupCode(String user, String code, String source) {
+        long wait = throttle.retryAfterSeconds(user, source);
+        if (wait > 0) {
+            return new Recovering(Change.LOCKED, null, wait);
+        }
+        CredentialStore.Entry e = wellFormed(user) ? entries.get(user) : null;
+        String match = e == null ? null : e.codes().stream().filter(c -> opens(c, code)).findFirst().orElse(null);
+        Instant now = clock.instant();
+        recoveries.values().removeIf(r -> !now.isBefore(r.expiresAt()));
+        if (match == null || recoveries.size() >= MAX_PENDING) {
+            throttle.failure(user, source);
+            long after = throttle.retryAfterSeconds(user, source);
+            return after > 0 ? new Recovering(Change.LOCKED, null, after) : new Recovering(Change.DENIED, null, 0);
+        }
+        throttle.success(user, source);
+        recoveries.values().removeIf(r -> r.subject().equals(user));
+        String ticket = "rc-" + HexFormat.of().formatHex(randomBytes(16));
+        recoveries.put(ticket, new Recovery(user, match, now.plus(RECOVERY_VALID), source));
+        return new Recovering(Change.OK, ticket, 0);
+    }
+
+    /** Whose recovery this ticket belongs to, so the caller can end that person's sessions. */
+    public Optional<String> recoveryOf(String ticket) {
+        Recovery r = recoveries.get(ticket);
+        return r == null ? Optional.empty() : Optional.of(r.subject());
+    }
+
+    /**
+     * Recovery, step two: sets the new password and PIN and uses up the code. A weak choice keeps the ticket, so the
+     * person can try again; a ticket that is old, from elsewhere, or whose code has since been replaced does nothing.
+     */
+    public Changed recover(String ticket, String newPassword, String newPin, String source) {
+        Recovery r = recoveries.get(ticket);
+        if (r == null || !r.source().equals(source) || !clock.instant().isBefore(r.expiresAt())) {
+            return Changed.of(Change.DENIED);
+        }
+        if (!strongPassword(r.subject(), newPassword) || !strongPin(newPin)) {
+            return Changed.of(Change.WEAK);
+        }
+        recoveries.remove(ticket);
+        CredentialStore.Entry e = entries.get(r.subject());
+        if (e == null || !e.codes().contains(r.code())) {
+            return Changed.of(Change.DENIED);
+        }
+        Instant now = clock.instant();
+        UserFile.Hashed h = UserFile.hash(newPassword.toCharArray(), passwordIterations);
+        byte[] salt = randomBytes(16);
+        byte[] pin = pinHash(newPin, salt, pinIterations);
+        List<String> left = new ArrayList<>(e.codes());
+        left.remove(r.code());
+        return update(r.subject(), x -> x.password(h.iterations(), h.salt(), h.hash(), now).pin(text(salt), text(pin), now)
+                .backupCodes(left), true);
+    }
+
+    /** True when the password or the PIN has lasted its full term: until it changes, the person can do nothing else. */
+    public boolean changeDue(String subject) {
+        CredentialStore.Entry e = entries.get(subject);
+        return e != null && !clock.instant().isBefore(changeBy(e));
+    }
+
+    public Standing standing(String subject) {
+        CredentialStore.Entry e = entries.get(subject);
+        return new Standing(e.passwordChanged(), e.pinChanged(), changeBy(e), changeDue(subject), !e.passkeyHash().isEmpty(),
+                e.codes().size(), rotation.toDays());
+    }
+
+    /** True once a person has chosen their own password or PIN, so the printed first ones mean nothing. */
+    public boolean hasOwnSecrets(String subject) {
+        CredentialStore.Entry e = entries.get(subject);
+        return e != null && e.hasOwnSecrets();
+    }
+
+    private Instant changeBy(CredentialStore.Entry e) {
+        Instant oldest = e.passwordChanged().isBefore(e.pinChanged()) ? e.passwordChanged() : e.pinChanged();
+        return oldest.plus(rotation);
+    }
+
+    private Changed prove(String subject, String password, String pin, String source) {
+        Authenticated a = stepUp(subject, password, pin, source);
+        return switch (a.status()) {
+            case OK -> Changed.of(Change.OK);
+            case LOCKED -> new Changed(Change.LOCKED, a.retryAfterSeconds());
+            case FAILED -> Changed.of(Change.DENIED);
+        };
+    }
+
+    /** Disk first: a change that cannot be kept does not happen, so a restart never brings an old secret back. */
+    private synchronized Changed update(String subject, java.util.function.UnaryOperator<CredentialStore.Entry> change,
+                                        boolean ownSecret) {
+        CredentialStore.Entry next = change.apply(entries.get(subject));
+        Map<String, CredentialStore.Entry> all = new HashMap<>(entries);
+        all.put(subject, next);
+        try {
+            store.save(all);
+            if (ownSecret) {
+                store.forgetFirstSecrets(subject);
+            }
+        } catch (IOException e) {
+            return Changed.of(Change.UNAVAILABLE);
+        }
+        entries.put(subject, next);
+        if (!next.pinHash().isEmpty()) {
+            cards.computeIfPresent(subject, (id, c) -> new Card(c.person(), c.key(), Base64.getDecoder().decode(next.pinSalt()),
+                    Base64.getDecoder().decode(next.pinHash())));
+        }
+        if (!next.passwordHash().isEmpty()) {
+            users = users.withPassword(subject, new UserFile.Hashed(next.passwordIterations(), next.passwordSalt(),
+                    next.passwordHash()));
+            idp.replaceUsers(users);
+        }
+        return Changed.of(Change.OK);
+    }
+
+    static boolean strongPassword(String subject, String password) {
+        return password.length() >= MIN_PASSWORD && password.length() <= 128
+                && !password.toLowerCase(java.util.Locale.ROOT).contains(subject.toLowerCase(java.util.Locale.ROOT))
+                && password.chars().distinct().count() >= 5;
+    }
+
+    static boolean strongPin(String pin) {
+        return pin.length() >= MIN_PIN && pin.length() <= 64 && pin.chars().distinct().count() >= 3;
+    }
+
+    private static String newCode() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < CODE_GROUPS * CODE_GROUP; i++) {
+            if (i > 0 && i % CODE_GROUP == 0) {
+                sb.append('-');
+            }
+            sb.append(CODE_ALPHABET.charAt(RANDOM.nextInt(CODE_ALPHABET.length())));
+        }
+        return sb.toString();
+    }
+
+    /** A code has about 74 random bits, so a plain salted hash is enough: there is nothing to guess against. */
+    private static String sealed(String code) {
+        String salt = HexFormat.of().formatHex(randomBytes(8));
+        return salt + ":" + Digests.sha256Hex(salt + "|" + code);
+    }
+
+    private static boolean opens(String kept, String code) {
+        int at = kept.indexOf(':');
+        String want = Digests.sha256Hex(kept.substring(0, at) + "|" + code.strip().toUpperCase(java.util.Locale.ROOT));
+        return MessageDigest.isEqual(want.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                kept.substring(at + 1).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private static String text(byte[] b) {
+        return Base64.getEncoder().encodeToString(b);
     }
 
     public Optional<Person> person(String id) {

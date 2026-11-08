@@ -1,9 +1,11 @@
 // The only file that talks to the server. Everything else asks this module; nothing else calls fetch or opens a stream.
 // The session is a cookie the browser keeps by itself (HttpOnly, never visible here). The anti-forgery token is kept in
 // memory only: it is fetched from /me after a reload and replaced at login and at step-up.
+import {toast, working} from './toast.js';
 
 const BASE = '/console/api/';
 let csrf = null;
+let unlocker = null;
 
 export class ApiError extends Error {
   constructor(status, message, extra) {
@@ -13,7 +15,41 @@ export class ApiError extends Error {
   }
 }
 
+/** What a person would call this request; null for the ones that need no notice. */
+function activity(method, path) {
+  if (path.startsWith('session/')) return null;
+  const known = [['fastforward', 'Moving scenario time forward'], ['control/reset', 'Resetting the lab'], ['lab/reset', 'Resetting the lab'],
+    ['launch/', 'Starting the scenario'], ['soc/verdicts', 'Signing the verdict'], ['/notes', 'Saving the note'],
+    ['/assignment', 'Assigning the case'], ['soc/search', 'Searching'], ['soc/counts', 'Counting events'], ['audit/verify', 'Verifying the audit chain'],
+    ['profile/password', 'Changing your password'], ['profile/pin', 'Changing your PIN'], ['profile/passkey', 'Saving your passkey'], ['profile/backup-codes', 'Making backup codes']];
+  const hit = known.find(([k]) => path.includes(k));
+  return hit ? hit[1] : method === 'POST' ? 'Saving' : 'Loading';
+}
+
 async function call(method, path, body, opts) {
+  const label = opts && opts.background ? null : activity(method, path);
+  const end = label ? working(label) : () => {};
+  try {
+    let data;
+    try {
+      data = await send(method, path, body, opts);
+    } catch (e) {
+      // confidential data: ask for the passkey once, then repeat what the person asked for
+      if (e.status !== 423 || !unlocker || (opts && opts.background)) throw e;
+      await unlocker();
+      data = await send(method, path, body, opts);
+    }
+    if (label && method === 'POST' && !path.startsWith('soc/search') && !path.startsWith('soc/counts')) toast(label + ': done.', 'ok');
+    return data;
+  } catch (e) {
+    if (label && method === 'POST' && e.status !== 423) toast(label + ' failed: ' + e.message, 'bad');
+    throw e;
+  } finally {
+    end();
+  }
+}
+
+async function send(method, path, body, opts) {
   const headers = {Accept: 'application/json'};
   if (method === 'POST') {
     headers['Content-Type'] = 'application/json';
@@ -38,6 +74,7 @@ async function call(method, path, body, opts) {
   if (res.status === 401 && !path.startsWith('session/')) {
     window.dispatchEvent(new CustomEvent('dw:session-ended'));
   }
+  if (res.status === 428) window.dispatchEvent(new CustomEvent('dw:change-due'));
   if (!res.ok) {
     throw new ApiError(res.status, data && typeof data.error === 'string' ? data.error : 'request failed (' + res.status + ')', data);
   }
@@ -50,6 +87,11 @@ const enc = (s) => encodeURIComponent(s);
 
 export function setCsrf(token) {
   csrf = token;
+}
+
+/** The shell's way of asking for the passkey: resolves once confidential views are open, rejects if the person gives up. */
+export function setUnlocker(fn) {
+  unlocker = fn;
 }
 
 export const api = {
@@ -79,6 +121,22 @@ export const api = {
     csrf = r.csrf;
     return r;
   },
+  unlock: (passkey) => post('session/unlock', {passkey}),
+  lock: () => post('session/lock', {}),
+  /** For a page that is going away: the request must outlive it. */
+  lockOnExit() {
+    if (!csrf) return;
+    fetch(BASE + 'session/lock', {method: 'POST', keepalive: true, credentials: 'same-origin', redirect: 'error', referrerPolicy: 'no-referrer',
+      headers: {'Content-Type': 'application/json', 'X-Dwarpal-CSRF': csrf}, body: '{}'}).catch(() => {});
+  },
+  recoverCode: (user, code) => post('session/recover/code', {user, code}),
+  recover: (ticket, newPassword, newPin) => post('session/recover', {ticket, newPassword, newPin}),
+  activity: () => get('me/activity'),
+  profile: () => get('profile'),
+  changePassword: (password, pin, newPassword) => post('profile/password', {password, pin, newPassword}),
+  changePin: (password, pin, newPin) => post('profile/pin', {password, pin, newPin}),
+  setPasskey: (password, pin, passkey) => post('profile/passkey', {password, pin, passkey}),
+  backupCodes: (password, pin) => post('profile/backup-codes', {password, pin}),
   sessions: () => get('session/list'),
   revokeSession: (id) => post('session/revoke', {id}),
   modules: () => get('modules'),
@@ -98,7 +156,7 @@ export const api = {
   counts: (query, from, to) => post('soc/counts', {query, from, to}),
   isolations: (opts) => get('soc/isolations', opts),
   metrics: (opts) => get('soc/metrics', opts),
-  report: (name) => get('soc/reports/' + enc(name)),
+  report: (name, opts) => get('soc/reports/' + enc(name), opts),
 
   // ---- the audit explorer
   auditHead: () => get('audit/head'),

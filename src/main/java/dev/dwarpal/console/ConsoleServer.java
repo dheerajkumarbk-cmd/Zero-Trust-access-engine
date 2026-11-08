@@ -85,7 +85,10 @@ public final class ConsoleServer implements AutoCloseable {
 
     /** The JDK server limits the number of request headers but not their size; this is the console's own bound. */
     static final int MAX_HEADER_BYTES = 16 * 1024;
-    private static final Set<String> RESERVED = Set.of("session", "me", "modules", "stream", "soc", "audit");
+    private static final int PAGE_FILES_FACTOR = 10;
+    private static final Set<String> RESERVED = Set.of("session", "me", "modules", "stream", "soc", "audit", "profile", "home");
+    /** What a person whose password or PIN has run out may still reach: enough to change them. */
+    private static final Set<String> OPEN_WHILE_DUE = Set.of("me", "modules", "lab", "stream", "profile");
 
     final LabHandle lab;
     final SocChannel channel;
@@ -96,6 +99,8 @@ public final class ConsoleServer implements AutoCloseable {
     final ConsoleSessions sessions;
     final ConsoleAudit audit;
     final StreamHub hub;
+    /** How long the passkey keeps confidential views open; null when this server has no passkey lock. */
+    final Duration passkeyWindow;
     private final StaticFiles files;
     private final List<ConsoleModule> modules;
     private final List<Route> routes = new ArrayList<>();
@@ -105,6 +110,8 @@ public final class ConsoleServer implements AutoCloseable {
     private final ScheduledExecutorService poller;
     private final Semaphore inFlight;
     private final RateLimiter anonymous;
+    /** Page files: a fixed list, about 30 per page load, so their limit must allow several reloads a minute. */
+    private final RateLimiter pageFiles;
     private final RateLimiter reads;
     private final RateLimiter writes;
     private final RateLimiter refusalAudits;
@@ -133,8 +140,10 @@ public final class ConsoleServer implements AutoCloseable {
         this.sessions = new ConsoleSessions(wall, settings);
         this.audit = new ConsoleAudit(() -> b.auditLog.get() != null ? b.auditLog.get() : lab.world().org.audit, () -> lab.world().org.clock);
         this.hub = new StreamHub(settings.maxStreams());
+        this.passkeyWindow = b.passkeyWindow;
         this.inFlight = new Semaphore(settings.maxConcurrent());
         this.anonymous = new RateLimiter(settings.anonymousPerMinute(), Duration.ofMinutes(1), 10_000);
+        this.pageFiles = new RateLimiter(settings.anonymousPerMinute() * PAGE_FILES_FACTOR, Duration.ofMinutes(1), 10_000);
         this.reads = new RateLimiter(settings.readsPerMinute(), Duration.ofMinutes(1), 1_000);
         this.writes = new RateLimiter(settings.writesPerMinute(), Duration.ofMinutes(1), 1_000);
         this.refusalAudits = new RateLimiter(20, Duration.ofMinutes(1), 5_000);
@@ -392,7 +401,7 @@ public final class ConsoleServer implements AutoCloseable {
         if (!method.equals("GET")) {
             return Reply.error(405, "method not allowed").withHeader("Allow", "GET");
         }
-        if (!anonymous.tryAcquire("static|" + source, wall.instant())) {
+        if (!pageFiles.tryAcquire("static|" + source, wall.instant())) {
             refused.incrementAndGet();
             return Reply.error(429, "too many requests").withHeader("Retry-After", "60");
         }
@@ -528,6 +537,23 @@ public final class ConsoleServer implements AutoCloseable {
                         "why", "step-up not fresh"));
             }
             return Reply.error(403, "step-up required");
+        }
+        if (session != null && auth.changeDue(session.person.id()) && !route.pattern().startsWith("session/")
+                && !route.pattern().startsWith("profile/") && !OPEN_WHILE_DUE.contains(route.pattern())) {
+            return Reply.error(428, "change your password and PIN first");
+        }
+        if (passkeyWindow != null && ConsoleRoutes.CONFIDENTIAL.contains(route.pattern())) {
+            if (!sessions.unlocked(session)) {
+                if (refusalAudits.tryAcquire("passkey|" + session.person.id(), wall.instant())) {
+                    audit.write("CONSOLE_REFUSED", session.person.id(), fields("session", session.tag(), "route",
+                            route.pattern(), "why", "passkey not given"));
+                }
+                return Reply.error(423, "passkey required");
+            }
+            // a page left open refreshes itself in the background; only something the person did keeps it unlocked
+            if (!"1".equals(ex.getRequestHeaders().getFirst(BACKGROUND_HEADER))) {
+                sessions.unlock(session, passkeyWindow);
+            }
         }
         if (!inFlight.tryAcquire()) {
             return Reply.error(503, "busy");
@@ -724,6 +750,10 @@ public final class ConsoleServer implements AutoCloseable {
             ex.sendResponseHeaders(r.status(), -1);
             return;
         }
+        if (r.status() == 413) {
+            // the body was left unread, so this connection cannot carry another request: say so, or the caller reuses it and hangs
+            ex.getResponseHeaders().set("Connection", "close");
+        }
         ex.sendResponseHeaders(r.status(), r.body().length);
         try (OutputStream out = ex.getResponseBody()) {
             out.write(r.body());
@@ -853,6 +883,7 @@ public final class ConsoleServer implements AutoCloseable {
         private InetSocketAddress address = new InetSocketAddress(InetAddress.getLoopbackAddress(), 8443);
         private String staticRoot = "console";
         private final List<ConsoleModule> modules = new ArrayList<>();
+        private Duration passkeyWindow;
 
         private Builder(LabHandle lab, SocChannel channel, VerdictSigner signer, ConsoleAuth auth, SSLContext tls) {
             this.lab = lab;
@@ -865,6 +896,12 @@ public final class ConsoleServer implements AutoCloseable {
         /** Where the console writes its records (default: the lab's chain); tests pass a log whose sink can fail. */
         public Builder auditLog(dev.dwarpal.audit.AuditLog v) {
             auditLog.set(v);
+            return this;
+        }
+
+        /** Confidential views need the person's passkey, and stay open this long after it. */
+        public Builder passkeyLock(Duration window) {
+            passkeyWindow = Objects.requireNonNull(window, "window");
             return this;
         }
 
