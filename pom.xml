@@ -17,6 +17,7 @@
         <!-- Reproducible builds: fixed timestamps in the jar, so anyone can rebuild and compare hashes. -->
         <project.build.outputTimestamp>2026-11-02T00:00:00Z</project.build.outputTimestamp>
         <snakeyaml.version>2.7</snakeyaml.version>
+        <postgresql.version>42.7.14</postgresql.version>
         <junit.version>5.14.4</junit.version>
         <jacoco.version>0.8.16</jacoco.version>
         <spotbugs.plugin.version>4.10.5.0</spotbugs.plugin.version>
@@ -33,6 +34,21 @@
             <groupId>org.yaml</groupId>
             <artifactId>snakeyaml</artifactId>
             <version>${snakeyaml.version}</version>
+        </dependency>
+
+        <!-- PostgreSQL JDBC driver (BSD-2-Clause): the only way the lab talks to the directory database.
+             Checked on 2026-11-08: no entry in the OSV database for this version.
+             checker-qual is left out on purpose: it only holds annotations the driver does not need at run time. -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>${postgresql.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.checkerframework</groupId>
+                    <artifactId>checker-qual</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>

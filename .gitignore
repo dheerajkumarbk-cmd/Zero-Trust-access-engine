@@ -15,3 +15,7 @@ out/
 *.p12
 *.anchor
 pki.pass
+
+# local database settings hold passwords: never commit them
+/db/local.properties
+*.local.properties

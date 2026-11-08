@@ -1,0 +1,10 @@
+# Copy this file to db/local.properties (git ignores that name) and type the two passwords after the = signs.
+# Never commit the copy, paste it into a chat, or put it in a screenshot.
+# Instead of the file you can set the environment variables DWARPAL_DB_APP_PASSWORD and DWARPAL_DB_MIGRATOR_PASSWORD
+# (and optionally DWARPAL_DB_URL / DWARPAL_DB_TEST_URL); an environment variable wins over the file.
+url=jdbc:postgresql://localhost:5432/dwarpal
+test.url=jdbc:postgresql://localhost:5432/dwarpal_test
+app.user=dwarpal_app
+app.password=
+migrator.user=dwarpal_migrator
+migrator.password=
