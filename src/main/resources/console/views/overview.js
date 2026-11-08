@@ -182,7 +182,7 @@ class DwOverview extends DwView {
     return hbars(top.map((x) => ({label: entityLink(x.entity), value: Number(x.score), text: num(x.score)})), 'Top entities by risk score');
   }
 
-  /** The report in brief and in full. Closing it locks it again. */
+  /** The report in brief and in full. Closing hides it; opening it asks for the passkey every time. */
   reportSummary(text) {
     const lines = text.split('\n');
     const counts = lines.find((l) => l.startsWith('Alerts by priority'));
@@ -190,23 +190,30 @@ class DwOverview extends DwView {
     const top = lines[lines.findIndex((l) => l.startsWith('Top risky entities')) + 1];
     const risk = top && top.trim() ? 'Highest risk: ' + top.trim().replace(/\s+\S+ alert .*$/, '').replace(/\s+/g, ' ') : null;
     const full = h('pre', {class: 'report', tabindex: 0}, text);
-    const close = h('button', {type: 'button', on: {click: async () => {
-      await this.shell.lock();
-      fill(this.slots.report, unavailable({status: 423}));
-    }}}, 'Close and lock');
+    const close = h('button', {type: 'button', on: {click: () => fill(this.slots.report, this.reportPrompt())}}, 'Close');
     return h('div', null, note('Daily report for scenario day ' + whenSec(this.lab.time).slice(0, 10) + ', in brief:'),
       h('ul', {class: 'brief'}, [counts, verdicts, risk].filter(Boolean).map((l) => h('li', null, l))),
       full, h('div', {class: 'row'}, close));
   }
 
+  /** The report is an export: it is never loaded by itself, only when the person opens it, and each opening asks for the passkey. */
   async report() {
-    try {
-      const r = await api.report('daily', {background: true});
-      return this.reportSummary(r.text);
-    } catch (e) {
-      if (e.status === 404 || e.status === 403) return note('Reports are for SOC leads. Sign in as a lead to see the daily report.');
-      throw e;
-    }
+    return this.reportPrompt();
+  }
+
+  reportPrompt() {
+    const out = h('div');
+    const open = h('button', {type: 'button', class: 'primary', on: {click: async () => {
+      try {
+        const r = await api.report('daily');
+        fill(out, this.reportSummary(r.text));
+      } catch (e) {
+        if (e.status === 404 || e.status === 403) fill(out, note('Reports are for SOC leads. Sign in as a lead to see the daily report.'));
+        else if (e.status !== 423) fill(out, unavailable(e));
+      }
+    }}}, 'Open the daily report');
+    fill(out, note('The daily report asks for your passkey every time you open it.'), h('div', {class: 'row'}, open));
+    return out;
   }
 }
 customElements.define('dw-overview', DwOverview);

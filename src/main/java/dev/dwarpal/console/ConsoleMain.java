@@ -128,7 +128,7 @@ public final class ConsoleMain {
                     + trail.dir().toAbsolutePath() + ").");
             ConsoleServer.Builder b = ConsoleServer.builder(lab, channel, new LabVerdictSigner(lab), auth, tls)
                     .settings(settings)
-                    .passkeyLock(Duration.ofMinutes(5))
+                    .passkeyLock(Duration.ofMinutes(15), Duration.ofMinutes(5))
                     .address(new InetSocketAddress(InetAddress.getLoopbackAddress(), consolePort));
             b.module(new dev.dwarpal.console.lab.LabModule(session));
             b.module(new dev.dwarpal.console.lab.GuideModule());

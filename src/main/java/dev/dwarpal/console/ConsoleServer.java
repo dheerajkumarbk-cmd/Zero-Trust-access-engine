@@ -106,6 +106,8 @@ public final class ConsoleServer implements AutoCloseable {
     final StreamHub hub;
     /** How long the passkey keeps confidential views open; null when this server has no passkey lock. */
     final Duration passkeyWindow;
+    /** The audit explorer has its own unlock, shorter than the shared window. */
+    final Duration auditWindow;
     private final StaticFiles files;
     private final List<ConsoleModule> modules;
     private final List<Route> routes = new ArrayList<>();
@@ -148,6 +150,7 @@ public final class ConsoleServer implements AutoCloseable {
                 () -> lab.world().org.clock, wall, b.trail != null);
         this.hub = new StreamHub(settings.maxStreams());
         this.passkeyWindow = b.passkeyWindow;
+        this.auditWindow = b.auditWindow;
         this.inFlight = new Semaphore(settings.maxConcurrent());
         this.anonymous = new RateLimiter(settings.anonymousPerMinute(), Duration.ofMinutes(1), 10_000);
         this.pageFiles = new RateLimiter(settings.anonymousPerMinute() * PAGE_FILES_FACTOR, Duration.ofMinutes(1), 10_000);
@@ -551,17 +554,25 @@ public final class ConsoleServer implements AutoCloseable {
                 && !route.pattern().startsWith("profile/") && !OPEN_WHILE_DUE.contains(route.pattern())) {
             return Reply.error(428, "change your password and PIN first");
         }
-        if (passkeyWindow != null && ConsoleRoutes.CONFIDENTIAL.contains(route.pattern())) {
-            if (!sessions.unlocked(session)) {
+        ConsoleRoutes.Gate gate = passkeyWindow != null && session != null && ConsoleRoutes.needsPasskey(session.person)
+                ? ConsoleRoutes.gate(route.pattern(), route.stepUp()) : ConsoleRoutes.Gate.NONE;
+        if (gate != ConsoleRoutes.Gate.NONE) {
+            // a page left open refreshes itself in the background and cannot answer a prompt: it never uses up an entry
+            boolean background = "1".equals(ex.getRequestHeaders().getFirst(BACKGROUND_HEADER));
+            boolean open = switch (gate) {
+                case WINDOW -> sessions.unlocked(session);
+                case AUDIT -> sessions.auditOpen(session);
+                case EVERY_TIME -> !background && sessions.consumeOnce(session);
+                case NONE -> true;
+            };
+            if (!open) {
                 if (refusalAudits.tryAcquire("passkey|" + session.person.id(), wall.instant())) {
-                    audit.write("CONSOLE_REFUSED", session.person.id(), fields("session", session.tag(), "route",
-                            route.pattern(), "why", "passkey not given"));
+                    audit.write("CONSOLE_REFUSED", session.person.id(), fields("session", session.tag(), "route", route.pattern(),
+                            "why", "passkey not given (" + gate.name().toLowerCase(Locale.ROOT) + ")"));
                 }
-                return Reply.error(423, "passkey required");
-            }
-            // a page left open refreshes itself in the background; only something the person did keeps it unlocked
-            if (!"1".equals(ex.getRequestHeaders().getFirst(BACKGROUND_HEADER))) {
-                sessions.unlock(session, passkeyWindow);
+                return Reply.json(423, dev.dwarpal.wire.JsonValue.object().put("error", "passkey required")
+                        .put("scope", gate == ConsoleRoutes.Gate.WINDOW ? "window" : gate == ConsoleRoutes.Gate.AUDIT ? "audit"
+                                : "once").build());
             }
         }
         if (!inFlight.tryAcquire()) {
@@ -921,6 +932,7 @@ public final class ConsoleServer implements AutoCloseable {
         private String staticRoot = "console";
         private final List<ConsoleModule> modules = new ArrayList<>();
         private Duration passkeyWindow;
+        private Duration auditWindow;
 
         private Builder(LabHandle lab, SocChannel channel, VerdictSigner signer, ConsoleAuth auth, SSLContext tls) {
             this.lab = lab;
@@ -946,9 +958,20 @@ public final class ConsoleServer implements AutoCloseable {
             return this;
         }
 
-        /** Confidential views need the person's passkey, and stay open this long after it. */
+        /** Confidential views need a passkey and stay open for {@code window} of real time (the audit unlock is 5 minutes at most). */
         public Builder passkeyLock(Duration window) {
-            passkeyWindow = Objects.requireNonNull(window, "window");
+            return passkeyLock(window, window.compareTo(Duration.ofMinutes(5)) < 0 ? window : Duration.ofMinutes(5));
+        }
+
+        /** As above, with the audit explorer's own unlock, which must not be longer than the shared window. */
+        public Builder passkeyLock(Duration window, Duration audit) {
+            Objects.requireNonNull(window, "window");
+            Objects.requireNonNull(audit, "audit");
+            if (window.isZero() || window.isNegative() || audit.isZero() || audit.isNegative() || audit.compareTo(window) > 0) {
+                throw new IllegalArgumentException("the audit unlock must be positive and no longer than the shared window");
+            }
+            passkeyWindow = window;
+            auditWindow = audit;
             return this;
         }
 

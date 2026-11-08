@@ -31,9 +31,32 @@ final class ConsoleRoutes {
             new String[]{"audit", "Audit explorer"}, new String[]{"attack", "ATT&CK"},
             new String[]{"scans", "Scans"});
 
-    /** Views of confidential data: with a passkey lock on the server, these answer only after the person's passkey. */
-    static final Set<String> CONFIDENTIAL = Set.of("soc/cases/{}", "soc/cases/{}/timeline", "soc/risk/{}/{}", "soc/search",
-            "soc/reports/{}", "audit/records", "audit/records/{}", "lab/export");
+    /**
+     * How the passkey guards a route (only where the server has a passkey lock, and only for people whose role has one):
+     * <ul>
+     *   <li>WINDOW: the shared window; one passkey entry opens cases, entities and hunt together for a while;</li>
+     *   <li>AUDIT: the audit explorer has its own, shorter unlock;</li>
+     *   <li>EVERY_TIME: one passkey entry per action, whatever the windows say.</li>
+     * </ul>
+     */
+    enum Gate { NONE, WINDOW, AUDIT, EVERY_TIME }
+
+    /** Views of confidential data, opened by the shared window. */
+    static final Set<String> WINDOW_ROUTES = Set.of("soc/cases/{}", "soc/cases/{}/timeline", "soc/risk/{}/{}", "soc/search");
+    /** The audit explorer: a fresher unlock than the window. */
+    static final Set<String> AUDIT_ROUTES = Set.of("audit/records", "audit/records/{}", "audit/verify");
+    /** Report exports always ask; so does every route that needs a fresh step-up (response actions, administration). */
+    static final Set<String> EVERY_TIME_ROUTES = Set.of("soc/reports/{}", "lab/export");
+
+    static Gate gate(String pattern, boolean stepUp) {
+        if (AUDIT_ROUTES.contains(pattern)) {
+            return Gate.AUDIT;
+        }
+        if (stepUp || EVERY_TIME_ROUTES.contains(pattern)) {
+            return Gate.EVERY_TIME;
+        }
+        return WINDOW_ROUTES.contains(pattern) ? Gate.WINDOW : Gate.NONE;
+    }
 
     private static final int MAX_NOTE = 2_000;
     private static final Set<Integer> PASS = Set.of(200, 400, 403, 404, 409, 429, 503);
@@ -197,6 +220,8 @@ final class ConsoleRoutes {
                 .put("passkeyNeeded", JsonValue.bool(needsPasskey(c.person())))
                 .put("passkeyLock", JsonValue.bool(s.passkeyWindow != null))
                 .put("unlocked", JsonValue.bool(s.sessions.unlocked(c.session)))
+                .put("unlockedSeconds", JsonValue.num(s.sessions.unlockedSeconds(c.session)))
+                .put("auditSeconds", JsonValue.num(s.sessions.auditSeconds(c.session)))
                 .put("backupCodesLeft", JsonValue.num(t.backupCodesLeft())).build());
     }
 
@@ -238,7 +263,7 @@ final class ConsoleRoutes {
     }
 
     /** Only people whose role opens confidential views have anything for a passkey to protect. */
-    private static boolean needsPasskey(ConsoleAuth.Person p) {
+    static boolean needsPasskey(ConsoleAuth.Person p) {
         return ConsoleServer.satisfiesModule(p.roles(), Role.ANALYST);
     }
 
@@ -264,26 +289,49 @@ final class ConsoleRoutes {
         return Reply.ok(JsonValue.object().put("codes", new JsonValue.JArray(out)).build()).audited("new backup codes");
     }
 
+    /** How long a passkey given for one risky action stays good if the action does not follow at once. */
+    static final java.time.Duration ONCE_TTL = java.time.Duration.ofSeconds(60);
+
     private static Reply unlock(ConsoleServer s, Ctx c) {
         if (s.passkeyWindow == null) {
             return Reply.error(404, "not found");
         }
-        ConsoleAuth.Authenticated a = s.auth.unlock(c.person().id(), c.fields(Set.of("passkey")).text("passkey", 1024), c.source);
+        String passkey;
+        String scope;
+        try {
+            Ctx.Fields f = c.fields(Set.of("passkey", "scope"));
+            passkey = f.text("passkey", 1024);
+            scope = f.text("scope", 10);
+        } catch (dev.dwarpal.wire.JsonException withoutScope) {
+            passkey = c.fields(Set.of("passkey")).text("passkey", 1024);
+            scope = "window";
+        }
+        if (!Set.of("window", "audit", "once").contains(scope)) {
+            return Reply.error(400, "invalid request");
+        }
+        ConsoleAuth.Authenticated a = s.auth.unlock(c.person().id(), passkey, c.source);
         if (a.status() != ConsoleAuth.Status.OK) {
-            s.audit.write("CONSOLE_UNLOCK_FAILED", c.person().id(), ConsoleServer.fields("session", c.session.tag()));
+            s.audit.write("CONSOLE_UNLOCK_FAILED", c.person().id(), ConsoleServer.fields("session", c.session.tag(), "scope", scope));
             return a.status() == ConsoleAuth.Status.LOCKED ? locked(a.retryAfterSeconds()) : Reply.error(401, "wrong passkey");
         }
-        s.sessions.unlock(c.session, s.passkeyWindow);
-        if (!s.audit.write("CONSOLE_UNLOCK", c.person().id(), ConsoleServer.fields("session", c.session.tag()))) {
+        switch (scope) {
+            case "audit" -> s.sessions.unlockAudit(c.session, s.auditWindow, s.passkeyWindow);
+            case "once" -> s.sessions.grantOnce(c.session, ONCE_TTL);
+            default -> s.sessions.unlock(c.session, s.passkeyWindow);
+        }
+        if (!s.audit.write("CONSOLE_UNLOCK", c.person().id(), ConsoleServer.fields("session", c.session.tag(), "scope", scope))) {
             return Reply.error(503, "audit trail unavailable");
         }
-        return Reply.ok(JsonValue.object().put("ok", JsonValue.bool(true)).build());
+        return Reply.ok(JsonValue.object().put("ok", JsonValue.bool(true))
+                .put("unlockedSeconds", JsonValue.num(s.sessions.unlockedSeconds(c.session)))
+                .put("auditSeconds", JsonValue.num(s.sessions.auditSeconds(c.session))).build());
     }
 
-    /** Closes confidential views now. The page calls this whenever a person leaves one. */
+    /** Closes everything the passkey opened, now (the footer has a Lock now button). */
     private static Reply lock(ConsoleServer s, Ctx c) {
-        if (s.sessions.unlocked(c.session)) {
-            s.sessions.lock(c.session);
+        boolean wasOpen = s.sessions.unlocked(c.session) || s.sessions.auditOpen(c.session);
+        s.sessions.lock(c.session);
+        if (wasOpen) {
             s.audit.write("CONSOLE_LOCK", c.person().id(), ConsoleServer.fields("session", c.session.tag()));
         }
         return Reply.ok(JsonValue.object().put("ok", JsonValue.bool(true)).build());
@@ -385,6 +433,8 @@ final class ConsoleRoutes {
                 .put("passkeySet", JsonValue.bool(s.auth.standing(x.person.id()).passkeySet()))
                 .put("passkeyNeeded", JsonValue.bool(needsPasskey(x.person)))
                 .put("unlocked", JsonValue.bool(s.sessions.unlocked(x)))
+                .put("unlockedSeconds", JsonValue.num(s.sessions.unlockedSeconds(x)))
+                .put("auditSeconds", JsonValue.num(s.sessions.auditSeconds(x)))
                 .put("signing", JsonValue.object().put("notice", s.signer.notice()).build());
         return Reply.ok(b.build());
     }

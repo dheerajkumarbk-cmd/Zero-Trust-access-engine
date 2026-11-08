@@ -12,6 +12,8 @@ export class ApiError extends Error {
     super(message);
     this.status = status;
     this.retryAfter = extra && extra.retryAfterSeconds ? extra.retryAfterSeconds : 0;
+    /** For a 423: what the passkey is being asked for: 'window' (cases, entities, hunt), 'audit', or 'once' (one action). */
+    this.scope = extra && typeof extra.scope === 'string' ? extra.scope : 'window';
   }
 }
 
@@ -40,7 +42,7 @@ async function call(method, path, body, opts) {
     } catch (e) {
       // confidential data: ask for the passkey once, then repeat what the person asked for
       if (e.status !== 423 || !unlocker || (opts && opts.background)) throw e;
-      await unlocker();
+      await unlocker(e.scope);
       data = await send(method, path, body, opts);
     }
     if (label && method === 'POST' && !path.startsWith('soc/search') && !path.startsWith('soc/counts')) toast(label + ': done.', 'ok');
@@ -125,14 +127,8 @@ export const api = {
     csrf = r.csrf;
     return r;
   },
-  unlock: (passkey) => post('session/unlock', {passkey}),
+  unlock: (passkey, scope) => post('session/unlock', {passkey, scope: scope || 'window'}),
   lock: () => post('session/lock', {}),
-  /** For a page that is going away: the request must outlive it. */
-  lockOnExit() {
-    if (!csrf) return;
-    fetch(BASE + 'session/lock', {method: 'POST', keepalive: true, credentials: 'same-origin', redirect: 'error', referrerPolicy: 'no-referrer',
-      headers: {'Content-Type': 'application/json', 'X-Dwarpal-CSRF': csrf}, body: '{}'}).catch(() => {});
-  },
   recoverCode: (user, code) => post('session/recover/code', {user, code}),
   recover: (ticket, newPassword, newPin) => post('session/recover', {ticket, newPassword, newPin}),
   activity: () => get('me/activity'),

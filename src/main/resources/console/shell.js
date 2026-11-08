@@ -35,6 +35,8 @@ class DwApp extends HTMLElement {
     super();
     this.events = new EventTarget();
     this.lab = {time: null, state: 'UNKNOWN', speed: null, feed: 'connecting'};
+    this.unlockState = null;
+    this.clockEl = null;
     this.me = null;
     this.modules = [];
     this.closeStream = null;
@@ -45,15 +47,70 @@ class DwApp extends HTMLElement {
 
   connectedCallback() {
     setUnlocker(() => this.needUnlock());
-    window.addEventListener('dw:unlock', () => this.needUnlock().then(() => this.route()).catch(() => {}));
+    window.addEventListener('dw:unlock', (e) => this.needUnlock(e.detail && e.detail.scope).then(() => this.route()).catch(() => {}));
     window.addEventListener('dw:change-due', () => this.mustChange());
     window.addEventListener('hashchange', () => this.moved());
-    window.addEventListener('pagehide', () => {
-      if (this.me && this.me.passkeyNeeded) api.lockOnExit();
-    });
     window.addEventListener('keydown', (e) => this.key(e));
     window.addEventListener('dw:session-ended', () => this.ended('Your session ended. Sign in again.'));
     this.boot();
+  }
+
+  get me() {
+    return this.meState;
+  }
+
+  set me(value) {
+    this.meState = value;
+    this.syncUnlock();
+  }
+
+  /** The seconds the server says are left in the passkey windows, counted down here in real time. */
+  syncUnlock() {
+    const m = this.meState;
+    this.unlockState = m && m.passkeyNeeded ? {win: m.unlockedSeconds || 0, aud: m.auditSeconds || 0, at: performance.now()} : null;
+    this.wasOpen = !!(this.unlockState && this.unlockState.win > 0);
+    this.paintClock();
+  }
+
+  /** What is left, from the countdown (never below zero). */
+  unlockLeft() {
+    const s = this.unlockState;
+    if (!s) return {win: 0, aud: 0};
+    const gone = (performance.now() - s.at) / 1000;
+    return {win: Math.max(0, Math.round(s.win - gone)), aud: Math.max(0, Math.round(s.aud - gone))};
+  }
+
+  paintClock() {
+    const el = this.clockEl;
+    if (!el || !el.isConnected) return;
+    if (!this.unlockState) {
+      fill(el);
+      return;
+    }
+    const left = this.unlockLeft();
+    const mmss = (n) => Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0');
+    if (left.win === 0) {
+      fill(el, 'Confidential views are locked.');
+      return;
+    }
+    fill(el, 'Confidential views open for ' + mmss(left.win) + (left.aud > 0 ? ' (audit explorer ' + mmss(left.aud) + ')' : '') + '. ',
+      h('button', {type: 'button', on: {click: () => this.lockNow()}}, 'Lock now'));
+  }
+
+  /** Once a second: the footer's countdown, and the data comes off the screen when the window ends. */
+  tickUnlock() {
+    this.paintClock();
+    const open = this.unlockLeft().win > 0;
+    if (this.wasOpen && !open && this.me) {
+      this.me.unlocked = false;
+      if (!document.querySelector('dialog[open]') && !document.activeElement?.closest('input,textarea')) this.route();
+    }
+    this.wasOpen = open;
+  }
+
+  async lockNow() {
+    await this.lock();
+    this.route();
   }
 
   /** The object views and modules get. */
@@ -99,7 +156,6 @@ class DwApp extends HTMLElement {
     this.buildFrame();
     this.startLive();
     this.place = place(location.hash);
-    await this.lock();
     if (this.me.changeDue) this.mustChange();
     else if (!location.hash || location.hash === '#' || location.hash === '#/') location.hash = this.landing();
     else this.route();
@@ -158,6 +214,12 @@ class DwApp extends HTMLElement {
     explain(this.main);
   }
 
+  unlockClock() {
+    this.clockEl = h('span', {class: 'unlock-clock', role: 'timer'});
+    this.paintClock();
+    return this.clockEl;
+  }
+
   renderNav() {
     const builtIn = this.modules.filter((m) => m.kind === 'builtin');
     const extra = this.modules.filter((m) => m.kind !== 'builtin');
@@ -169,7 +231,7 @@ class DwApp extends HTMLElement {
       h('h2', null, 'Account'), h('a', {href: '#/profile', 'data-id': 'profile'}, 'Profile'));
   }
 
-  /** The foot of each page: only links this person's role can open. */
+  /** The foot of each page: only links this person's role can open, and the passkey countdown. */
   footer() {
     const can = (id) => this.modules.some((m) => m.id === id);
     const go = (id, text, hash) => (can(id) ? h('a', {href: hash || '#/' + id}, text) : null);
@@ -181,7 +243,8 @@ class DwApp extends HTMLElement {
           group('Work', go('queue', 'Alert queue'), go('cases', 'Cases'), go('response', 'Response'), go('scans', 'Scans')),
           group('Reports', go('overview', 'Daily report', '#/overview?at=report'), go('audit', 'Audit explorer'), go('attack', 'ATT&CK map'), go('hunt', 'Hunt')),
           group('Help', h('button', {type: 'button', on: {click: () => glossary(this.me.passkeyNeeded)}}, 'Glossary'), go('guide', 'Guide', '#/m/guide'), go('lab', 'Scenario lab', '#/m/lab'), h('a', {href: '#/profile'}, 'Profile')))),
-      h('div', {class: 'foot-end'}, h('span', null, 'Dwarpal, a college project built at home.'), h('span', null, 'Times are scenario time (UTC).')));
+      h('div', {class: 'foot-end'}, h('span', null, 'Dwarpal, a college project built at home.'), this.unlockClock(),
+        h('span', null, 'Times are scenario time (UTC).')));
   }
 
   // ---- live feed ----------------------------------------------------------------------------------------
@@ -197,6 +260,7 @@ class DwApp extends HTMLElement {
       if (state === 'closed') api.me({background: true}).catch(() => {});
     });
     const every = (ms, fn) => this.timers.push(setInterval(() => fn().catch(() => {}), ms));
+    this.timers.push(setInterval(() => this.tickUnlock(), 1000));
     every(15000, async () => {
       Object.assign(this.lab, await api.lab({background: true}));
       this.events.dispatchEvent(new CustomEvent('live', {detail: {name: 'lab', data: this.lab}}));
@@ -240,12 +304,10 @@ class DwApp extends HTMLElement {
   }
 
   // ---- routing ------------------------------------------------------------------------------------------
-  /** Leaving a page closes whatever the passkey opened, before the next page can ask for anything. */
+  /** Moving between pages keeps the passkey window open; it ends by itself, or at Lock now. */
   async moved() {
     const next = place(location.hash);
-    const left = next !== this.place;
     this.place = next;
-    if (left) await this.lock();
     this.route();
   }
 
@@ -254,6 +316,9 @@ class DwApp extends HTMLElement {
     try {
       await api.lock();
       this.me.unlocked = false;
+      this.me.unlockedSeconds = 0;
+      this.me.auditSeconds = 0;
+      this.syncUnlock();
     } catch (e) {
       // the server closes it by itself after a few minutes without use
     }
@@ -339,8 +404,13 @@ class DwApp extends HTMLElement {
   }
 
   // ---- passkey ------------------------------------------------------------------------------------------
-  /** Resolves once confidential views are open. A person with no passkey yet is sent to make one. */
-  needUnlock() {
+  /**
+   * Resolves once the passkey is accepted. scope: 'window' opens cases, entities and hunt together for 15 minutes;
+   * 'audit' is the audit explorer's own 5 minutes (and renews the window); 'once' confirms one risky action.
+   * A person with no passkey yet is sent to make one.
+   */
+  needUnlock(scope) {
+    scope = scope === 'audit' || scope === 'once' ? scope : 'window';
     if (this.unlocking) return this.unlocking;
     this.unlocking = new Promise((resolve, reject) => {
       const done = (ok) => {
@@ -362,15 +432,23 @@ class DwApp extends HTMLElement {
       } else {
         const key = h('input', {type: 'password', id: 'pk-key', autocomplete: 'off', required: true, spellcheck: false});
         const msg = h('p', {class: 'note', role: 'alert'});
-        const form = h('form', {class: 'stack', method: 'dialog'}, h('h1', {id: 'pk-title'}, 'Enter your passkey'),
-          h('p', {class: 'note'}, 'This is confidential. It locks again as soon as you close it or leave this page.'),
+        const form = h('form', {class: 'stack', method: 'dialog'}, h('h1', {id: 'pk-title'}, scope === 'once' ? 'Confirm with your passkey' : 'Enter your passkey'),
+          h('p', {class: 'note'}, scope === 'once' ? 'This action asks for your passkey every time.'
+            : scope === 'audit' ? 'The audit explorer opens for 5 minutes, and the other confidential views for 15.'
+              : 'Cases, entities and hunt open together for 15 minutes. The footer counts the time down.'),
           h('label', {for: 'pk-key'}, 'Passkey'), key, msg,
           h('div', {class: 'row'}, h('button', {type: 'submit', class: 'primary'}, 'Open'), h('button', {type: 'button', on: {click: () => done(false)}}, 'Cancel')));
         form.addEventListener('submit', async (e) => {
           e.preventDefault();
           msg.textContent = '';
           try {
-            await api.unlock(key.value);
+            const r = await api.unlock(key.value, scope);
+            if (scope !== 'once') {
+              this.me.unlocked = true;
+              this.me.unlockedSeconds = r.unlockedSeconds;
+              this.me.auditSeconds = r.auditSeconds;
+              this.syncUnlock();
+            }
             done(true);
           } catch (err) {
             msg.textContent = err.status === 429 ? 'Too many attempts. Try again in ' + (err.retryAfter || 5) + ' s.' : 'That is not your passkey.';

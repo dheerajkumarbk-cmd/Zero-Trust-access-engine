@@ -52,7 +52,7 @@ const GROUPS = [
     ['step-up', 'Proving your password and PIN again before a sensitive action.'],
     ['isolation', 'Cutting a device off from the network until a human lifts it.'],
     ['anchor', 'A protected copy of the audit trail\'s end, used to show nothing was rewritten.'],
-    ['passkey', 'A secret of your own that opens one confidential view. It locks again when you close or leave that view.'],
+    ['passkey', 'A secret of your own. One entry opens cases, entities and hunt together for 15 minutes (the footer counts the time down). The audit explorer needs a fresher entry, valid for 5 minutes. A response action, an export or a change in Administration asks every time.'],
     ['backup code', 'A one-use code that sets a new password and PIN if yours are stolen or lost.'],
     ['scan', 'A read-only check of the audit trail, sensors, refused access, firewall, logs, cases and risk.'],
   ]],

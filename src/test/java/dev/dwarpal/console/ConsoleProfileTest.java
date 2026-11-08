@@ -134,10 +134,10 @@ class ConsoleProfileTest {
         assertEquals(200, unlock(s).status());
         assertEquals(200, search(s).status());
         f.clock.advance(Duration.ofMinutes(14));
-        f.get("/console/api/me", s);
-        assertEquals(200, search(s).status(), "each use keeps it open");
-        f.clock.advance(Duration.ofMinutes(14));
-        f.get("/console/api/me", s);
+        assertEquals(200, search(s).status(), "still inside the fifteen minutes");
+        f.clock.advance(Duration.ofMinutes(2));
+        assertEquals(423, search(s).status(), "using it did not extend it: the window ends fifteen minutes after the passkey");
+        assertEquals(200, unlock(s).status());
         assertEquals(200, search(s).status());
 
         Sess other = f.login("ana");
@@ -163,15 +163,15 @@ class ConsoleProfileTest {
     }
 
     @Test
-    void aRefreshingPageDoesNotKeepItOpenButUseDoes() throws Exception {
+    void neitherARefreshingPageNorUseKeepsTheWindowOpenPastItsEnd() throws Exception {
         Sess s = f.login("ben");
         assertEquals(200, setPasskey(s).status());
         assertEquals(200, unlock(s).status());
         f.clock.advance(Duration.ofMinutes(14));
         f.get("/console/api/me", s);
-        assertNotEquals(423, f.backgroundGet("/console/api/soc/reports/daily", s).status(), "still open");
+        assertNotEquals(423, f.backgroundGet("/console/api/soc/risk/subject/ben", s).status(), "still open");
         f.clock.advance(Duration.ofMinutes(2));
-        assertEquals(423, search(s).status(), "a background refresh is not use");
+        assertEquals(423, search(s).status(), "neither a background refresh nor use extends the fifteen minutes");
     }
 
     @Test
@@ -199,7 +199,7 @@ class ConsoleProfileTest {
     }
 
     @Test
-    void anIdlePasskeyCloses() throws Exception {
+    void aPasskeyWindowClosesByItself() throws Exception {
         Sess s = f.login("ben");
         assertEquals(200, setPasskey(s).status());
         assertEquals(200, unlock(s).status());

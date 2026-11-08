@@ -82,6 +82,15 @@ class LabConsoleEndToEndTest {
             assertTrue(modules.body().contains("\"guide\"") && modules.body().contains("\"lab\""), modules.body());
             assertEquals(200, get(http, base, "/console/api/soc/queue", ana).statusCode());
             assertEquals(200, get(http, base, "/console/api/lab", ana).statusCode());
+            // the audit explorer has its own, fresher unlock: a passkey of her own, given for the audit
+            HttpResponse<String> setKey = postAs(http, base, "/console/api/profile/passkey", ana,
+                    "{\"password\":\"" + people.get("ana")[0] + "\",\"pin\":\"" + people.get("ana")[1]
+                            + "\",\"passkey\":\"e2e-audit-passkey\"}");
+            assertEquals(200, setKey.statusCode(), setKey.body());
+            assertEquals(423, get(http, base, "/console/api/audit/verify", ana).statusCode(), "closed until the audit unlock");
+            HttpResponse<String> open = postAs(http, base, "/console/api/session/unlock", ana,
+                    "{\"passkey\":\"e2e-audit-passkey\",\"scope\":\"audit\"}");
+            assertEquals(200, open.statusCode(), open.body());
             HttpResponse<String> verify = get(http, base, "/console/api/audit/verify", ana);
             assertEquals(200, verify.statusCode(), verify.body());
             assertTrue(verify.body().contains("\"intact\":true"), "the chain verifies from the page: " + verify.body());
@@ -119,6 +128,13 @@ class LabConsoleEndToEndTest {
     private static HttpResponse<String> post(HttpClient http, String base, String path, String body) throws Exception {
         return http.send(HttpRequest.newBuilder(URI.create(base + path)).timeout(Duration.ofSeconds(20))
                 .header("User-Agent", "E2E/1").header("Origin", base).header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    }
+
+    private static HttpResponse<String> postAs(HttpClient http, String base, String path, Session s, String body) throws Exception {
+        return http.send(HttpRequest.newBuilder(URI.create(base + path)).timeout(Duration.ofSeconds(20))
+                .header("User-Agent", "E2E/1").header("Origin", base).header("Content-Type", "application/json")
+                .header("Cookie", ConsoleServer.COOKIE + "=" + s.cookie()).header(ConsoleServer.CSRF_HEADER, s.csrf())
                 .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     }
 

@@ -72,7 +72,7 @@ export function cream(title, ...kids) {
 export function unavailable(err) {
   if (err && err.status === 423) {
     return h('div', {class: 'locked'}, h('strong', null, 'Locked. '), 'This is confidential. Enter your passkey to open it.',
-      h('div', null, h('button', {type: 'button', on: {click: () => window.dispatchEvent(new CustomEvent('dw:unlock'))}}, 'Enter passkey')));
+      h('div', null, h('button', {type: 'button', on: {click: () => window.dispatchEvent(new CustomEvent('dw:unlock', {detail: {scope: err.scope}}))}}, 'Enter passkey')));
   }
   const msg = err && err.message ? err.message : 'unknown error';
   return h('div', {class: 'unavailable', role: 'alert'}, h('strong', null, 'Unavailable. '),

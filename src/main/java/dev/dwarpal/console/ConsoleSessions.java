@@ -35,7 +35,12 @@ final class ConsoleSessions {
         final String agent;
         volatile Instant lastSeen;
         volatile Instant stepUpAt;
+        /** The shared window: one passkey entry opens cases, entities and hunt together until this real time. */
         volatile Instant unlockedUntil;
+        /** The audit explorer's own, shorter unlock. */
+        volatile Instant auditUntil;
+        /** One passkey entry, good for exactly one risky action; null when there is none. */
+        volatile Instant onceUntil;
 
         Session(String id, long order, ConsoleAuth.Person person, String csrf, Instant createdAt, String source,
                 String agent, Instant stepUpAt) {
@@ -128,23 +133,71 @@ final class ConsoleSessions {
         Session s = new Session(token(), old.order, old.person, token(), old.createdAt, old.source, old.agent, now);
         s.lastSeen = now;
         s.unlockedUntil = old.unlockedUntil;
+        s.auditUntil = old.auditUntil;
         sessions.put(s.id, s);
         return Optional.of(s);
     }
 
-    /** Confidential views stay open for this long after the passkey, and each use of them extends it. */
+    /**
+     * Opens the shared window: confidential views stay open until {@code window} (real time) after the passkey was given.
+     * Using them does not extend it, so a countdown shown to the person is true; only a new passkey entry renews it.
+     */
     void unlock(Session s, java.time.Duration window) {
         s.unlockedUntil = clock.instant().plus(window);
     }
 
-    /** Closes confidential views at once: the next one needs the passkey again. */
+    /** The passkey given for the audit explorer: open for {@code audit}, and the shared window is renewed too. */
+    void unlockAudit(Session s, java.time.Duration audit, java.time.Duration window) {
+        Instant now = clock.instant();
+        s.auditUntil = now.plus(audit);
+        s.unlockedUntil = now.plus(window);
+    }
+
+    /** The passkey given for one risky action: good for that one action, for at most {@code ttl}; no window is touched. */
+    void grantOnce(Session s, java.time.Duration ttl) {
+        s.onceUntil = clock.instant().plus(ttl);
+    }
+
+    /** Uses up the single-use passkey: true once per entry. The next risky action needs the passkey again. */
+    boolean consumeOnce(Session s) {
+        synchronized (s) {
+            Instant t = s.onceUntil;
+            s.onceUntil = null;
+            return t != null && clock.instant().isBefore(t);
+        }
+    }
+
+    /** Closes everything the passkey opened: the window, the audit unlock and any unused single-use entry. */
     void lock(Session s) {
         s.unlockedUntil = null;
+        s.auditUntil = null;
+        s.onceUntil = null;
     }
 
     boolean unlocked(Session s) {
-        Instant t = s.unlockedUntil;
+        return before(s.unlockedUntil);
+    }
+
+    boolean auditOpen(Session s) {
+        return before(s.auditUntil);
+    }
+
+    /** Real seconds left in the shared window, 0 when it is closed. */
+    long unlockedSeconds(Session s) {
+        return secondsLeft(s.unlockedUntil);
+    }
+
+    /** Real seconds left in the audit unlock, 0 when it is closed. */
+    long auditSeconds(Session s) {
+        return secondsLeft(s.auditUntil);
+    }
+
+    private boolean before(Instant t) {
         return t != null && clock.instant().isBefore(t);
+    }
+
+    private long secondsLeft(Instant t) {
+        return t == null ? 0 : Math.max(0, java.time.Duration.between(clock.instant(), t).toSeconds());
     }
 
     boolean stepUpFresh(Session s) {

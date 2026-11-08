@@ -130,6 +130,8 @@ class LabConsoleRedTeamTest {
     @Order(3)
     void aVerdictCannotNameAnotherAnalystAndNeedsAFreshStepUp() throws Exception {
         Session ana = login("ana");
+        openConfidential(ana, "ana");
+        unlock(ana, "once");
         String alertId = "al-anything-1";
         HttpResponse<String> other = send("POST", "/console/api/soc/verdicts", ana, base, true,
                 "{\"alertId\":\"" + alertId + "\",\"outcome\":\"TRUE_POSITIVE\",\"analystId\":\"ben\"}");
@@ -160,11 +162,21 @@ class LabConsoleRedTeamTest {
 
     /** Confidential views need the person's own passkey on the real launcher. */
     private static void openConfidential(Session s, String id) throws Exception {
+        setPasskey(s, id);
+        unlock(s, "window");
+    }
+
+    private static void setPasskey(Session s, String id) throws Exception {
         String[] who = people.get(id);
         HttpResponse<String> r = send("POST", "/console/api/profile/passkey", s, base, true,
                 "{\"password\":\"" + who[0] + "\",\"pin\":\"" + who[1] + "\",\"passkey\":\"red-team-passkey\"}");
         assertEquals(200, r.statusCode(), r.body());
-        r = send("POST", "/console/api/session/unlock", s, base, true, "{\"passkey\":\"red-team-passkey\"}");
+    }
+
+    /** One passkey entry: scope window (cases, entities, hunt), audit (the explorer), or once (one risky action). */
+    private static void unlock(Session s, String scope) throws Exception {
+        HttpResponse<String> r = send("POST", "/console/api/session/unlock", s, base, true,
+                "{\"passkey\":\"red-team-passkey\",\"scope\":\"" + scope + "\"}");
         assertEquals(200, r.statusCode(), r.body());
     }
 
@@ -173,6 +185,7 @@ class LabConsoleRedTeamTest {
     void theRunExportCarriesNoKeyPasswordOrCertificate() throws Exception {
         Session cleo = login("cleo");
         openConfidential(cleo, "cleo");
+        unlock(cleo, "once");
         HttpResponse<String> export = send("GET", "/console/api/lab/export", cleo, null, false, null);
         assertEquals(200, export.statusCode(), export.body().substring(0, Math.min(200, export.body().length())));
         String body = export.body();
@@ -207,9 +220,13 @@ class LabConsoleRedTeamTest {
     @Order(7)
     void anAdministratorResetsTheLabAndTheAnalystsSessionAndTheAuditChainStillWork() throws Exception {
         Session ana = login("ana");
+        setPasskey(ana, "ana");
+        unlock(ana, "audit");
         HttpResponse<String> before = send("GET", "/console/api/audit/verify", ana, null, false, null);
         assertTrue(before.body().contains("\"intact\":true"), before.body());
         Session dana = stepUp(login("dana"));
+        setPasskey(dana, "dana");
+        unlock(dana, "once");
         HttpResponse<String> reset = send("POST", "/console/api/admin/lab/reset", dana, base, true, "{}");
         assertEquals(200, reset.statusCode(), reset.body());
         // the analyst was never told: her session, the SOC channel and the new chain all work
@@ -227,6 +244,7 @@ class LabConsoleRedTeamTest {
         // the simulated organisation does not touch
         Session ana = login("ana");
         openConfidential(ana, "ana");
+        unlock(ana, "audit");
         HttpResponse<String> head = send("GET", "/console/api/audit/head?source=console", ana, null, false, null);
         Matcher h = Pattern.compile("\"head\"[ ]*:[ ]*([0-9]+)").matcher(head.body());
         assertTrue(h.find(), head.body());

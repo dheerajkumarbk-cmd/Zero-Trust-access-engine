@@ -294,6 +294,8 @@ dialog::backdrop { background: rgba(0, 0, 0, .56); }
 .foot-col h2 { font: 700 11px/16px var(--sans); text-transform: uppercase; letter-spacing: .18em; color: var(--accent); margin: 0 0 4px; }
 .foot-col a, .foot-col button { color: var(--muted); font-size: 13px; line-height: 20px; font-weight: 400; background: none; border: 0; padding: 0; }
 .foot-col a:hover, .foot-col button:hover:not(:disabled) { color: var(--fg); background: none; }
+.unlock-clock { color: var(--muted); }
+.unlock-clock button { background: none; border: 0; padding: 0; margin-left: 4px; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
 .foot-end { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--sage); font-size: 13px; line-height: 20px; }
 
 /* what needs attention: sentences, in order of how much they matter */
