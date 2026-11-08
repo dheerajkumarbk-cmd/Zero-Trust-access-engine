@@ -53,7 +53,7 @@ const GROUPS = [
     ['isolation', 'Cutting a device off from the network until a human lifts it.'],
     ['anchor', 'A protected copy of the audit trail\'s end, used to show nothing was rewritten.'],
     ['passkey', 'A secret of your own. One entry opens cases, entities and hunt together for 15 minutes (the footer counts the time down). The audit explorer needs a fresher entry, valid for 5 minutes. A response action, an export or a policy change asks every time.'],
-    ['elevation', 'A short, reasoned period for privileged changes (a decision on someone's access, a change to an administrator). You give your PIN, your passkey and a reason; it lasts 10 minutes, the footer counts them down, and everything you do inside it is recorded under it. An administrator's own request always goes to the other administrator.'],
+    ['elevation', 'A short, reasoned period for privileged changes (a decision on access, a change to an administrator). You give your PIN, your passkey and a reason; it lasts 10 minutes, the footer counts them down, and everything you do inside it is recorded under it. A request made by an administrator always goes to the other administrator.'],
     ['backup code', 'A one-use code that sets a new password and PIN if yours are stolen or lost.'],
     ['scan', 'A read-only check of the audit trail, sensors, refused access, firewall, logs, cases and risk.'],
   ]],
