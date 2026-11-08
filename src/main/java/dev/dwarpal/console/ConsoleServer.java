@@ -106,6 +106,27 @@ public final class ConsoleServer implements AutoCloseable {
         }
 
         @Override
+        public void rolesChanged(String personId, Set<String> roles) {
+            Set<ConsoleModule.Role> now = java.util.EnumSet.noneOf(ConsoleModule.Role.class);
+            for (String r : roles) {
+                try {
+                    now.add(ConsoleModule.Role.valueOf(r));
+                } catch (IllegalArgumentException unknown) {
+                    // a role this console does not know has nothing to enrol
+                }
+            }
+            if (now.isEmpty()) {
+                ConsoleServer.this.auth.block(personId);
+            }
+            if (ConsoleServer.this.auth.updateRoles(personId, now) || now.isEmpty()) {
+                for (ConsoleSessions.Session s : ConsoleServer.this.sessions.of(personId)) {
+                    ConsoleServer.this.hub.closeSession(s.id);
+                    ConsoleServer.this.sessions.end(s.id);
+                }
+            }
+        }
+
+        @Override
         public void closeAccount(String personId) {
             ConsoleServer.this.auth.block(personId);
             for (ConsoleSessions.Session s : ConsoleServer.this.sessions.of(personId)) {
@@ -124,6 +145,10 @@ public final class ConsoleServer implements AutoCloseable {
     final Duration passkeyWindow;
     /** The audit explorer has its own unlock, shorter than the shared window. */
     final Duration auditWindow;
+    /** Proves a person holds their passkey: the one function an elevation and the unlock routes both use. */
+    final PasskeyStepUp passkeys;
+    /** How long an elevation lasts, in real time. */
+    final Duration elevationLength;
     private final StaticFiles files;
     private final List<ConsoleModule> modules;
     private final List<Route> routes = new ArrayList<>();
@@ -167,6 +192,8 @@ public final class ConsoleServer implements AutoCloseable {
         this.hub = new StreamHub(settings.maxStreams());
         this.passkeyWindow = b.passkeyWindow;
         this.auditWindow = b.auditWindow;
+        this.passkeys = b.passkeys != null ? b.passkeys : PasskeyStepUp.typed(b.auth);
+        this.elevationLength = b.elevationLength;
         this.inFlight = new Semaphore(settings.maxConcurrent());
         this.anonymous = new RateLimiter(settings.anonymousPerMinute(), Duration.ofMinutes(1), 10_000);
         this.pageFiles = new RateLimiter(settings.anonymousPerMinute() * PAGE_FILES_FACTOR, Duration.ofMinutes(1), 10_000);
@@ -325,7 +352,7 @@ public final class ConsoleServer implements AutoCloseable {
     }
 
     ConsoleModule.Principal principal(ConsoleSessions.Session s) {
-        return new ConsoleModule.Principal(s.person.id(), s.person.roles(), sessions.stepUpFresh(s));
+        return new ConsoleModule.Principal(s.person.id(), s.person.roles(), sessions.stepUpFresh(s), sessions.elevation(s));
     }
 
     List<ConsoleModule> modules() {
@@ -617,8 +644,8 @@ public final class ConsoleServer implements AutoCloseable {
         String object = String.join("/", ctx.params);
         if (route.kind() == Kind.WRITE && session != null) {
             // the record of intent comes first: if the trail cannot take it, the write does not happen
-            if (!audit.write("CONSOLE_WRITE", person, fields("session", tag, "route", route.pattern(), "object", object,
-                    "phase", "attempt"))) {
+            if (!audit.write("CONSOLE_WRITE", person, withElevation(session, fields("session", tag, "route", route.pattern(),
+                    "object", object, "phase", "attempt")))) {
                 return Reply.error(503, "audit trail unavailable");
             }
         }
@@ -637,8 +664,8 @@ public final class ConsoleServer implements AutoCloseable {
             return r;
         }
         if (route.kind() == Kind.WRITE && session != null) {
-            audit.write("CONSOLE_WRITE", person, fields("session", tag, "route", route.pattern(), "object", object, "phase",
-                    "result", "status", Integer.toString(r.status()), "detail", r.audit()));
+            audit.write("CONSOLE_WRITE", person, withElevation(session, fields("session", tag, "route", route.pattern(), "object",
+                    object, "phase", "result", "status", Integer.toString(r.status()), "detail", r.audit())));
         } else if (route.kind() == Kind.SENSITIVE && session != null) {
             // a page left open that refreshes itself is not somebody reading again; a person reading the same thing
             // twice within a minute is one record that says "twice"
@@ -683,6 +710,15 @@ public final class ConsoleServer implements AutoCloseable {
                     "route", route.pattern(), "why", detail));
         }
         return Reply.error(403, "forbidden");
+    }
+
+    /** A write made inside an elevation says which one, so its records can be found together. */
+    private Map<String, String> withElevation(ConsoleSessions.Session session, Map<String, String> f) {
+        ConsoleModule.Elevation e = sessions.elevation(session);
+        if (e != null) {
+            f.put("elevation", e.id());
+        }
+        return f;
     }
 
     static Map<String, String> fields(String... kv) {
@@ -843,8 +879,18 @@ public final class ConsoleServer implements AutoCloseable {
 
     // ---- the live feed ----------------------------------------------------------------------------------------
 
+    /** Writes the record of every elevation whose time ran out (or whose session ended) since the last call. */
+    void closeElevations() {
+        sessions.expireElevations();
+        for (ConsoleSessions.Ended e : sessions.drainEnded()) {
+            audit.write("ELEVATION_ENDED", e.person(), fields("elevation", e.elevation().id(), "session", e.session(),
+                    "how", e.how(), "reason", e.elevation().reason(), "until", e.elevation().until().toString()));
+        }
+    }
+
     private void poll() {
         try {
+            closeElevations();
             hub.closeWhere(id -> !sessions.valid(id));
             if (hub.open() == 0) {
                 lastRaised = world().raised.size();
@@ -950,6 +996,8 @@ public final class ConsoleServer implements AutoCloseable {
         private final List<ConsoleModule> modules = new ArrayList<>();
         private Duration passkeyWindow;
         private Duration auditWindow;
+        private PasskeyStepUp passkeys;
+        private Duration elevationLength = Duration.ofMinutes(10);
 
         private Builder(LabHandle lab, SocChannel channel, VerdictSigner signer, ConsoleAuth auth, SSLContext tls) {
             this.lab = lab;
@@ -989,6 +1037,21 @@ public final class ConsoleServer implements AutoCloseable {
             }
             passkeyWindow = window;
             auditWindow = audit;
+            return this;
+        }
+
+        /** How a passkey is proved. The default is the typed passkey; Stage 5 passes the Windows Hello one. */
+        public Builder passkeyStepUp(PasskeyStepUp v) {
+            passkeys = Objects.requireNonNull(v, "passkeyStepUp");
+            return this;
+        }
+
+        /** How long an elevation lasts, in real time (default ten minutes). */
+        public Builder elevationLength(Duration v) {
+            if (v.isZero() || v.isNegative()) {
+                throw new IllegalArgumentException("an elevation must last some time");
+            }
+            elevationLength = v;
             return this;
         }
 

@@ -13,7 +13,18 @@ public record AccessRequest(String id, Kind kind, Status status, String subjectI
                             String displayName, String department, String businessRole, String decidedBy,
                             String decisionReason, Instant createdAt, Instant updatedAt, List<String> items) {
 
-    public enum Kind { JOINER, LEAVER, ACCESS }
+    /**
+     * The last four are privileged changes: an administrator asks, and only a DIFFERENT administrator decides. CREATE_ADMIN makes a
+     * new person with the administrator role; ADD_ADMIN gives it to an existing person; REMOVE_ADMIN takes it away; OWN_ACCESS
+     * is an administrator's change to their own access.
+     */
+    public enum Kind {
+        JOINER, LEAVER, ACCESS, CREATE_ADMIN, ADD_ADMIN, REMOVE_ADMIN, OWN_ACCESS;
+
+        public boolean privileged() {
+            return this == CREATE_ADMIN || this == ADD_ADMIN || this == REMOVE_ADMIN || this == OWN_ACCESS;
+        }
+    }
 
     /** PENDING waits for the administrator (joiners) or is being processed; APPROVED waits only for second approvers. */
     public enum Status { PENDING, APPROVED, REJECTED, DONE, CANCELLED }

@@ -138,12 +138,17 @@ public final class AdminModule implements ConsoleModule {
 
         // the access process: joiners to decide, sensitive grants waiting for the administrator
         routes.get("access/queue", Role.ADMIN, ModuleKit.guard(Role.ADMIN, (r, p) -> access(a -> a.adminQueue(r))));
-        routes.post("access/joiners/{}/save", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN,
+        routes.post("access/joiners/{}/save", Role.ADMIN, false, ModuleKit.guard(Role.ADMIN,
                 (r, p) -> access(a -> a.saveJoiner(r, ModuleKit.id(p.get(0))))));
-        routes.post("access/joiners/{}/reject", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN,
+        routes.post("access/joiners/{}/reject", Role.ADMIN, false, ModuleKit.guard(Role.ADMIN,
                 (r, p) -> access(a -> a.rejectJoiner(r, ModuleKit.id(p.get(0))))));
-        routes.post("access/approvals/{}/decision", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN,
+        routes.post("access/approvals/{}/decision", Role.ADMIN, false, ModuleKit.guard(Role.ADMIN,
                 (r, p) -> access(a -> a.decide(r, ModuleKit.id(p.get(0)), Role.ADMIN))));
+        // the administrator's own requests (create or change an administrator, change one's own access) go to the OTHER one
+        routes.post("access/privileged", Role.ADMIN, false, ModuleKit.guard(Role.ADMIN,
+                (r, p) -> access(a -> a.requestPrivileged(r))));
+        routes.post("access/privileged/{}/decision", Role.ADMIN, false, ModuleKit.guard(Role.ADMIN,
+                (r, p) -> access(a -> a.decidePrivileged(r, ModuleKit.id(p.get(0))))));
     }
 
     // ---- the person's own page ------------------------------------------------------------------------

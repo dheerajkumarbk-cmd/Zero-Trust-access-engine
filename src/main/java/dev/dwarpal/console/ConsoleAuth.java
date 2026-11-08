@@ -330,6 +330,43 @@ public final class ConsoleAuth {
         return after > 0 ? new Authenticated(Status.LOCKED, null, after, subject) : Authenticated.failed(subject);
     }
 
+    /**
+     * Is this the person's security PIN? On its own, for an elevation (the passkey is checked beside it). Wrong guesses
+     * cost the same growing wait as wrong passwords, and an unknown person costs the same work as a known one.
+     */
+    public Authenticated checkPin(String subject, String pin, String source) {
+        String account = "pin:" + subject;
+        long wait = throttle.retryAfterSeconds(account, source);
+        if (wait > 0) {
+            return new Authenticated(Status.LOCKED, null, wait, subject);
+        }
+        Card card = cards.get(subject);
+        boolean ok = pinMatches(card == null ? dummy : card, pin == null ? "" : pin) && card != null;
+        if (ok) {
+            throttle.success(account, source);
+            return new Authenticated(Status.OK, card.person(), 0, subject);
+        }
+        throttle.failure(account, source);
+        long after = throttle.retryAfterSeconds(account, source);
+        return after > 0 ? new Authenticated(Status.LOCKED, null, after, subject) : Authenticated.failed(subject);
+    }
+
+    /**
+     * Gives a signed-in person the roles the directory now says they hold. True when that changed anything, so the caller
+     * can end their sessions. A person who cannot sign in at all (no card) is left alone.
+     */
+    public boolean updateRoles(String id, Set<dev.dwarpal.console.ConsoleModule.Role> roles) {
+        boolean[] changed = new boolean[1];
+        cards.computeIfPresent(id, (k, c) -> {
+            if (c.person().roles().equals(roles)) {
+                return c;
+            }
+            changed[0] = true;
+            return new Card(new Person(c.person().id(), c.person().display(), roles), c.key(), c.pinSalt(), c.pinHash());
+        });
+        return changed[0];
+    }
+
     /** Ten new one-use codes, shown once; older ones stop working. Only their hashes are kept. */
     public Optional<List<String>> newBackupCodes(String subject, String password, String pin, String source, Changed[] result) {
         Changed proof = prove(subject, password, pin, source);

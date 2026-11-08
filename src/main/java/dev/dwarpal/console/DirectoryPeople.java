@@ -30,6 +30,7 @@ final class DirectoryPeople {
             "ben", new String[]{"SOC", "Security analyst"},
             "cleo", new String[]{"SOC", "SOC lead"},
             "dana", new String[]{"IT Security", "Administrator"},
+            "spector", new String[]{"Administration", "Administrator"},
             "uma", new String[]{"Finance", "Finance officer"},
             "hana", new String[]{"Human Resources", "HR officer"});
 

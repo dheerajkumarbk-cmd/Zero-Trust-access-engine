@@ -30,7 +30,7 @@ class DirectoryPeopleTest {
         MemoryDirectory directory = new MemoryDirectory();
         List<Enrolment> file = DemoPeople.fresh();
         DirectoryPeople.Result r = DirectoryPeople.sync(directory, file, CLOCK);
-        assertEquals(6, r.movedIn());
+        assertEquals(7, r.movedIn());
         assertEquals(0, r.skipped());
         assertEquals(file.stream().map(e -> e.person().id()).sorted().toList(), r.people().stream().map(e -> e.person().id()).sorted().toList());
         DirectoryPerson hana = directory.find("hana").orElseThrow();
@@ -61,7 +61,7 @@ class DirectoryPeopleTest {
         Enrolment ana = r.people().stream().filter(e -> e.person().id().equals("ana")).findFirst().orElseThrow();
         assertEquals("Ana, promoted", ana.person().display());
         assertEquals(Set.of(Role.LEAD, Role.ANALYST), ana.person().roles());
-        assertEquals(5, r.movedIn(), "ana was already there");
+        assertEquals(6, r.movedIn(), "ana was already there");
     }
 
     @Test
@@ -70,7 +70,7 @@ class DirectoryPeopleTest {
         directory.addIfAbsent(person("ben", "Ben, left", DirectoryPerson.Status.DISABLED, "ANALYST"));
         DirectoryPeople.Result r = DirectoryPeople.sync(directory, DemoPeople.fresh(), CLOCK);
         assertFalse(r.people().stream().anyMatch(e -> e.person().id().equals("ben")));
-        assertEquals(5, r.people().size());
+        assertEquals(6, r.people().size());
         assertEquals(1, r.skipped());
     }
 

@@ -100,13 +100,13 @@ class LabConsoleDirectoryEndToEndTest {
         Path dir = Files.createTempDirectory("dwarpal-directory-e2e");
         launch(dir, r -> {
             assertTrue(r.log().contains("Directory: PostgreSQL"), r.log());
-            assertTrue(r.log().contains("6 people can sign in (6 moved in by this start"), r.log());
+            assertTrue(r.log().contains("7 people can sign in (7 moved in by this start"), r.log());
             assertTrue(r.people().keySet().containsAll(List.of("ana", "ben", "cleo", "dana", "uma", "hana")), r.log());
 
             Session dana = login(r, "dana");
             HttpResponse<String> page = get(r, "/console/api/admin/directory", dana);
             assertEquals(200, page.statusCode(), page.body());
-            for (String id : List.of("ana", "ben", "cleo", "dana", "uma", "hana")) {
+            for (String id : List.of("ana", "ben", "cleo", "dana", "uma", "hana", "spector")) {
                 assertTrue(page.body().contains("\"id\":\"" + id + "\""), id + " in " + page.body());
             }
             assertTrue(page.body().contains("\"HR\""), "Hana holds the HR role");
@@ -142,7 +142,7 @@ class LabConsoleDirectoryEndToEndTest {
             return null;
         });
         launch(dir, r -> {
-            assertTrue(r.log().contains("5 people can sign in (0 moved in by this start, 1 not enrolled)"), r.log());
+            assertTrue(r.log().contains("6 people can sign in (0 moved in by this start, 1 not enrolled)"), r.log());
             assertFalse(r.log().contains("Audit trail on disk: 0 records"), "the first run's sign-ins were saved: " + r.log());
             assertTrue(r.log().contains("records from earlier runs, checked and intact"), r.log());
             assertNotEquals(200, loginStatus(r, "ben"), "a disabled person cannot finish signing in");

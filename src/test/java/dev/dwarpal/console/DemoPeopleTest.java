@@ -23,7 +23,7 @@ class DemoPeopleTest {
     void theLabKeepsItsPeopleAndSecretsBetweenStarts(@TempDir Path dir) throws Exception {
         List<Enrolment> first = DemoPeople.loadOrCreate(dir);
         List<Enrolment> second = DemoPeople.loadOrCreate(dir);
-        assertEquals(6, first.size());
+        assertEquals(7, first.size());
         assertEquals(first.stream().map(e -> e.person().id() + e.password() + e.pin()).toList(),
                 second.stream().map(e -> e.person().id() + e.password() + e.pin()).toList());
         assertTrue(Files.isRegularFile(dir.resolve("console").resolve("people.txt")));
@@ -71,7 +71,7 @@ class DemoPeopleTest {
         List<String> old = Files.readAllLines(file).stream().filter(l -> !l.startsWith("hana|")).toList();
         Files.write(file, old);
         List<Enrolment> second = DemoPeople.loadOrCreate(dir);
-        assertEquals(6, second.size());
+        assertEquals(7, second.size());
         for (Enrolment e : first) {
             if (!e.person().id().equals("hana")) {
                 Enrolment same = second.stream().filter(x -> x.person().id().equals(e.person().id())).findFirst().orElseThrow();

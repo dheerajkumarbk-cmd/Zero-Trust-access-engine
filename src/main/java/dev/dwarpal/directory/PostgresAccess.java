@@ -81,6 +81,13 @@ public final class PostgresAccess implements Access {
             + " WHERE grant_id = ? AND state IN ('ACTIVE', 'PENDING')";
     private static final String PENDING_IN_REQUEST = "SELECT COUNT(*) FROM access_grant WHERE request_id = ? AND state = 'PENDING'";
 
+    private static final String REQUESTS_OPEN_PRIVILEGED = REQUEST_COLUMNS
+            + " WHERE kind IN ('CREATE_ADMIN', 'ADD_ADMIN', 'REMOVE_ADMIN', 'OWN_ACCESS') AND status = 'PENDING' ORDER BY created_at";
+    private static final String OPEN_PRIVILEGED_FOR = "SELECT 1 FROM access_request WHERE subject_id = ? AND kind = ? AND status = 'PENDING'";
+    private static final String COUNT_ACTIVE_ADMINS = "SELECT COUNT(*) FROM directory_person p JOIN directory_person_role r"
+            + " ON r.person_id = p.person_id WHERE p.status = 'ACTIVE' AND r.console_role = 'ADMIN'";
+    private static final String DELETE_ONE_ROLE = "DELETE FROM directory_person_role WHERE person_id = ? AND console_role = ?";
+
     private static final String PERSON_STATUS = "SELECT status FROM directory_person WHERE person_id = ?";
     private static final String HAS_ROLE = "SELECT 1 FROM directory_person_role WHERE person_id = ? AND console_role = ?";
     private static final String PERSON_ROLES = "SELECT console_role FROM directory_person_role WHERE person_id = ? ORDER BY console_role";
@@ -145,7 +152,7 @@ public final class PostgresAccess implements Access {
             String id = newId("req-");
             insertRequest(c, id, AccessRequest.Kind.JOINER, AccessRequest.Status.PENDING, personId, hrId, why, name, dept, job, now);
             List<AccessEvent> events = List.of(event("ACCESS_REQUESTED", hrId, "kind", "JOINER", "request", id, "subject", personId,
-                    "businessRole", job));
+                    "businessRole", job, "before", "no such person", "after", "request waiting for the administrator"));
             return new AccessResult(loadRequest(c, id), List.of(), events);
         }));
     }
@@ -168,10 +175,10 @@ public final class PostgresAccess implements Access {
                 throw new Refused(Refused.Code.CONFLICT, "that person exists already");
             }
             Instant now = clock.instant();
-            insertPerson(c, req, now);
+            insertPerson(c, req, "HR", now);
             List<AccessEvent> events = new ArrayList<>();
             events.add(event("ACCESS_PERSON_ADDED", adminId, "request", req.id(), "person", req.subjectId(), "businessRole",
-                    req.businessRole(), "source", "HR"));
+                    req.businessRole(), "source", "HR", "before", "no such person", "after", "ACTIVE, no console role yet"));
             for (String item : chosen) {
                 insertRequestItem(c, req.id(), item);
                 AccessItem it = catalog.get(item);
@@ -180,15 +187,15 @@ public final class PostgresAccess implements Access {
                     insertGrant(c, grantId, req.id(), req.subjectId(), item, AccessGrant.State.ACTIVE, now, now);
                     grantRole(c, req.subjectId(), it);
                     events.add(event("ACCESS_GRANTED", adminId, "request", req.id(), "grant", grantId, "person", req.subjectId(),
-                            "item", item, "how", "ticked by the administrator, simple item"));
+                            "item", item, "how", "ticked by the administrator, simple item", "before", "none", "after", "ACTIVE"));
                 } else {
                     insertGrant(c, grantId, req.id(), req.subjectId(), item, AccessGrant.State.PENDING, now, null);
                     insertApproval(c, grantId, "ADMIN", adminId, AccessGrant.Decision.APPROVED, "ticked and saved", now);
                     insertApproval(c, grantId, "LEAD", null, AccessGrant.Decision.PENDING, null, null);
                     events.add(event("ACCESS_APPROVED", adminId, "request", req.id(), "grant", grantId, "person", req.subjectId(),
-                            "item", item, "role", "ADMIN"));
+                            "item", item, "role", "ADMIN", "before", "approval by ADMIN: PENDING", "after", "approval by ADMIN: APPROVED"));
                     events.add(event("ACCESS_PENDING", adminId, "request", req.id(), "grant", grantId, "person", req.subjectId(),
-                            "item", item, "waiting", "LEAD"));
+                            "item", item, "waiting", "LEAD", "before", "none", "after", "PENDING, waiting for LEAD"));
                 }
             }
             AccessRequest.Status next = pendingCount(c, req.id()) == 0 ? AccessRequest.Status.DONE : AccessRequest.Status.APPROVED;
@@ -208,7 +215,7 @@ public final class PostgresAccess implements Access {
             }
             setStatus(c, req.id(), AccessRequest.Status.PENDING, AccessRequest.Status.REJECTED, adminId, why, clock.instant());
             List<AccessEvent> events = List.of(event("ACCESS_REJECTED", adminId, "request", req.id(), "kind", "JOINER", "subject",
-                    req.subjectId(), "reason", why));
+                    req.subjectId(), "reason", why, "before", "request PENDING", "after", "request REJECTED"));
             return new AccessResult(loadRequest(c, req.id()), List.of(), events);
         }));
     }
@@ -240,7 +247,7 @@ public final class PostgresAccess implements Access {
             insertRequest(c, id, AccessRequest.Kind.ACCESS, AccessRequest.Status.PENDING, personId, personId, why, null, null, null, now);
             List<AccessEvent> events = new ArrayList<>();
             events.add(event("ACCESS_REQUESTED", personId, "kind", "ACCESS", "request", id, "subject", personId, "items",
-                    String.join(",", chosen)));
+                    String.join(",", chosen), "before", "none", "after", "request PENDING"));
             for (String item : chosen) {
                 insertRequestItem(c, id, item);
                 AccessItem it = catalog.get(item);
@@ -249,13 +256,13 @@ public final class PostgresAccess implements Access {
                     insertGrant(c, grantId, id, personId, item, AccessGrant.State.ACTIVE, now, now);
                     grantRole(c, personId, it);
                     events.add(event("ACCESS_GRANTED", personId, "request", id, "grant", grantId, "person", personId, "item", item,
-                            "how", "automatic: the directory shows the person is active"));
+                            "how", "automatic: the directory shows the person is active", "before", "none", "after", "ACTIVE"));
                 } else {
                     insertGrant(c, grantId, id, personId, item, AccessGrant.State.PENDING, now, null);
                     insertApproval(c, grantId, "ADMIN", null, AccessGrant.Decision.PENDING, null, null);
                     insertApproval(c, grantId, "LEAD", null, AccessGrant.Decision.PENDING, null, null);
                     events.add(event("ACCESS_PENDING", personId, "request", id, "grant", grantId, "person", personId, "item", item,
-                            "waiting", "ADMIN,LEAD"));
+                            "waiting", "ADMIN,LEAD", "before", "none", "after", "PENDING, waiting for ADMIN and LEAD"));
                 }
             }
             AccessRequest.Status next = pendingCount(c, id) == 0 ? AccessRequest.Status.DONE : AccessRequest.Status.PENDING;
@@ -298,7 +305,9 @@ public final class PostgresAccess implements Access {
             }
             List<AccessEvent> events = new ArrayList<>();
             events.add(event(approve ? "ACCESS_APPROVED" : "ACCESS_REJECTED", approverId, "request", req.id(), "grant", grantId,
-                    "person", g.personId(), "item", g.itemId(), "role", approverRole, "reason", why == null ? "" : why));
+                    "person", g.personId(), "item", g.itemId(), "role", approverRole, "reason", why == null ? "" : why,
+                    "before", "approval by " + approverRole + ": PENDING",
+                    "after", "approval by " + approverRole + ": " + (approve ? "APPROVED" : "REJECTED")));
             if (approve) {
                 if (activate(c, grantId, now) == 1) {
                     AccessItem it = items(c).get(g.itemId());
@@ -306,7 +315,7 @@ public final class PostgresAccess implements Access {
                         grantRole(c, g.personId(), it);
                     }
                     events.add(event("ACCESS_GRANTED", approverId, "request", req.id(), "grant", grantId, "person", g.personId(),
-                            "item", g.itemId(), "how", "approved by every approver the item needs"));
+                            "item", g.itemId(), "how", "approved by every approver the item needs", "before", "PENDING", "after", "ACTIVE"));
                 }
             } else {
                 reject(c, grantId);
@@ -346,7 +355,8 @@ public final class PostgresAccess implements Access {
             String id = newId("req-");
             insertRequest(c, id, AccessRequest.Kind.LEAVER, AccessRequest.Status.DONE, personId, hrId, why, null, null, null, now);
             List<AccessEvent> events = new ArrayList<>();
-            events.add(event("ACCESS_REQUESTED", hrId, "kind", "LEAVER", "request", id, "subject", personId, "reason", why));
+            events.add(event("ACCESS_REQUESTED", hrId, "kind", "LEAVER", "request", id, "subject", personId, "reason", why,
+                    "before", "ACTIVE person", "after", "everything removed"));
             // every grant the records show, not a re-calculation from the role, so one-off extras go as well
             for (AccessGrant g : liveGrants(c, personId)) {
                 try (PreparedStatement s = c.prepareStatement(REMOVE_GRANT)) {
@@ -356,7 +366,7 @@ public final class PostgresAccess implements Access {
                     s.executeUpdate();
                 }
                 events.add(event("ACCESS_REMOVED", hrId, "request", id, "grant", g.id(), "person", personId, "item", g.itemId(),
-                        "was", g.state().name(), "why", "leaver"));
+                        "was", g.state().name(), "why", "leaver", "before", g.state().name(), "after", "REMOVED"));
             }
             List<String> roles = new ArrayList<>();
             try (PreparedStatement s = c.prepareStatement(PERSON_ROLES)) {
@@ -368,7 +378,8 @@ public final class PostgresAccess implements Access {
                 }
             }
             deleteRoles(c, personId);
-            events.add(event("ACCESS_ROLES_REMOVED", hrId, "request", id, "person", personId, "roles", String.join(",", roles)));
+            events.add(event("ACCESS_ROLES_REMOVED", hrId, "request", id, "person", personId, "roles", String.join(",", roles),
+                    "before", "roles: " + String.join(",", roles), "after", "roles: none"));
             try (PreparedStatement s = c.prepareStatement(CANCEL_OPEN_REQUESTS)) {
                 s.setString(1, "the person left");
                 s.setObject(2, at(now));
@@ -376,9 +387,191 @@ public final class PostgresAccess implements Access {
                 s.executeUpdate();
             }
             disable(c, personId, now);
-            events.add(event("ACCESS_PERSON_DISABLED", hrId, "request", id, "person", personId));
+            events.add(event("ACCESS_PERSON_DISABLED", hrId, "request", id, "person", personId, "before", "ACTIVE", "after", "DISABLED"));
             return new AccessResult(loadRequest(c, id), personGrants(c, personId), events);
         }));
+    }
+
+    // ---- privileged changes: one administrator asks, a DIFFERENT one decides --------------------------------------------------
+
+    @Override
+    public AccessResult requestPrivileged(String adminId, AccessRequest.Kind kind, String targetId, String displayName,
+                                          String department, String businessRole, Set<String> items, String reason) {
+        if (kind == null || !kind.privileged()) {
+            throw new Refused(Refused.Code.INVALID, "that is not a privileged change");
+        }
+        String why = plain(reason, "reason", 300);
+        String target = kind == AccessRequest.Kind.OWN_ACCESS ? adminId : targetId;
+        if (!DirectoryPerson.validId(target)) {
+            throw new Refused(Refused.Code.INVALID, "a person id is 2 to 32 lower-case letters, digits, . _ -");
+        }
+        return locked(() -> db.write(c -> {
+            requireActive(c, adminId, "ADMIN");
+            String name = null;
+            String dept = null;
+            String job = null;
+            Set<String> chosen = new TreeSet<>();
+            String before;
+            String after;
+            switch (kind) {
+                case CREATE_ADMIN -> {
+                    name = plain(displayName, "name", DirectoryPerson.NAME_MAX);
+                    dept = plain(department, "department", DirectoryPerson.LABEL_MAX);
+                    job = plain(businessRole, "business role", DirectoryPerson.LABEL_MAX);
+                    if (personStatus(c, target) != null) {
+                        throw new Refused(Refused.Code.CONFLICT, "that person exists already");
+                    }
+                    before = "no such person";
+                    after = "a new person with the administrator role";
+                }
+                case ADD_ADMIN -> {
+                    if (!"ACTIVE".equals(personStatus(c, target))) {
+                        throw new Refused(Refused.Code.NOT_FOUND, "not found");
+                    }
+                    if (hasRole(c, target, "ADMIN")) {
+                        throw new Refused(Refused.Code.CONFLICT, "that person is an administrator already");
+                    }
+                    before = "roles: " + String.join(",", rolesOf(c, target));
+                    after = "the administrator role added";
+                }
+                case REMOVE_ADMIN -> {
+                    if (!"ACTIVE".equals(personStatus(c, target)) || !hasRole(c, target, "ADMIN")) {
+                        throw new Refused(Refused.Code.NOT_FOUND, "that person is not an administrator");
+                    }
+                    if (activeAdmins(c) < 2) {
+                        throw new Refused(Refused.Code.CONFLICT, "the last administrator cannot be removed");
+                    }
+                    before = "roles: " + String.join(",", rolesOf(c, target));
+                    after = "the administrator role removed";
+                }
+                case OWN_ACCESS -> {
+                    Map<String, AccessItem> catalog = items(c);
+                    chosen.addAll(Objects.requireNonNull(items, "items"));
+                    if (chosen.isEmpty() || chosen.size() > MAX_ITEMS || !catalog.keySet().containsAll(chosen)) {
+                        throw new Refused(Refused.Code.INVALID, "choose one or more items from the list");
+                    }
+                    for (String item : chosen) {
+                        AccessItem it = catalog.get(item);
+                        if (it.consoleRole() != null) {
+                            throw new Refused(Refused.Code.INVALID, "console roles change through the administrator changes");
+                        }
+                        if (holds(c, adminId, item)) {
+                            throw new Refused(Refused.Code.CONFLICT, "you have " + it.label() + " already");
+                        }
+                    }
+                    before = "own access without: " + String.join(",", chosen);
+                    after = "own access with: " + String.join(",", chosen);
+                }
+                default -> throw new Refused(Refused.Code.INVALID, "that is not a privileged change");
+            }
+            if (openPrivilegedFor(c, target, kind)) {
+                throw new Refused(Refused.Code.CONFLICT, "that change is waiting for a decision already");
+            }
+            Instant now = clock.instant();
+            String id = newId("req-");
+            insertRequest(c, id, kind, AccessRequest.Status.PENDING, target, adminId, why, name, dept, job, now);
+            for (String item : chosen) {
+                insertRequestItem(c, id, item);
+            }
+            List<AccessEvent> events = List.of(event("ACCESS_PRIVILEGED_REQUESTED", adminId, "request", id, "change", kind.name(),
+                    "target", target, "items", String.join(",", chosen), "reason", why, "waiting", "the other administrator",
+                    "before", before, "after", after + " (if approved)"));
+            return new AccessResult(loadRequest(c, id), List.of(), events);
+        }));
+    }
+
+    @Override
+    public AccessResult decidePrivileged(String approverId, String requestId, boolean approve, String reason) {
+        String why = approve ? optional(reason, 300) : plain(reason, "reason", 300);
+        return locked(() -> db.write(c -> {
+            requireActive(c, approverId, "ADMIN");
+            AccessRequest req = requestId == null || requestId.length() > 40 ? null : findRequest(c, requestId).orElse(null);
+            if (req == null || !req.kind().privileged()) {
+                throw new Refused(Refused.Code.NOT_FOUND, "not found");
+            }
+            if (req.status() != AccessRequest.Status.PENDING) {
+                throw new Refused(Refused.Code.CONFLICT, "that request has been dealt with already");
+            }
+            if (req.requestedBy().equals(approverId)) {
+                throw new Refused(Refused.Code.FORBIDDEN, "nobody approves their own request");
+            }
+            if (approve && (!"ACTIVE".equals(personStatus(c, req.requestedBy())) || !hasRole(c, req.requestedBy(), "ADMIN"))) {
+                throw new Refused(Refused.Code.CONFLICT, "the person who asked is no longer an administrator");
+            }
+            Instant now = clock.instant();
+            String target = req.subjectId();
+            String change = req.kind().name();
+            List<AccessEvent> events = new ArrayList<>();
+            if (!approve) {
+                setStatus(c, req.id(), AccessRequest.Status.PENDING, AccessRequest.Status.REJECTED, approverId, why, now);
+                events.add(event("ACCESS_PRIVILEGED_REJECTED", approverId, "request", req.id(), "change", change, "target", target,
+                        "asked by", req.requestedBy(), "reason", why, "before", "request PENDING", "after", "request REJECTED, nothing changed"));
+                return new AccessResult(loadRequest(c, req.id()), List.of(), events);
+            }
+            events.add(event("ACCESS_PRIVILEGED_APPROVED", approverId, "request", req.id(), "change", change, "target", target,
+                    "asked by", req.requestedBy(), "reason", why == null ? "" : why, "before", "request PENDING", "after", "request APPROVED"));
+            switch (req.kind()) {
+                case CREATE_ADMIN -> {
+                    if (personStatus(c, target) != null) {
+                        throw new Refused(Refused.Code.CONFLICT, "that person exists already");
+                    }
+                    insertPerson(c, req, "ADMIN", now);
+                    insertRole(c, target, "ADMIN");
+                    events.add(event("ACCESS_PERSON_ADDED", approverId, "request", req.id(), "person", target, "businessRole",
+                            req.businessRole(), "source", "ADMIN", "before", "no such person", "after", "ACTIVE, role ADMIN"));
+                }
+                case ADD_ADMIN -> {
+                    if (!"ACTIVE".equals(personStatus(c, target)) || hasRole(c, target, "ADMIN")) {
+                        throw new Refused(Refused.Code.CONFLICT, "that person cannot be given the administrator role now");
+                    }
+                    String was = String.join(",", rolesOf(c, target));
+                    insertRole(c, target, "ADMIN");
+                    events.add(event("ACCESS_ROLE_ADDED", approverId, "request", req.id(), "person", target, "role", "ADMIN",
+                            "before", "roles: " + was, "after", "roles: " + String.join(",", rolesOf(c, target))));
+                }
+                case REMOVE_ADMIN -> {
+                    if (!"ACTIVE".equals(personStatus(c, target)) || !hasRole(c, target, "ADMIN")) {
+                        throw new Refused(Refused.Code.CONFLICT, "that person is not an administrator now");
+                    }
+                    if (activeAdmins(c) < 2) {
+                        throw new Refused(Refused.Code.CONFLICT, "the last administrator cannot be removed");
+                    }
+                    String was = String.join(",", rolesOf(c, target));
+                    try (PreparedStatement st = c.prepareStatement(DELETE_ONE_ROLE)) {
+                        st.setString(1, target);
+                        st.setString(2, "ADMIN");
+                        st.executeUpdate();
+                    }
+                    String left = String.join(",", rolesOf(c, target));
+                    events.add(event("ACCESS_ROLE_REMOVED", approverId, "request", req.id(), "person", target, "role", "ADMIN",
+                            "before", "roles: " + was, "after", "roles: " + (left.isEmpty() ? "none" : left)));
+                }
+                case OWN_ACCESS -> {
+                    for (String item : req.items()) {
+                        if (holds(c, target, item)) {
+                            throw new Refused(Refused.Code.CONFLICT, "the person has that already");
+                        }
+                        String grantId = newId("grt-");
+                        insertGrant(c, grantId, req.id(), target, item, AccessGrant.State.ACTIVE, now, now);
+                        events.add(event("ACCESS_GRANTED", approverId, "request", req.id(), "grant", grantId, "person", target,
+                                "item", item, "how", "approved by the other administrator", "before", "none", "after", "ACTIVE"));
+                    }
+                }
+                default -> throw new Refused(Refused.Code.INVALID, "that is not a privileged change");
+            }
+            setStatus(c, req.id(), AccessRequest.Status.PENDING, AccessRequest.Status.DONE, approverId,
+                    why == null ? "approved" : why, now);
+            return new AccessResult(loadRequest(c, req.id()), requestGrants(c, req.id()), events);
+        }));
+    }
+
+    @Override
+    public List<AccessRequest> openPrivileged() {
+        return db.read(c -> {
+            try (PreparedStatement s = c.prepareStatement(REQUESTS_OPEN_PRIVILEGED)) {
+                return readRequests(c, s, Integer.MAX_VALUE);
+            }
+        });
     }
 
     // ---- reads -----------------------------------------------------------------------------------------------------------
@@ -575,6 +768,43 @@ public final class PostgresAccess implements Access {
         }
     }
 
+    private static List<String> rolesOf(Connection c, String person) throws SQLException {
+        List<String> out = new ArrayList<>();
+        try (PreparedStatement s = c.prepareStatement(PERSON_ROLES)) {
+            s.setString(1, person);
+            try (ResultSet r = s.executeQuery()) {
+                while (r.next()) {
+                    out.add(r.getString(1));
+                }
+            }
+        }
+        return out;
+    }
+
+    private static void insertRole(Connection c, String person, String role) throws SQLException {
+        try (PreparedStatement s = c.prepareStatement(INSERT_ROLE)) {
+            s.setString(1, person);
+            s.setString(2, role);
+            s.executeUpdate();
+        }
+    }
+
+    private static int activeAdmins(Connection c) throws SQLException {
+        try (PreparedStatement s = c.prepareStatement(COUNT_ACTIVE_ADMINS); ResultSet r = s.executeQuery()) {
+            return r.next() ? r.getInt(1) : 0;
+        }
+    }
+
+    private static boolean openPrivilegedFor(Connection c, String target, AccessRequest.Kind kind) throws SQLException {
+        try (PreparedStatement s = c.prepareStatement(OPEN_PRIVILEGED_FOR)) {
+            s.setString(1, target);
+            s.setString(2, kind.name());
+            try (ResultSet r = s.executeQuery()) {
+                return r.next();
+            }
+        }
+    }
+
     private static boolean openJoinerFor(Connection c, String id) throws SQLException {
         try (PreparedStatement s = c.prepareStatement(OPEN_JOINER_FOR)) {
             s.setString(1, id);
@@ -653,14 +883,14 @@ public final class PostgresAccess implements Access {
         }
     }
 
-    private static void insertPerson(Connection c, AccessRequest req, Instant now) throws SQLException {
+    private static void insertPerson(Connection c, AccessRequest req, String source, Instant now) throws SQLException {
         try (PreparedStatement s = c.prepareStatement(INSERT_PERSON)) {
             s.setString(1, req.subjectId());
             s.setString(2, req.displayName());
             s.setString(3, req.department());
             s.setString(4, req.businessRole());
             s.setString(5, "ACTIVE");
-            s.setString(6, "HR");
+            s.setString(6, source);
             s.setObject(7, at(now));
             s.setObject(8, at(now));
             s.executeUpdate();

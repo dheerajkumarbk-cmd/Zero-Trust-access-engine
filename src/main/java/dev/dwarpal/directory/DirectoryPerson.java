@@ -20,7 +20,7 @@ public record DirectoryPerson(String id, String displayName, String department, 
     public enum Status { ACTIVE, DISABLED }
 
     /** Where the person came from: the lab's own starting set, or an HR joiner request. */
-    public enum Source { SEED, HR }
+    public enum Source { SEED, HR, ADMIN }
 
     /** The console roles, spelled exactly as the database allows them. */
     public static final Set<String> ROLES = Set.of("ANALYST", "LEAD", "ADMIN", "USER", "HR");

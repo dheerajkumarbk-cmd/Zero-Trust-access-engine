@@ -85,6 +85,8 @@ public final class AccessApi {
         out.put("available", available);
         out.put("catalog", access.catalog());
         out.put("roles", r.who().roles().stream().map(Enum::name).sorted().toList());
+        // an administrator's request has no second approver to go to, so the page offers the privileged change instead
+        out.put("canRequestMore", !r.who().has(Role.ADMIN));
         return ModuleKit.json(out);
     }
 
@@ -120,25 +122,46 @@ public final class AccessApi {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("joiners", access.openJoiners());
         out.put("waiting", views(access.awaiting("ADMIN"), r.who().id()));
+        out.put("privileged", privileged(access.openPrivileged(), r.who().id()));
         out.put("recent", access.recent());
         out.put("catalog", access.catalog());
         out.put("templates", access.templates());
+        List<Map<String, Object>> people = new ArrayList<>();
+        for (DirectoryPerson p : directory.people()) {
+            if (p.status() == DirectoryPerson.Status.ACTIVE) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("id", p.id());
+                m.put("name", p.displayName());
+                m.put("department", p.department());
+                m.put("roles", p.consoleRoles().stream().sorted().toList());
+                people.add(m);
+            }
+        }
+        out.put("people", people);
         return ModuleKit.json(out);
     }
 
     // ---- changes -------------------------------------------------------------------------------------------------------
 
     public Response requestMore(ConsoleModule.Request r) {
+        if (r.who().has(Role.ADMIN)) {
+            // nobody could approve it: an administrator's own request needs the OTHER administrator
+            throw new ModuleKit.Refusal(403, "administrators use \"Request a privileged change\"");
+        }
         JsonValue.JObject body = ModuleKit.body(r, BODY_REQUEST);
         Set<String> items = strings(body, "items");
         String reason = ModuleKit.string(body, "reason").orElse(null);
-        return changed(() -> access.requestAccess(r.who().id(), items, reason));
+        Response response = changed(r, () -> access.requestAccess(r.who().id(), items, reason));
+        if (response.status() == 200) {
+            refresh(r.who().id());
+        }
+        return response;
     }
 
     public Response submitJoiner(ConsoleModule.Request r) {
         requireRole(r, Role.HR);
         JsonValue.JObject b = ModuleKit.body(r, BODY_JOINER);
-        return changed(() -> access.submitJoiner(r.who().id(), ModuleKit.string(b, "id").orElse(null),
+        return changed(r, () -> access.submitJoiner(r.who().id(), ModuleKit.string(b, "id").orElse(null),
                 ModuleKit.string(b, "name").orElse(null), ModuleKit.string(b, "department").orElse(null),
                 ModuleKit.string(b, "businessRole").orElse(null), ModuleKit.string(b, "reason").orElse(null)));
     }
@@ -147,7 +170,7 @@ public final class AccessApi {
         requireRole(r, Role.HR);
         JsonValue.JObject b = ModuleKit.body(r, BODY_LEAVER);
         String person = ModuleKit.string(b, "id").orElse(null);
-        Response response = changed(() -> access.leaver(r.who().id(), person, ModuleKit.string(b, "reason").orElse(null)));
+        Response response = changed(r, () -> access.leaver(r.who().id(), person, ModuleKit.string(b, "reason").orElse(null)));
         if (response.status() == 200) {
             // the database says the person has left: now nothing of theirs can be used
             ConsoleModule.Host h = host;
@@ -161,8 +184,9 @@ public final class AccessApi {
 
     public Response saveJoiner(ConsoleModule.Request r, String requestId) {
         requireRole(r, Role.ADMIN);
+        requireElevation(r);
         Set<String> items = strings(ModuleKit.body(r, BODY_SAVE), "items");
-        Response response = changed(() -> access.saveJoiner(r.who().id(), requestId, items));
+        Response response = changed(r, () -> access.saveJoiner(r.who().id(), requestId, items));
         if (response.status() == 200) {
             access.request(requestId).ifPresent(q -> credentials.personCreated(q.subjectId()));
         }
@@ -171,16 +195,95 @@ public final class AccessApi {
 
     public Response rejectJoiner(ConsoleModule.Request r, String requestId) {
         requireRole(r, Role.ADMIN);
+        requireElevation(r);
         JsonValue.JObject b = ModuleKit.body(r, BODY_REASON);
-        return changed(() -> access.rejectJoiner(r.who().id(), requestId, ModuleKit.string(b, "reason").orElse(null)));
+        return changed(r, () -> access.rejectJoiner(r.who().id(), requestId, ModuleKit.string(b, "reason").orElse(null)));
     }
 
     /** An approval as the administrator or as a lead: strictly the role asked for, never a higher one standing in. */
     public Response decide(ConsoleModule.Request r, String grantId, Role as) {
         requireRole(r, as);
+        requireElevation(r);
         JsonValue.JObject b = ModuleKit.body(r, BODY_DECISION);
         boolean approve = ModuleKit.bool(b, "approve").orElseThrow(() -> new ModuleKit.Refusal(400, "say whether you approve"));
-        return changed(() -> access.decide(r.who().id(), as.name(), grantId, approve, ModuleKit.string(b, "reason").orElse(null)));
+        Access.AccessResult[] done = new Access.AccessResult[1];
+        Response response = changed(r, () -> done[0] = access.decide(r.who().id(), as.name(), grantId, approve,
+                ModuleKit.string(b, "reason").orElse(null)));
+        if (response.status() == 200 && done[0] != null) {
+            refresh(done[0].request().subjectId());
+        }
+        return response;
+    }
+
+    // ---- privileged changes: one administrator asks, a DIFFERENT one decides -------------------------------------------------
+
+    private static final Set<String> BODY_PRIVILEGED = Set.of("change", "target", "name", "department", "businessRole", "items",
+            "reason");
+
+    /** An administrator asks for a change that only the other administrator may decide. Needs an elevation. */
+    public Response requestPrivileged(ConsoleModule.Request r) {
+        requireRole(r, Role.ADMIN);
+        requireElevation(r);
+        JsonValue.JObject b = ModuleKit.body(r, BODY_PRIVILEGED);
+        String change = ModuleKit.string(b, "change").orElse("");
+        AccessRequest.Kind kind;
+        try {
+            kind = AccessRequest.Kind.valueOf(change);
+        } catch (IllegalArgumentException unknown) {
+            throw new ModuleKit.Refusal(400, "choose one of the privileged changes");
+        }
+        if (!kind.privileged()) {
+            throw new ModuleKit.Refusal(400, "choose one of the privileged changes");
+        }
+        Set<String> items = b.get("items").isPresent() ? strings(b, "items") : Set.of();
+        return changed(r, () -> access.requestPrivileged(r.who().id(), kind, ModuleKit.string(b, "target").orElse(null),
+                ModuleKit.string(b, "name").orElse(null), ModuleKit.string(b, "department").orElse(null),
+                ModuleKit.string(b, "businessRole").orElse(null), items, ModuleKit.string(b, "reason").orElse(null)));
+    }
+
+    /** The other administrator decides. Needs an elevation; the one who asked is refused by the rules, not by the page. */
+    public Response decidePrivileged(ConsoleModule.Request r, String requestId) {
+        requireRole(r, Role.ADMIN);
+        requireElevation(r);
+        JsonValue.JObject b = ModuleKit.body(r, BODY_DECISION);
+        boolean approve = ModuleKit.bool(b, "approve").orElseThrow(() -> new ModuleKit.Refusal(400, "say whether you approve"));
+        Response response = changed(r, () -> access.decidePrivileged(r.who().id(), requestId, approve,
+                ModuleKit.string(b, "reason").orElse(null)));
+        if (response.status() == 200 && approve) {
+            access.request(requestId).ifPresent(q -> {
+                refresh(q.subjectId());
+                if (q.kind() == AccessRequest.Kind.CREATE_ADMIN) {
+                    credentials.personCreated(q.subjectId());
+                }
+            });
+        }
+        return response;
+    }
+
+    /** Makes a role change real at once: the console takes the roles the directory now shows and ends the person's sessions. */
+    private void refresh(String personId) {
+        ConsoleModule.Host h = host;
+        if (h != null) {
+            directory.find(personId).ifPresent(p -> h.rolesChanged(personId, p.consoleRoles()));
+        }
+    }
+
+    private static void requireElevation(ConsoleModule.Request r) {
+        if (!r.who().elevated()) {
+            throw new ModuleKit.Refusal(423, "elevation required");
+        }
+    }
+
+    private List<Map<String, Object>> privileged(List<AccessRequest> open, String viewer) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (AccessRequest q : open) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("request", q);
+            // the one who asked sees it is waiting for the other administrator, and cannot decide it
+            m.put("canDecide", !q.requestedBy().equals(viewer));
+            out.add(m);
+        }
+        return out;
     }
 
     // ---- helpers ---------------------------------------------------------------------------------------------------------
@@ -219,8 +322,11 @@ public final class AccessApi {
         return out;
     }
 
-    /** Runs a change, writes its audit records (one per grant, approval and removal) and answers. */
-    private Response changed(Supplier<Access.AccessResult> change) {
+    /**
+     * Runs a change, writes its audit records (one per grant, approval and removal) and answers. Inside an elevation every
+     * record also carries the elevation's identifier and reason, so what one elevation did can be read together.
+     */
+    private Response changed(ConsoleModule.Request r, Supplier<Access.AccessResult> change) {
         Access.AccessResult result;
         try {
             result = change.get();
@@ -235,8 +341,14 @@ public final class AccessApi {
         }
         int failed = 0;
         ConsoleModule.Host h = host;
+        ConsoleModule.Elevation elevation = r.who().elevation();
         for (Access.AccessEvent e : result.events()) {
-            if (h == null || !h.audit(e.type(), e.actor(), e.fields())) {
+            Map<String, String> fields = new LinkedHashMap<>(e.fields());
+            if (elevation != null) {
+                fields.put("elevation", elevation.id());
+                fields.put("elevationReason", elevation.reason());
+            }
+            if (h == null || !h.audit(e.type(), e.actor(), fields)) {
                 failed++;
             }
         }

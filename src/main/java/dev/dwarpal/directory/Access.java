@@ -90,12 +90,28 @@ public interface Access {
     /** HR removes a leaver: no approval, everything in one transaction. */
     AccessResult leaver(String hrId, String personId, String reason);
 
+    /**
+     * An administrator asks for a privileged change ({@link AccessRequest.Kind#privileged()}). Only a DIFFERENT administrator
+     * decides it: nobody approves their own request, and the lead is not asked. For OWN_ACCESS the person is the asker.
+     */
+    AccessResult requestPrivileged(String adminId, AccessRequest.Kind kind, String targetId, String displayName,
+                                   String department, String businessRole, Set<String> items, String reason);
+
+    /**
+     * The other administrator approves (the change is made in the same transaction) or rejects it (a reason is needed, and
+     * nothing changes). The last administrator can never be removed.
+     */
+    AccessResult decidePrivileged(String approverId, String requestId, boolean approve, String reason);
+
     // ---- reads -------------------------------------------------------------------------------------------------
 
     Optional<AccessRequest> request(String id);
 
     /** Joiner requests waiting for the administrator, oldest first. */
     List<AccessRequest> openJoiners();
+
+    /** Privileged changes waiting for the other administrator, oldest first. */
+    List<AccessRequest> openPrivileged();
 
     /** The newest requests of every kind and status (at most 50). */
     List<AccessRequest> recent();

@@ -36,7 +36,8 @@ public final class Migrator {
     /** The scripts, in order. A new script is added here on purpose; a test compares this list with the folder. */
     static final List<Script> SCRIPTS = List.of(
             new Script(1, "directory", "/db/migrations/V001__directory.sql"),
-            new Script(2, "access", "/db/migrations/V002__access.sql"));
+            new Script(2, "access", "/db/migrations/V002__access.sql"),
+            new Script(3, "privileged", "/db/migrations/V003__privileged.sql"));
 
     private static final String CREATE_VERSION_TABLE = "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL,"
             + " name VARCHAR(100) NOT NULL, checksum CHAR(64) NOT NULL, applied_at TIMESTAMP WITH TIME ZONE NOT NULL,"

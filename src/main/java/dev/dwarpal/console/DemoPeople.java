@@ -15,7 +15,8 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * The people of the lab console: the three analysts of the SOC (ana, ben, cleo), an administrator (dana), an HR officer (hana) and an
+ * The people of the lab console: the three analysts of the SOC (ana, ben, cleo), two administrators (dana and spector,
+ * so that an administrator's own request always has a different administrator to go to), an HR officer (hana) and an
  * ordinary user (uma). Passwords and security-key PINs are random, made once and kept in {@code <lab>/console/people.txt}
  * (owner-only), because a lab that changes every password at each start is a lab nobody logs in to. They are printed by
  * the launcher for the owner and are never in the repository.
@@ -28,13 +29,14 @@ public final class DemoPeople {
     private DemoPeople() {
     }
 
-    /** The six demo people, with fresh random secrets. */
+    /** The seven demo people, with fresh random secrets. */
     public static List<Enrolment> fresh() {
         List<Enrolment> out = new ArrayList<>();
         out.add(enrol("ana", "Ana (analyst)", Set.of(Role.ANALYST)));
         out.add(enrol("ben", "Ben (analyst)", Set.of(Role.ANALYST)));
         out.add(enrol("cleo", "Cleo (SOC lead)", Set.of(Role.LEAD, Role.ANALYST)));
         out.add(enrol("dana", "Dana (administrator)", Set.of(Role.ADMIN)));
+        out.add(enrol("spector", "Spector (administrator)", Set.of(Role.ADMIN)));
         out.add(enrol("uma", "Uma (user)", Set.of(Role.USER)));
         out.add(enrol("hana", "Hana (HR)", Set.of(Role.HR)));
         return out;

@@ -84,7 +84,7 @@ class DirectoryPeopleJoinersTest {
         String file = Files.readString(lab.resolve("console").resolve("people.txt"));
         assertTrue(file.lines().anyMatch(l -> l.startsWith("priya|Priya Nair|USER|")));
         List<Enrolment> again = DemoPeople.loadOrCreate(lab);
-        assertEquals(7, again.size(), "the six demo people and the joiner");
+        assertEquals(8, again.size(), "the seven demo people and the joiner");
         Enrolment back = again.stream().filter(x -> x.person().id().equals("priya")).findFirst().orElseThrow();
         assertEquals(e.password(), back.password());
         assertEquals(e.pin(), back.pin());

@@ -69,7 +69,15 @@ class DwApp extends HTMLElement {
     const m = this.meState;
     this.unlockState = m && m.passkeyNeeded ? {win: m.unlockedSeconds || 0, aud: m.auditSeconds || 0, at: performance.now()} : null;
     this.wasOpen = !!(this.unlockState && this.unlockState.win > 0);
+    const ev = m && m.elevation && m.elevation.open ? m.elevation : null;
+    this.elevState = ev ? {seconds: ev.seconds || 0, at: performance.now()} : null;
     this.paintClock();
+  }
+
+  /** Seconds left in the elevation, counted down here in real time (never below zero). */
+  elevationLeft() {
+    const e = this.elevState;
+    return e ? Math.max(0, Math.round(e.seconds - (performance.now() - e.at) / 1000)) : 0;
   }
 
   /** What is left, from the countdown (never below zero). */
@@ -83,18 +91,23 @@ class DwApp extends HTMLElement {
   paintClock() {
     const el = this.clockEl;
     if (!el) return;
-    if (!this.unlockState) {
-      fill(el);
-      return;
-    }
-    const left = this.unlockLeft();
     const mmss = (n) => Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0');
-    if (left.win === 0) {
-      fill(el, 'Confidential views are locked.');
-      return;
+    const parts = [];
+    if (this.unlockState) {
+      const left = this.unlockLeft();
+      if (left.win === 0) {
+        parts.push('Confidential views are locked.');
+      } else {
+        parts.push('Confidential views open for ' + mmss(left.win) + (left.aud > 0 ? ' (audit explorer ' + mmss(left.aud) + ')' : '') + '. ',
+          h('button', {type: 'button', on: {click: () => this.lockNow()}}, 'Lock now'));
+      }
     }
-    fill(el, 'Confidential views open for ' + mmss(left.win) + (left.aud > 0 ? ' (audit explorer ' + mmss(left.aud) + ')' : '') + '. ',
-      h('button', {type: 'button', on: {click: () => this.lockNow()}}, 'Lock now'));
+    const lift = this.elevationLeft();
+    if (lift > 0) {
+      parts.push(' Elevated for ' + mmss(lift) + ', everything you do is recorded. ',
+        h('button', {type: 'button', on: {click: () => this.endElevation()}}, 'End now'));
+    }
+    fill(el, ...parts);
   }
 
   /** Once a second: the footer's countdown, and the data comes off the screen when the window ends. */
@@ -106,6 +119,23 @@ class DwApp extends HTMLElement {
       if (!document.querySelector('dialog[open]') && !document.activeElement?.closest('input,textarea')) this.route();
     }
     this.wasOpen = open;
+    if (this.elevState && this.elevationLeft() === 0) {
+      // the server closed it too, and wrote that down
+      this.elevState = null;
+      if (this.me) this.me.elevation = {open: false};
+      this.paintClock();
+    }
+  }
+
+  async endElevation() {
+    try {
+      await api.endElevation();
+    } catch (e) {
+      // it ends by itself when its time is up
+    }
+    this.elevState = null;
+    if (this.me) this.me.elevation = {open: false};
+    this.paintClock();
   }
 
   async lockNow() {
@@ -410,6 +440,7 @@ class DwApp extends HTMLElement {
    * A person with no passkey yet is sent to make one.
    */
   needUnlock(scope) {
+    if (scope === 'elevation') return this.needElevation();
     scope = scope === 'audit' || scope === 'once' ? scope : 'window';
     if (this.unlocking) return this.unlocking;
     this.unlocking = new Promise((resolve, reject) => {
@@ -461,6 +492,65 @@ class DwApp extends HTMLElement {
       dlg.showModal();
     });
     return this.unlocking;
+  }
+
+  // ---- elevation ----------------------------------------------------------------------------------------
+  /**
+   * Resolves once an elevation is open: the PIN, the passkey and a reason. A privileged change (a decision on access, a
+   * new administrator) is allowed for ten real minutes, the footer counts them down, and everything done is recorded.
+   */
+  needElevation() {
+    if (this.elevating) return this.elevating;
+    this.elevating = new Promise((resolve, reject) => {
+      const done = (ok) => {
+        dlg.close();
+        dlg.remove();
+        this.elevating = null;
+        if (ok) resolve(true);
+        else reject(new ApiError(423, 'elevation required'));
+      };
+      const dlg = h('dialog', {'aria-labelledby': 'ev-title'});
+      dlg.addEventListener('cancel', () => done(false));
+      if (!this.me.passkeySet) {
+        dlg.append(h('h1', {id: 'ev-title'}, 'Set your passkey first'),
+          h('p', {class: 'note'}, 'An elevation needs a passkey of your own. Set one now, then come back.'),
+          h('div', {class: 'row'}, h('button', {type: 'button', class: 'primary', on: {click: () => {
+            done(false);
+            this.navigate('#/profile?at=passkey');
+          }}}, 'Set my passkey'), h('button', {type: 'button', on: {click: () => done(false)}}, 'Cancel')));
+      } else {
+        const pin = h('input', {type: 'password', id: 'ev-pin', autocomplete: 'off', required: true, spellcheck: false});
+        const key = h('input', {type: 'password', id: 'ev-key', autocomplete: 'off', required: true, spellcheck: false});
+        const why = h('input', {type: 'text', id: 'ev-why', autocomplete: 'off', required: true, maxlength: 200,
+          placeholder: 'For example: approving the new analyst'});
+        const msg = h('p', {class: 'note', role: 'alert'});
+        const form = h('form', {class: 'stack', method: 'dialog'}, h('h1', {id: 'ev-title'}, 'Start an elevation'),
+          h('p', {class: 'note'}, 'Privileged changes need your security PIN, your passkey and a reason. The elevation lasts 10 minutes, '
+            + 'the footer counts them down, and everything you do inside it is written to the audit trail under it.'),
+          h('label', {for: 'ev-pin'}, 'Security PIN'), pin, h('label', {for: 'ev-key'}, 'Passkey'), key,
+          h('label', {for: 'ev-why'}, 'Reason'), why, msg,
+          h('div', {class: 'row'}, h('button', {type: 'submit', class: 'primary'}, 'Start'), h('button', {type: 'button', on: {click: () => done(false)}}, 'Cancel')));
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          msg.textContent = '';
+          try {
+            const r = await api.elevate(pin.value, key.value, why.value);
+            this.me.elevation = r.elevation;
+            this.syncUnlock();
+            done(true);
+          } catch (err) {
+            msg.textContent = err.status === 429 ? 'Too many attempts. Try again in ' + (err.retryAfter || 5) + ' s.'
+              : err.status === 400 ? 'Give a reason of 5 to 200 characters.' : 'That PIN or passkey is not right.';
+            pin.value = '';
+            key.value = '';
+          }
+        });
+        dlg.append(form);
+      }
+      document.body.append(dlg);
+      dlg.showModal();
+    });
+    return this.elevating;
   }
 
   // ---- step-up ------------------------------------------------------------------------------------------

@@ -74,6 +74,8 @@ final class ConsoleRoutes {
         s.route("POST", "session/recover/code", Kind.PUBLIC, null, false, c -> recoverCode(s, c));
         s.route("POST", "session/unlock", Kind.READ, null, false, c -> unlock(s, c));
         s.route("POST", "session/lock", Kind.READ, null, false, c -> lock(s, c));
+        s.route("POST", "session/elevate", Kind.WRITE, null, false, c -> startElevation(s, c));
+        s.route("POST", "session/elevate/end", Kind.WRITE, null, false, c -> endElevation(s, c));
         s.route("GET", "session/list", Kind.READ, null, false, c -> sessionList(s, c));
         s.route("POST", "session/revoke", Kind.READ, null, false, c -> revoke(s, c));
         // ---- one's own sign-in
@@ -309,7 +311,7 @@ final class ConsoleRoutes {
         if (!Set.of("window", "audit", "once").contains(scope)) {
             return Reply.error(400, "invalid request");
         }
-        ConsoleAuth.Authenticated a = s.auth.unlock(c.person().id(), passkey, c.source);
+        ConsoleAuth.Authenticated a = s.passkeys.verify(c.person().id(), passkey, c.source);
         if (a.status() != ConsoleAuth.Status.OK) {
             s.audit.write("CONSOLE_UNLOCK_FAILED", c.person().id(), ConsoleServer.fields("session", c.session.tag(), "scope", scope));
             return a.status() == ConsoleAuth.Status.LOCKED ? locked(a.retryAfterSeconds()) : Reply.error(401, "wrong passkey");
@@ -325,6 +327,58 @@ final class ConsoleRoutes {
         return Reply.ok(JsonValue.object().put("ok", JsonValue.bool(true))
                 .put("unlockedSeconds", JsonValue.num(s.sessions.unlockedSeconds(c.session)))
                 .put("auditSeconds", JsonValue.num(s.sessions.auditSeconds(c.session))).build());
+    }
+
+    /**
+     * An elevation: the privileged actions of the access process (a decision on a grant, a joiner, an administrator change)
+     * are allowed for ten real minutes after the person gives their PIN, their passkey and a reason. Everything done inside
+     * it is written under its identifier. Both secrets are always checked, so a refusal does not say which one was wrong.
+     */
+    private static Reply startElevation(ConsoleServer s, Ctx c) {
+        if (!ConsoleServer.satisfiesModule(c.person().roles(), Role.LEAD)) {
+            return Reply.error(403, "your role has no privileged actions");
+        }
+        Ctx.Fields f = c.fields(Set.of("pin", "passkey", "reason"));
+        String pin = f.text("pin", 64);
+        String passkey = f.text("passkey", 1024);
+        String reason = f.text("reason", 300).strip();
+        if (reason.length() < 5 || reason.length() > 200) {
+            return Reply.error(400, "give a reason of 5 to 200 characters");
+        }
+        String id = c.person().id();
+        ConsoleAuth.Authenticated byPin = s.auth.checkPin(id, pin, c.source);
+        ConsoleAuth.Authenticated byKey = s.passkeys.verify(id, passkey, c.source);
+        if (byPin.status() != ConsoleAuth.Status.OK || byKey.status() != ConsoleAuth.Status.OK) {
+            s.audit.write("ELEVATION_FAILED", id, ConsoleServer.fields("session", c.session.tag()));
+            long wait = Math.max(byPin.retryAfterSeconds(), byKey.retryAfterSeconds());
+            return wait > 0 ? locked(wait) : Reply.error(401, "wrong PIN or passkey");
+        }
+        ConsoleModule.Elevation e = s.sessions.elevate(c.session, reason, s.elevationLength);
+        if (!s.audit.write("ELEVATION_STARTED", id, ConsoleServer.fields("elevation", e.id(), "session", c.session.tag(),
+                "reason", reason, "until", e.until().toString(), "minutes", Long.toString(s.elevationLength.toMinutes())))) {
+            s.sessions.endElevation(c.session);
+            return Reply.error(503, "audit trail unavailable");
+        }
+        return Reply.ok(JsonValue.object().put("ok", JsonValue.bool(true)).put("elevation", elevationJson(s, c.session)).build());
+    }
+
+    /** The person closes the elevation before its time is up. */
+    private static Reply endElevation(ConsoleServer s, Ctx c) {
+        ConsoleModule.Elevation e = s.sessions.endElevation(c.session);
+        if (e != null) {
+            s.audit.write("ELEVATION_ENDED", c.person().id(), ConsoleServer.fields("elevation", e.id(), "session", c.session.tag(),
+                    "how", "ended by the person", "reason", e.reason(), "until", e.until().toString()));
+        }
+        return Reply.ok(JsonValue.object().put("ok", JsonValue.bool(true)).build());
+    }
+
+    static JsonValue elevationJson(ConsoleServer s, ConsoleSessions.Session x) {
+        ConsoleModule.Elevation e = s.sessions.elevation(x);
+        if (e == null) {
+            return JsonValue.object().put("open", JsonValue.bool(false)).build();
+        }
+        return JsonValue.object().put("open", JsonValue.bool(true)).put("id", e.id()).put("reason", e.reason())
+                .put("seconds", JsonValue.num(s.sessions.elevationSeconds(x))).build();
     }
 
     /** Closes everything the passkey opened, now (the footer has a Lock now button). */
@@ -435,6 +489,8 @@ final class ConsoleRoutes {
                 .put("unlocked", JsonValue.bool(s.sessions.unlocked(x)))
                 .put("unlockedSeconds", JsonValue.num(s.sessions.unlockedSeconds(x)))
                 .put("auditSeconds", JsonValue.num(s.sessions.auditSeconds(x)))
+                .put("elevationAllowed", JsonValue.bool(ConsoleServer.satisfiesModule(x.person.roles(), Role.LEAD)))
+                .put("elevation", elevationJson(s, x))
                 .put("signing", JsonValue.object().put("notice", s.signer.notice()).build());
         return Reply.ok(b.build());
     }

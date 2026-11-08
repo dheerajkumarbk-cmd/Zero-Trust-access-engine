@@ -7,7 +7,8 @@ stylesheet('/console/modules/access/access.css');
 
 const STATE = { ACTIVE: 'Active', PENDING: 'Waiting for approval', REJECTED: 'Refused', REMOVED: 'Removed' };
 const STATUS = { PENDING: 'Waiting', APPROVED: 'Approved, waiting for a second approver', REJECTED: 'Refused', DONE: 'Done', CANCELLED: 'Cancelled' };
-const KIND = { JOINER: 'New joiner', LEAVER: 'Leaver', ACCESS: 'More access' };
+const KIND = { JOINER: 'New joiner', LEAVER: 'Leaver', ACCESS: 'More access', CREATE_ADMIN: 'New administrator', ADD_ADMIN: 'Give administrator role',
+  REMOVE_ADMIN: 'Remove administrator role', OWN_ACCESS: 'Own access change' };
 
 export function when(iso) {
   return iso ? String(iso).replace('T', ' ').slice(0, 16) + ' UTC' : '';
@@ -81,7 +82,11 @@ export async function myAccess(box, ctx) {
   clear(box);
   box.append(el('h3', {}, 'What you have'), grantsTable(m.grants, m.catalog),
     el('p', { class: 'acc-note' }, 'Your console roles: ' + (m.roles.length ? m.roles.join(', ') : 'none') + '. A change of role shows after your next sign-in.'));
-  if (m.available.length) {
+  if (m.canRequestMore === false) {
+    box.append(el('h3', {}, 'Changes to your own access'),
+      el('p', { class: 'acc-note' }, 'As an administrator you cannot approve your own request, so nothing you ask for here could ever be decided. '
+        + 'Use Request a privileged change under Administration, Access requests: it goes to the other administrator.'));
+  } else if (m.available.length) {
     const p = picker(m.available, new Set());
     const reason = reasonBox('acc-more-reason', 'Why you need it');
     const send = button('Send the request', async () => {
@@ -155,7 +160,7 @@ function decisionCard(w, catalog, asRole, ctx, again) {
   const item = find(catalog, w.grant.itemId);
   const reason = reasonBox('why-' + w.grant.id, 'A reason (needed to refuse)');
   const act = (approve) => async () => {
-    const r = await ctx.privileged((asRole === 'ADMIN' ? 'access/' : '') + 'approvals/' + w.grant.id + '/decision', { approve, reason: reason.value });
+    const r = await ctx.elevated((asRole === 'ADMIN' ? 'access/' : '') + 'approvals/' + w.grant.id + '/decision', { approve, reason: reason.value });
     if (r) {
       ctx.say(approve ? 'Approved.' : 'Refused.');
       again();
@@ -193,14 +198,14 @@ export async function adminQueue(box, ctx) {
     const p = picker(q.catalog, ticked);
     const reason = reasonBox('rej-' + j.id, 'A reason (needed to refuse)');
     const save = button('Save and grant', async () => {
-      const r = await ctx.privileged('access/joiners/' + j.id + '/save', { items: p.chosen() });
+      const r = await ctx.elevated('access/joiners/' + j.id + '/save', { items: p.chosen() });
       if (r) {
         ctx.say(j.displayName + ' now exists with ' + r.grants.length + ' access item(s). Sensitive ones wait for a lead.');
         adminQueue(box, ctx);
       }
     }, { class: 'primary' });
     const refuse = button('Refuse', async () => {
-      const r = await ctx.privileged('access/joiners/' + j.id + '/reject', { reason: reason.value });
+      const r = await ctx.elevated('access/joiners/' + j.id + '/reject', { reason: reason.value });
       if (r) {
         ctx.say('Refused. Nothing was created.');
         adminQueue(box, ctx);
@@ -213,5 +218,101 @@ export async function adminQueue(box, ctx) {
   box.append(el('h3', {}, 'Sensitive access waiting for you'));
   if (!q.waiting.length) box.append(el('p', { class: 'acc-empty' }, 'Nothing is waiting for you.'));
   for (const w of q.waiting) box.append(decisionCard(w, q.catalog, 'ADMIN', ctx, () => adminQueue(box, ctx)));
+  privilegedChanges(box, q, ctx);
   box.append(el('h3', {}, 'Recent requests'), requestsTable(q.recent, q.catalog));
+}
+
+// ---- privileged changes: one administrator asks, the OTHER administrator decides ---------------------------------------------------
+
+/** The change in plain words. */
+export function changeWords(q, catalog) {
+  const names = (q.items || []).map((i) => find(catalog, i).label).join(', ');
+  switch (q.kind) {
+    case 'CREATE_ADMIN': return 'Create the administrator account ' + q.subjectId + ' (' + q.displayName + ', ' + q.department + ')';
+    case 'ADD_ADMIN': return 'Give ' + q.subjectId + ' the administrator role';
+    case 'REMOVE_ADMIN': return 'Take the administrator role away from ' + q.subjectId;
+    case 'OWN_ACCESS': return q.subjectId + ' asks for their own access to: ' + names;
+    default: return q.kind;
+  }
+}
+
+function privilegedChanges(box, q, ctx) {
+  const people = q.people || [];
+  const kinds = [['ADD_ADMIN', 'Give a person the administrator role'], ['REMOVE_ADMIN', 'Take the administrator role away'],
+    ['CREATE_ADMIN', 'Create a new administrator account'], ['OWN_ACCESS', 'Change my own access']];
+  const change = el('select', { id: 'pc-change' }, kinds.map(([v, t]) => el('option', { value: v }, t)));
+  const part = el('div', { class: 'acc-form' });
+  const picked = { person: null, id: null, name: null, dept: null, job: null, items: null };
+  const reason = reasonBox('pc-why', 'Why this change is needed');
+
+  function drawPart() {
+    clear(part);
+    const kind = change.value;
+    if (kind === 'ADD_ADMIN' || kind === 'REMOVE_ADMIN') {
+      const wantAdmin = kind === 'REMOVE_ADMIN';
+      const list = people.filter((p) => p.roles.includes('ADMIN') === wantAdmin);
+      picked.person = el('select', { id: 'pc-person' }, el('option', { value: '' }, 'Choose a person'),
+        list.map((p) => el('option', { value: p.id }, p.name + ' (' + p.id + ', ' + p.department + ')')));
+      part.append(field('Person', picked.person));
+    } else if (kind === 'CREATE_ADMIN') {
+      picked.id = el('input', { type: 'text', id: 'pc-id', maxlength: 32, spellcheck: false, placeholder: 'lower-case, e.g. morgan' });
+      picked.name = el('input', { type: 'text', id: 'pc-name', maxlength: 100, placeholder: 'Full name' });
+      picked.dept = el('input', { type: 'text', id: 'pc-dept', maxlength: 60, placeholder: 'Department', value: 'Administration' });
+      picked.job = el('input', { type: 'text', id: 'pc-job', maxlength: 60, placeholder: 'Business role', value: 'Administrator' });
+      part.append(field('Person id', picked.id), field('Name', picked.name), field('Department', picked.dept), field('Business role', picked.job));
+    } else {
+      // the console roles change through the administrator changes above, so they are not offered here
+      picked.items = picker(q.catalog.filter((i) => !i.consoleRole), new Set());
+      part.append(picked.items.node);
+    }
+  }
+  change.addEventListener('change', drawPart);
+  drawPart();
+
+  const send = button('Send to the other administrator', async () => {
+    const kind = change.value;
+    const body = { change: kind, reason: reason.value };
+    if (kind === 'ADD_ADMIN' || kind === 'REMOVE_ADMIN') {
+      if (!picked.person.value) return ctx.say('Choose the person.', true);
+      body.target = picked.person.value;
+    } else if (kind === 'CREATE_ADMIN') {
+      body.target = picked.id.value;
+      body.name = picked.name.value;
+      body.department = picked.dept.value;
+      body.businessRole = picked.job.value;
+    } else {
+      const chosen = picked.items.chosen();
+      if (!chosen.length) return ctx.say('Tick what you would like.', true);
+      body.items = chosen;
+    }
+    const r = await ctx.elevated('access/privileged', body);
+    if (r) {
+      ctx.say('Sent. The other administrator decides it; you cannot, and nothing changes until they approve.');
+      adminQueue(box, ctx);
+    }
+    return undefined;
+  }, { class: 'primary' });
+
+  box.append(el('h3', {}, 'Request a privileged change'),
+    el('p', { class: 'acc-note' }, 'Changes to an administrator, or to your own access, go to the OTHER administrator. You cannot approve your own request, and the lead is not asked. '
+      + 'You need an elevation (PIN, passkey and a reason) to send one.'),
+    el('div', { class: 'acc-card' }, field('What', change), part, field('Reason', reason), el('div', { class: 'acc-row' }, send)));
+
+  box.append(el('h3', {}, 'Privileged changes waiting'));
+  if (!(q.privileged || []).length) box.append(el('p', { class: 'acc-empty' }, 'Nothing is waiting.'));
+  for (const w of q.privileged || []) {
+    const why = reasonBox('pcw-' + w.request.id, 'A reason (needed to refuse)');
+    const act = (approve) => async () => {
+      const r = await ctx.elevated('access/privileged/' + w.request.id + '/decision', { approve, reason: why.value });
+      if (r) {
+        ctx.say(approve ? 'Approved and done.' : 'Refused. Nothing changed.');
+        adminQueue(box, ctx);
+      }
+    };
+    box.append(el('div', { class: 'acc-card' }, el('strong', {}, changeWords(w.request, q.catalog)),
+      el('p', { class: 'acc-note' }, 'Asked by ' + w.request.requestedBy + ' on ' + when(w.request.createdAt) + '. Reason: ' + w.request.reason),
+      w.canDecide
+        ? el('div', null, field('Reason', why), el('div', { class: 'acc-row' }, button('Approve', act(true), { class: 'primary' }), button('Refuse', act(false))))
+        : el('p', { class: 'acc-note' }, 'Waiting for the other administrator. You cannot decide your own request.')));
+  }
 }

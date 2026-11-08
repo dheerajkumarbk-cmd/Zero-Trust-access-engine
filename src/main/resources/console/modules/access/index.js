@@ -32,7 +32,9 @@ function view(root, shell) {
     return call(api.post(path, data || {}));
   }
 
-  const ctx = { api, say, call, privileged };
+  // a decision on access needs an elevation; the shell asks for it when the server says so, then repeats the call
+  const elevated = (path, data) => call(api.post(path, data || {}));
+  const ctx = { api, say, call, privileged, elevated };
 
   async function open(key) {
     for (const [k, p] of pages) p.tab.setAttribute('aria-selected', k === key ? 'true' : 'false');

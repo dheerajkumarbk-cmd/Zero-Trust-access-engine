@@ -259,7 +259,7 @@ function view(root, shell) {
 
   async function accessQueue(box) {
     try {
-      await adminQueue(box, { api, say, call, privileged });
+      await adminQueue(box, { api, say, call, privileged, elevated: (path, data) => call(api.post(path, data || {})) });
     } catch (e) {
       say(e && e.message ? e.message : 'The access requests are unavailable.', true);
     }

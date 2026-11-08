@@ -36,8 +36,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AccessSectionTest {
 
     private static final Principal HR = new Principal("hana", Set.of(Role.HR), true);
-    private static final Principal ADMIN = new Principal("dana", Set.of(Role.ADMIN), true);
-    private static final Principal LEAD = new Principal("cleo", Set.of(Role.LEAD, Role.ANALYST), true);
+    /** The decisions of an administrator and of a lead are made inside an elevation (PIN, passkey and a reason). */
+    private static final ConsoleModule.Elevation ELEVATION = new ConsoleModule.Elevation("elv-test", "testing the access process",
+            Instant.parse("2099-01-01T00:00:00Z"));
+    private static final Principal ADMIN = new Principal("dana", Set.of(Role.ADMIN), true, ELEVATION);
+    private static final Principal ADMIN_NOT_ELEVATED = new Principal("dana", Set.of(Role.ADMIN), true);
+    private static final Principal LEAD = new Principal("cleo", Set.of(Role.LEAD, Role.ANALYST), true, ELEVATION);
+    private static final Principal LEAD_NOT_ELEVATED = new Principal("cleo", Set.of(Role.LEAD, Role.ANALYST), true);
     private static final Principal ANALYST = new Principal("ana", Set.of(Role.ANALYST), true);
     private static final Principal USER = new Principal("uma", Set.of(Role.USER), true);
 
@@ -45,6 +50,7 @@ class AccessSectionTest {
     private static final class RecordingHost implements ConsoleModule.Host {
         final List<String[]> audits = new ArrayList<>();
         final List<String> closed = new ArrayList<>();
+        final List<String> rolesChanged = new ArrayList<>();
         boolean trailWorks = true;
 
         @Override
@@ -56,6 +62,11 @@ class AccessSectionTest {
         @Override
         public void closeAccount(String personId) {
             closed.add(personId);
+        }
+
+        @Override
+        public void rolesChanged(String personId, Set<String> roles) {
+            rolesChanged.add(personId + ":" + String.join(",", new java.util.TreeSet<>(roles)));
         }
 
         long count(String type) {
@@ -78,6 +89,7 @@ class AccessSectionTest {
         directory = new PostgresDirectory(TestDatabase.app());
         seed("hana", "Human Resources", "HR officer", "HR");
         seed("dana", "IT Security", "Administrator", "ADMIN");
+        seed("spector", "Administration", "Administrator", "ADMIN");
         seed("cleo", "SOC", "SOC lead", "ANALYST", "LEAD");
         seed("ana", "SOC", "Security analyst", "ANALYST");
         seed("uma", "Finance", "Finance officer", "USER");
@@ -217,14 +229,60 @@ class AccessSectionTest {
     }
 
     @Test
-    void theRoutesThatChangeThingsAskForAFreshSecondFactorFromTheHost() {
-        for (String r : List.of("hr/joiner", "hr/leaver", "approvals/{}/decision")) {
+    void hrAsksForAFreshSecondFactorAndTheDecisionsAskForAnElevationInstead() {
+        for (String r : List.of("hr/joiner", "hr/leaver")) {
             assertTrue(access.route("POST", r).stepUp(), r);
         }
-        for (String r : List.of("access/joiners/{}/save", "access/joiners/{}/reject", "access/approvals/{}/decision")) {
-            assertTrue(admin.route("POST", r).stepUp(), r);
+        // HR holds no passkey, so it keeps the password and PIN; a decision on access is made inside an elevation
+        assertFalse(access.route("POST", "approvals/{}/decision").stepUp(), "the lead's decision asks for an elevation");
+        for (String r : List.of("access/joiners/{}/save", "access/joiners/{}/reject", "access/approvals/{}/decision",
+                "access/privileged", "access/privileged/{}/decision")) {
+            assertFalse(admin.route("POST", r).stepUp(), r + " asks for an elevation, not for a password");
         }
         assertFalse(access.route("POST", "request").stepUp(), "asking for more access for oneself is not privileged");
+    }
+
+    @Test
+    void withoutAnElevationEveryDecisionIsRefusedAndChangesNothing() {
+        String id = requestId(access.call("POST", "hr/joiner", HR, joinerBody("priya")));
+        Response noSave = admin.call("POST", "access/joiners/" + id + "/save", ADMIN_NOT_ELEVATED, "{\"items\":[\"email\"]}");
+        assertEquals(423, noSave.status(), noSave.body());
+        assertTrue(noSave.body().contains("elevation required"));
+        assertEquals(423, admin.call("POST", "access/joiners/" + id + "/reject", ADMIN_NOT_ELEVATED, "{\"reason\":\"no\"}").status());
+        assertEquals(423, admin.call("POST", "access/privileged", ADMIN_NOT_ELEVATED,
+                "{\"change\":\"ADD_ADMIN\",\"target\":\"uma\",\"reason\":\"x\"}").status());
+        assertEquals(423, admin.call("POST", "access/privileged/x/decision", ADMIN_NOT_ELEVATED, "{\"approve\":true}").status());
+        assertEquals(423, admin.call("POST", "access/approvals/x/decision", ADMIN_NOT_ELEVATED, "{\"approve\":true}").status());
+        assertEquals(423, access.call("POST", "approvals/x/decision", LEAD_NOT_ELEVATED, "{\"approve\":true}").status());
+        assertTrue(directory.find("priya").isEmpty(), "nothing was created");
+        assertEquals(1, host.count("ACCESS_REQUESTED"), "and nothing was recorded but HR's own request");
+        assertEquals(403, access.call("POST", "approvals/x/decision", USER, "{\"approve\":true}").status(),
+                "a person with the wrong role is told no before the elevation is even mentioned");
+    }
+
+    @Test
+    void everyRecordOfAnElevatedActionNamesTheElevationAndItsReason() {
+        String id = requestId(access.call("POST", "hr/joiner", HR, joinerBody("priya")));
+        host.audits.clear();
+        Response saved = admin.call("POST", "access/joiners/" + id + "/save", ADMIN, "{\"items\":[\"email\",\"finance\"]}");
+        assertEquals(200, saved.status(), saved.body());
+        assertFalse(host.audits.isEmpty());
+        for (String[] a : host.audits) {
+            assertTrue(a[2].contains("elevation=elv-test") && a[2].contains("elevationReason=testing the access process"), a[0] + " " + a[2]);
+            assertEquals("dana", a[1]);
+        }
+        assertTrue(host.audits.stream().anyMatch(a -> a[0].equals("ACCESS_PERSON_ADDED") && a[2].contains("before=no such person")
+                && a[2].contains("after=ACTIVE")), "a change says what it was before and what it is after");
+        host.audits.clear();
+        String finance = grantIds(saved, "PENDING").getFirst();
+        assertEquals(200, access.call("POST", "approvals/" + finance + "/decision", LEAD, "{\"approve\":true,\"reason\":\"checked\"}").status());
+        for (String[] a : host.audits) {
+            assertTrue(a[2].contains("elevation=elv-test") && a[1].equals("cleo"), a[0] + " " + a[2]);
+        }
+        assertTrue(host.audits.stream().anyMatch(a -> a[0].equals("ACCESS_GRANTED") && a[2].contains("before=PENDING") && a[2].contains("after=ACTIVE")));
+        host.audits.clear();
+        assertEquals(200, access.call("POST", "request", USER, "{\"items\":[\"vpn\"],\"reason\":\"work\"}").status());
+        assertTrue(host.audits.stream().noneMatch(a -> a[2].contains("elevation=")), "a person who is not elevated leaves no elevation id");
     }
 
     // ---- more access --------------------------------------------------------------------------------------------------------

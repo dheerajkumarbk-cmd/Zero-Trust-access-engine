@@ -41,6 +41,8 @@ final class ConsoleSessions {
         volatile Instant auditUntil;
         /** One passkey entry, good for exactly one risky action; null when there is none. */
         volatile Instant onceUntil;
+        /** The person's open elevation (real time); null when there is none. */
+        volatile ConsoleModule.Elevation elevation;
 
         Session(String id, long order, ConsoleAuth.Person person, String csrf, Instant createdAt, String source,
                 String agent, Instant stepUpAt) {
@@ -134,6 +136,7 @@ final class ConsoleSessions {
         s.lastSeen = now;
         s.unlockedUntil = old.unlockedUntil;
         s.auditUntil = old.auditUntil;
+        s.elevation = old.elevation;
         sessions.put(s.id, s);
         return Optional.of(s);
     }
@@ -227,7 +230,81 @@ final class ConsoleSessions {
     }
 
     void end(String id) {
-        sessions.remove(id);
+        Session s = sessions.remove(id);
+        if (s != null) {
+            retire(s, "the session ended");
+        }
+    }
+
+    // ---- elevation ---------------------------------------------------------------------------------------------------
+
+    /** An elevation that ended without the person pressing End: the server writes its record. */
+    record Ended(String person, String session, ConsoleModule.Elevation elevation, String how) {
+    }
+
+    private final java.util.concurrent.ConcurrentLinkedQueue<Ended> ended = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+    /** Opens an elevation for {@code length} of real time with a new identifier; any earlier one is replaced. */
+    ConsoleModule.Elevation elevate(Session s, String reason, java.time.Duration length) {
+        byte[] b = new byte[8];
+        RANDOM.nextBytes(b);
+        ConsoleModule.Elevation e = new ConsoleModule.Elevation("elv-" + java.util.HexFormat.of().formatHex(b), reason,
+                clock.instant().plus(length));
+        synchronized (s) {
+            s.elevation = e;
+        }
+        return e;
+    }
+
+    /** The open elevation, or null once its real time has run out (whether or not the server has noticed yet). */
+    ConsoleModule.Elevation elevation(Session s) {
+        ConsoleModule.Elevation e = s.elevation;
+        return e != null && clock.instant().isBefore(e.until()) ? e : null;
+    }
+
+    long elevationSeconds(Session s) {
+        ConsoleModule.Elevation e = elevation(s);
+        return e == null ? 0 : secondsLeft(e.until());
+    }
+
+    /** The person ends it. Returns what was open, or null. */
+    ConsoleModule.Elevation endElevation(Session s) {
+        synchronized (s) {
+            ConsoleModule.Elevation e = s.elevation;
+            s.elevation = null;
+            return e;
+        }
+    }
+
+    /** Closes every elevation whose time is up; the records of the closings wait in {@link #drainEnded}. */
+    void expireElevations() {
+        Instant now = clock.instant();
+        for (Session s : sessions.values()) {
+            ConsoleModule.Elevation e = s.elevation;
+            if (e != null && !now.isBefore(e.until())) {
+                retire(s, "time ran out");
+            }
+        }
+    }
+
+    /** The elevations that ended by themselves since the last call, oldest first. */
+    List<Ended> drainEnded() {
+        List<Ended> out = new ArrayList<>();
+        for (Ended e = ended.poll(); e != null; e = ended.poll()) {
+            out.add(e);
+        }
+        return out;
+    }
+
+    private void retire(Session s, String how) {
+        synchronized (s) {
+            ConsoleModule.Elevation e = s.elevation;
+            if (e == null) {
+                return;
+            }
+            s.elevation = null;
+            ended.add(new Ended(s.person.id(), s.tag(), e, how));
+        }
     }
 
     /** The person's live sessions, oldest first. */
@@ -248,8 +325,12 @@ final class ConsoleSessions {
 
     private void sweep() {
         Instant now = clock.instant();
-        sessions.values().removeIf(s -> !now.isBefore(s.lastSeen.plus(settings.idle()))
-                || !now.isBefore(s.createdAt.plus(settings.absolute())));
+        for (Session s : new ArrayList<>(sessions.values())) {
+            if (!now.isBefore(s.lastSeen.plus(settings.idle())) || !now.isBefore(s.createdAt.plus(settings.absolute()))) {
+                sessions.remove(s.id);
+                retire(s, "the session expired");
+            }
+        }
     }
 
     private static String token() {

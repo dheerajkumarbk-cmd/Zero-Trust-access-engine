@@ -18,7 +18,7 @@ import java.util.Objects;
  *   POST hr/joiner                      HR, step-up  {"id","name","department","businessRole","reason"}
  *   POST hr/leaver                      HR, step-up  {"id","reason"}  removes everything now
  *   GET  approvals                      LEAD  grants waiting for a lead (an administrator is not a lead)
- *   POST approvals/{grant}/decision     LEAD, step-up  {"approve":true|false,"reason":"..."}
+ *   POST approvals/{grant}/decision     LEAD, elevation  {"approve":true|false,"reason":"..."}
  * </pre>
  */
 public final class AccessModule implements ConsoleModule {
@@ -58,7 +58,7 @@ public final class AccessModule implements ConsoleModule {
         routes.post("hr/joiner", Role.HR, true, ModuleKit.guard(Role.HR, (r, p) -> api.submitJoiner(r)));
         routes.post("hr/leaver", Role.HR, true, ModuleKit.guard(Role.HR, (r, p) -> api.submitLeaver(r)));
         routes.get("approvals", Role.LEAD, ModuleKit.guard(Role.LEAD, (r, p) -> api.leadApprovals(r)));
-        routes.post("approvals/{}/decision", Role.LEAD, true,
+        routes.post("approvals/{}/decision", Role.LEAD, false,
                 ModuleKit.guard(Role.LEAD, (r, p) -> api.decide(r, ModuleKit.id(p.get(0)), Role.LEAD)));
     }
 }

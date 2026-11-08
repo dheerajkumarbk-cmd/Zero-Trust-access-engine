@@ -20,15 +20,38 @@ public interface ConsoleModule {
 
     enum Role { ANALYST, LEAD, ADMIN, USER, HR }
 
-    /** Who is calling: set by the host from the session, never from anything the browser sends in the request. */
-    record Principal(String id, Set<Role> roles, boolean stepUpFresh) {
+    /**
+     * An open elevation: a short period, given for a stated reason, in which privileged actions are allowed. Everything done
+     * inside it is written to the audit trail under {@code id}. {@code until} is real time, not the lab's scenario time.
+     */
+    record Elevation(String id, String reason, java.time.Instant until) {
+        public Elevation {
+            Objects.requireNonNull(id, "id");
+            Objects.requireNonNull(reason, "reason");
+            Objects.requireNonNull(until, "until");
+        }
+    }
+
+    /**
+     * Who is calling: set by the host from the session, never from anything the browser sends in the request.
+     * {@code elevation} is the person's open elevation, or null (the host sets it only while it is still open).
+     */
+    record Principal(String id, Set<Role> roles, boolean stepUpFresh, Elevation elevation) {
         public Principal {
             Objects.requireNonNull(id, "id");
             roles = Set.copyOf(roles);
         }
 
+        public Principal(String id, Set<Role> roles, boolean stepUpFresh) {
+            this(id, roles, stepUpFresh, null);
+        }
+
         public boolean has(Role r) {
             return roles.contains(r);
+        }
+
+        public boolean elevated() {
+            return elevation != null;
         }
     }
 
@@ -86,6 +109,13 @@ public interface ConsoleModule {
 
         /** Ends every session of the person and refuses their next sign-in (a leaver). */
         void closeAccount(String personId);
+
+        /**
+         * The directory now says this person holds these console roles (names such as ANALYST). If that differs from what
+         * they sign in with, the console takes the new roles and ends their open sessions, so the change is real at once.
+         */
+        default void rolesChanged(String personId, Set<String> roles) {
+        }
     }
 
     /** Called once, before {@link #routes}, with the console's host. Most modules need nothing from it. */

@@ -12,8 +12,8 @@ export class ApiError extends Error {
     super(message);
     this.status = status;
     this.retryAfter = extra && extra.retryAfterSeconds ? extra.retryAfterSeconds : 0;
-    /** For a 423: what the passkey is being asked for: 'window' (cases, entities, hunt), 'audit', or 'once' (one action). */
-    this.scope = extra && typeof extra.scope === 'string' ? extra.scope : 'window';
+    /** For a 423: what is being asked for: 'window' (cases, entities, hunt), 'audit', 'once' (one action), or 'elevation' (a privileged change). */
+    this.scope = extra && typeof extra.scope === 'string' ? extra.scope : message === 'elevation required' ? 'elevation' : 'window';
   }
 }
 
@@ -23,6 +23,7 @@ function activity(method, path) {
   const known = [['fastforward', 'Moving scenario time forward'], ['control/reset', 'Resetting the lab'], ['lab/reset', 'Resetting the lab'],
     ['launch/', 'Starting the scenario'], ['soc/verdicts', 'Signing the verdict'], ['/notes', 'Saving the note'],
     ['/assignment', 'Assigning the case'], ['soc/search', 'Searching'], ['soc/counts', 'Counting events'], ['audit/verify', 'Verifying the audit chain'],
+    
     ['profile/password', 'Changing your password'], ['profile/pin', 'Changing your PIN'], ['profile/passkey', 'Saving your passkey'], ['profile/backup-codes', 'Making backup codes']];
   const hit = known.find(([k]) => path.includes(k));
   return hit ? hit[1] : method === 'POST' ? 'Saving' : 'Loading';
@@ -129,6 +130,9 @@ export const api = {
   },
   unlock: (passkey, scope) => post('session/unlock', {passkey, scope: scope || 'window'}),
   lock: () => post('session/lock', {}),
+  /** Starts an elevation: the PIN, the passkey and a reason; it lasts ten real minutes. */
+  elevate: (pin, passkey, reason) => post('session/elevate', {pin, passkey, reason}),
+  endElevation: () => post('session/elevate/end', {}),
   recoverCode: (user, code) => post('session/recover/code', {user, code}),
   recover: (ticket, newPassword, newPin) => post('session/recover', {ticket, newPassword, newPin}),
   activity: () => get('me/activity'),
