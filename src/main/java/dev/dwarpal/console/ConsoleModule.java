@@ -116,6 +116,15 @@ public interface ConsoleModule {
          */
         default void rolesChanged(String personId, Set<String> roles) {
         }
+
+        /** One record of the audit trail as a module may read it. Vault records are in it too: the module decides what shows. */
+        record AuditRow(long sequence, java.time.Instant at, String type, String actor, String payloadJson) {
+        }
+
+        /** The newest records of the console's audit trail (the saved trail, or the lab's chain when none is kept), newest first. Read only. */
+        default List<AuditRow> auditTail(int max) {
+            return List.of();
+        }
     }
 
     /** Called once, before {@link #routes}, with the console's host. Most modules need nothing from it. */

@@ -47,9 +47,13 @@ account than the requester, and one account can never approve its own request. S
       Built in Stage 2: any record whose type starts `VAULT_` goes into the saved console trail (`ConsoleTrail`). Analysts
       get "not found" for it and never see it listed; a lead sees only its `action` and `target` fields (plus the
       record's own actor and time). Stage 6 must put the secret nowhere in the payload, and write `action` and `target`.
-- [ ] **S4 monitoring:** each administrator sees the other administrator's actions on the monitoring page; Cleo sees the
+- [x] **S4 monitoring:** each administrator sees the other administrator's actions on the monitoring page; Cleo sees the
       limited vault log (who, when, on whom, never the secret). The records an administrator needs are already written
       by Stage 3 and Step A (`ACCESS_*`, `ELEVATION_*`, with before and after).
+      Built in Stage 4: the Monitoring page (`MonitorModule`, id `monitor`): "Administrators" shows the other administrator's
+      actions (administrators only), "Vault log" shows who, when, on whom and the kind of action (leads only; an administrator who is
+      not a lead gets "not found"). Read only: it has no write route. Test: `MonitorEndToEndTest`. Stage 6 only has to write
+      `VAULT_` records with `action` and `target`.
 - [ ] **S5 -> step-up function:** Stage 5 replaces the typed passkey with a real Windows Hello passkey by swapping the
       implementation behind `PasskeyStepUp`; the callers (the unlock routes and the elevation) do not change. Spector
       registers his own passkey.

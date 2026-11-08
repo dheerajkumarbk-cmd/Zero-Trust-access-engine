@@ -106,6 +106,28 @@ public final class ConsoleServer implements AutoCloseable {
         }
 
         @Override
+        public List<AuditRow> auditTail(int max) {
+            dev.dwarpal.lab.LabAudit view = trail != null ? trail.view() : world().auditView;
+            int want = Math.max(1, Math.min(max, 2_000));
+            long head = view.page(0, 1, Optional.empty()).head();
+            long cursor = Math.max(0, head - want);
+            List<AuditRow> out = new ArrayList<>();
+            while (cursor < head) {
+                dev.dwarpal.lab.LabAudit.Page page = view.page(cursor, 500, Optional.empty());
+                if (page.entries().isEmpty()) {
+                    break;
+                }
+                for (dev.dwarpal.lab.LabAudit.Entry e : page.entries()) {
+                    String payload = view.record(e.sequence()).map(dev.dwarpal.lab.LabAudit.Detail::payloadJson).orElse("{}");
+                    out.add(new AuditRow(e.sequence(), e.at(), e.type(), e.actor(), payload));
+                    cursor = e.sequence();
+                }
+            }
+            java.util.Collections.reverse(out);
+            return out;
+        }
+
+        @Override
         public void rolesChanged(String personId, Set<String> roles) {
             Set<ConsoleModule.Role> now = java.util.EnumSet.noneOf(ConsoleModule.Role.class);
             for (String r : roles) {

@@ -146,6 +146,8 @@ public final class ConsoleMain {
             if (accessApi != null) {
                 b.module(new AccessModule(accessApi));
             }
+            List<ConsoleAuth.Enrolment> enrolled = people;
+            b.module(new MonitorModule(() -> administratorIds(directory, enrolled)));
             if (trail != null) {
                 b.trail(trail);
             }
@@ -175,6 +177,25 @@ public final class ConsoleMain {
                 }
             }
         }
+    }
+
+    /** The people who are administrators now: the directory when there is one, else the people file. */
+    static java.util.Set<String> administratorIds(Directory directory, List<ConsoleAuth.Enrolment> people) {
+        java.util.Set<String> out = new java.util.TreeSet<>();
+        if (directory != null) {
+            for (dev.dwarpal.directory.DirectoryPerson p : directory.people()) {
+                if (p.status() == dev.dwarpal.directory.DirectoryPerson.Status.ACTIVE && p.consoleRoles().contains("ADMIN")) {
+                    out.add(p.id());
+                }
+            }
+        } else {
+            for (ConsoleAuth.Enrolment e : people) {
+                if (e.person().roles().contains(ConsoleModule.Role.ADMIN)) {
+                    out.add(e.person().id());
+                }
+            }
+        }
+        return out;
     }
 
     /**
