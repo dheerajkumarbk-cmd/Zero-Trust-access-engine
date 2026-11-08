@@ -59,6 +59,7 @@ public final class ConsoleMain {
         int rotateDays = 7;
         String dbMode = "on";
         String trailMode = "on";
+        String passkeyMode = "device";
         LabConfig config = LabConfig.defaults(Path.of("lab"));
         for (int i = 0; i < args.length; i += 2) {
             if (i + 1 >= args.length) {
@@ -78,6 +79,7 @@ public final class ConsoleMain {
                 case "--rotate-days" -> rotateDays = Integer.parseInt(v);
                 case "--db" -> dbMode = v;
                 case "--trail" -> trailMode = v;
+                case "--passkey" -> passkeyMode = v;
                 default -> throw new IllegalArgumentException("unknown option " + args[i]);
             }
         }
@@ -135,7 +137,18 @@ public final class ConsoleMain {
             out.println(trail == null ? "Audit trail on disk: switched off for this run (--trail off); records go into the lab's chain only."
                     : "Audit trail on disk: " + trail.records() + " records from earlier runs, checked and intact ("
                     + trail.dir().toAbsolutePath() + ").");
+            // the passkey is the person's own device (Windows Hello, a phone, a security key); "typed" is the fallback for a
+            // machine with none
+            PasskeyStepUp passkeys = switch (passkeyMode) {
+                case "device" -> WebAuthnStepUp.open(auth, config.dir().resolve("console").resolve("passkeys.txt"), "localhost",
+                        "https://localhost:" + consolePort, Clock.systemUTC());
+                case "typed" -> PasskeyStepUp.typed(auth);
+                default -> throw new IllegalArgumentException("--passkey takes device or typed");
+            };
+            out.println("Passkey: " + ("device".equals(passkeyMode) ? "the person's own device (Windows Hello, a phone or a security key); "
+                    + "each person registers theirs on the Profile page." : "typed (fallback for a machine with no device passkey)."));
             ConsoleServer.Builder b = ConsoleServer.builder(lab, channel, new LabVerdictSigner(lab), auth, tls)
+                    .passkeyStepUp(passkeys)
                     .settings(settings)
                     .passkeyLock(Duration.ofMinutes(15), Duration.ofMinutes(5))
                     .address(new InetSocketAddress(InetAddress.getLoopbackAddress(), consolePort));

@@ -2,6 +2,7 @@
 // their own below it (#/profile/backup), which explains itself before asking for anything.
 // Secrets are typed here and sent once; the server keeps only one-way hashes and the page keeps nothing.
 import {api} from '../api.js';
+import {deviceSupported, makePasskey, deviceMessage} from '../webauthn.js';
 import {h, fill, link, panel, cream, spot, note} from '../dom.js';
 import {DwView} from '../view.js';
 import {table} from '../table.js';
@@ -98,6 +99,23 @@ class DwProfile extends DwView {
   passkeyPanel(p) {
     const pw = field('pk-pw', 'Password', 'current-password');
     const pin = field('pk-pin', 'Security key PIN', 'one-time-code');
+    if (p.passkeyKind === 'webauthn') {
+      return spot('passkey', panel(p.passkeySet ? 'Replace your device passkey' : 'Register your device passkey',
+        note('Your own device (Windows Hello, a phone or a security key) holds the passkey and asks for your PIN, fingerprint or face each time. '
+          + 'The console keeps only the public half. Registering again replaces the earlier device. Your password and PIN prove it is you first.'),
+        secretForm([pw, pin], p.passkeySet ? 'Replace with this device' : 'Register this device', async ([a, b]) => {
+          if (!deviceSupported()) throw new Error('This browser cannot use a device passkey.');
+          try {
+            const evidence = await makePasskey(await api.passkeyBegin(a, b));
+            await api.setPasskey(a, b, evidence);
+          } catch (err) {
+            if (deviceMessage(err)) throw new Error(deviceMessage(err));
+            throw err;
+          }
+          await this.after();
+          return 'Your device passkey is registered.';
+        })));
+    }
     const next = field('pk-new', 'New passkey (10 characters or more)', 'new-password');
     const again = field('pk-again', 'New passkey again', 'new-password');
     return spot('passkey', panel(p.passkeySet ? 'Replace passkey' : 'Set a passkey',

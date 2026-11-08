@@ -467,6 +467,32 @@ public final class ConsoleAuth {
         return oldest.plus(rotation);
     }
 
+    /** Password and PIN prove who is asking, and nothing is changed (a device passkey is registered after this). */
+    public Changed proveOwner(String subject, String password, String pin, String source) {
+        return prove(subject, password, pin, source);
+    }
+
+    /**
+     * Like {@link #unlock}, for a passkey that a device proves by signing: the same growing wait after wrong tries (counted
+     * per person and per source) and the same answer. {@code proof} is asked only when the person is not in a wait.
+     */
+    public Authenticated unlockWith(String subject, String source, java.util.function.BooleanSupplier proof) {
+        String account = "passkey:" + subject;
+        long wait = throttle.retryAfterSeconds(account, source);
+        if (wait > 0) {
+            return new Authenticated(Status.LOCKED, null, wait, subject);
+        }
+        Card card = cards.get(subject);
+        boolean ok = proof.getAsBoolean();
+        if (ok && card != null) {
+            throttle.success(account, source);
+            return new Authenticated(Status.OK, card.person(), 0, subject);
+        }
+        throttle.failure(account, source);
+        long after = throttle.retryAfterSeconds(account, source);
+        return after > 0 ? new Authenticated(Status.LOCKED, null, after, subject) : Authenticated.failed(subject);
+    }
+
     private Changed prove(String subject, String password, String pin, String source) {
         Authenticated a = stepUp(subject, password, pin, source);
         return switch (a.status()) {

@@ -128,6 +128,10 @@ export const api = {
     csrf = r.csrf;
     return r;
   },
+  /** A fresh challenge for the person's device to sign (when the console uses device passkeys). */
+  passkeyChallenge: () => post('session/passkey/challenge', {}),
+  /** The first half of registering a device passkey: password and PIN prove who asks, the server answers with a challenge. */
+  passkeyBegin: (password, pin) => post('profile/passkey/begin', {password, pin}),
   unlock: (passkey, scope) => post('session/unlock', {passkey, scope: scope || 'window'}),
   lock: () => post('session/lock', {}),
   /** Starts an elevation: the PIN, the passkey and a reason; it lasts ten real minutes. */

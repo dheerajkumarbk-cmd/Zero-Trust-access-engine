@@ -44,7 +44,7 @@ class LabConsoleEndToEndTest {
         PrintStream out = new PrintStream(bytes, true, StandardCharsets.UTF_8);
         Thread launcher = new Thread(() -> {
             try {
-                ConsoleMain.run(new String[]{"--dir", dir.toString(), "--users", "30", "--warmup-days", "1", "--port", "0", "--db", "off"},
+                ConsoleMain.run(new String[]{"--dir", dir.toString(), "--users", "30", "--warmup-days", "1", "--port", "0", "--db", "off", "--passkey", "typed"},
                         out);
             } catch (Exception e) {
                 out.println("launcher failed: " + e);

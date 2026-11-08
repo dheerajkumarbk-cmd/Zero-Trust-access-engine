@@ -1,4 +1,5 @@
 // The shell: login, navigation built from /console/api/modules, routing, the live feed, keyboard, step-up, status bar.
+import {deviceSupported, signChallenge, deviceMessage} from './webauthn.js';
 import {api, ApiError, setUnlocker} from './api.js';
 import {h, fill, unavailable} from './dom.js';
 import {lists} from './table.js';
@@ -461,19 +462,21 @@ class DwApp extends HTMLElement {
             this.navigate('#/profile?at=passkey');
           }}}, 'Set my passkey'), h('button', {type: 'button', on: {click: () => done(false)}}, 'Cancel')));
       } else {
-        const key = h('input', {type: 'password', id: 'pk-key', autocomplete: 'off', required: true, spellcheck: false});
+        const device = this.me.passkeyKind === 'webauthn';
+        const key = device ? {value: ''} : h('input', {type: 'password', id: 'pk-key', autocomplete: 'off', required: true, spellcheck: false});
         const msg = h('p', {class: 'note', role: 'alert'});
-        const form = h('form', {class: 'stack', method: 'dialog'}, h('h1', {id: 'pk-title'}, scope === 'once' ? 'Confirm with your passkey' : 'Enter your passkey'),
+        const form = h('form', {class: 'stack', method: 'dialog'}, h('h1', {id: 'pk-title'}, scope === 'once' ? 'Confirm with your passkey' : device ? 'Use your device passkey' : 'Enter your passkey'),
           h('p', {class: 'note'}, scope === 'once' ? 'This action asks for your passkey every time.'
             : scope === 'audit' ? 'The audit explorer opens for 5 minutes, and the other confidential views for 15.'
               : 'Cases, entities and hunt open together for 15 minutes. The footer counts the time down.'),
-          h('label', {for: 'pk-key'}, 'Passkey'), key, msg,
-          h('div', {class: 'row'}, h('button', {type: 'submit', class: 'primary'}, 'Open'), h('button', {type: 'button', on: {click: () => done(false)}}, 'Cancel')));
+          device ? h('p', {class: 'note'}, 'Windows Hello (or your phone or security key) will ask for your PIN, fingerprint or face.')
+            : [h('label', {for: 'pk-key'}, 'Passkey'), key], msg,
+          h('div', {class: 'row'}, h('button', {type: 'submit', class: 'primary'}, device ? 'Use Windows Hello' : 'Open'), h('button', {type: 'button', on: {click: () => done(false)}}, 'Cancel')));
         form.addEventListener('submit', async (e) => {
           e.preventDefault();
           msg.textContent = '';
           try {
-            const r = await api.unlock(key.value, scope);
+            const r = await api.unlock(device ? await this.deviceEvidence() : key.value, scope);
             if (scope !== 'once') {
               this.me.unlocked = true;
               this.me.unlockedSeconds = r.unlockedSeconds;
@@ -482,7 +485,8 @@ class DwApp extends HTMLElement {
             }
             done(true);
           } catch (err) {
-            msg.textContent = err.status === 429 ? 'Too many attempts. Try again in ' + (err.retryAfter || 5) + ' s.' : 'That is not your passkey.';
+            msg.textContent = err.status === 429 ? 'Too many attempts. Try again in ' + (err.retryAfter || 5) + ' s.'
+              : deviceMessage(err) || 'That is not your passkey.';
             key.value = '';
           }
         });
@@ -492,6 +496,12 @@ class DwApp extends HTMLElement {
       dlg.showModal();
     });
     return this.unlocking;
+  }
+
+  /** The signed answer of the person's own device to a fresh challenge from the server. */
+  async deviceEvidence() {
+    if (!deviceSupported()) throw new ApiError(0, 'This browser cannot use a device passkey.');
+    return signChallenge(await api.passkeyChallenge());
   }
 
   // ---- elevation ----------------------------------------------------------------------------------------
@@ -520,27 +530,28 @@ class DwApp extends HTMLElement {
           }}}, 'Set my passkey'), h('button', {type: 'button', on: {click: () => done(false)}}, 'Cancel')));
       } else {
         const pin = h('input', {type: 'password', id: 'ev-pin', autocomplete: 'off', required: true, spellcheck: false});
-        const key = h('input', {type: 'password', id: 'ev-key', autocomplete: 'off', required: true, spellcheck: false});
+        const device = this.me.passkeyKind === 'webauthn';
+        const key = device ? {value: ''} : h('input', {type: 'password', id: 'ev-key', autocomplete: 'off', required: true, spellcheck: false});
         const why = h('input', {type: 'text', id: 'ev-why', autocomplete: 'off', required: true, maxlength: 200,
           placeholder: 'For example: approving the new analyst'});
         const msg = h('p', {class: 'note', role: 'alert'});
         const form = h('form', {class: 'stack', method: 'dialog'}, h('h1', {id: 'ev-title'}, 'Start an elevation'),
           h('p', {class: 'note'}, 'Privileged changes need your security PIN, your passkey and a reason. The elevation lasts 10 minutes, '
             + 'the footer counts them down, and everything you do inside it is written to the audit trail under it.'),
-          h('label', {for: 'ev-pin'}, 'Security PIN'), pin, h('label', {for: 'ev-key'}, 'Passkey'), key,
+          h('label', {for: 'ev-pin'}, 'Security PIN'), pin, device ? [] : [h('label', {for: 'ev-key'}, 'Passkey'), key],
           h('label', {for: 'ev-why'}, 'Reason'), why, msg,
-          h('div', {class: 'row'}, h('button', {type: 'submit', class: 'primary'}, 'Start'), h('button', {type: 'button', on: {click: () => done(false)}}, 'Cancel')));
+          h('div', {class: 'row'}, h('button', {type: 'submit', class: 'primary'}, device ? 'Start with Windows Hello' : 'Start'), h('button', {type: 'button', on: {click: () => done(false)}}, 'Cancel')));
         form.addEventListener('submit', async (e) => {
           e.preventDefault();
           msg.textContent = '';
           try {
-            const r = await api.elevate(pin.value, key.value, why.value);
+            const r = await api.elevate(pin.value, device ? await this.deviceEvidence() : key.value, why.value);
             this.me.elevation = r.elevation;
             this.syncUnlock();
             done(true);
           } catch (err) {
             msg.textContent = err.status === 429 ? 'Too many attempts. Try again in ' + (err.retryAfter || 5) + ' s.'
-              : err.status === 400 ? 'Give a reason of 5 to 200 characters.' : 'That PIN or passkey is not right.';
+              : err.status === 400 ? 'Give a reason of 5 to 200 characters.' : deviceMessage(err) || 'That PIN or passkey is not right.';
             pin.value = '';
             key.value = '';
           }

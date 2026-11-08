@@ -73,6 +73,7 @@ final class ConsoleRoutes {
         s.route("POST", "session/recover", Kind.PUBLIC, null, false, c -> recover(s, c));
         s.route("POST", "session/recover/code", Kind.PUBLIC, null, false, c -> recoverCode(s, c));
         s.route("POST", "session/unlock", Kind.READ, null, false, c -> unlock(s, c));
+        s.route("POST", "session/passkey/challenge", Kind.READ, null, false, c -> passkeyChallenge(s, c));
         s.route("POST", "session/lock", Kind.READ, null, false, c -> lock(s, c));
         s.route("POST", "session/elevate", Kind.WRITE, null, false, c -> startElevation(s, c));
         s.route("POST", "session/elevate/end", Kind.WRITE, null, false, c -> endElevation(s, c));
@@ -83,6 +84,7 @@ final class ConsoleRoutes {
         s.route("POST", "profile/password", Kind.WRITE, null, false, c -> changePassword(s, c));
         s.route("POST", "profile/pin", Kind.WRITE, null, false, c -> changePin(s, c));
         s.route("POST", "profile/passkey", Kind.WRITE, null, false, c -> setPasskey(s, c));
+        s.route("POST", "profile/passkey/begin", Kind.WRITE, null, false, c -> beginPasskey(s, c));
         s.route("POST", "profile/backup-codes", Kind.WRITE, null, false, c -> backupCodes(s, c));
         // ---- identity, modules, lab, stream
         s.route("GET", "me", Kind.READ, null, false, c -> me(s, c));
@@ -218,7 +220,8 @@ final class ConsoleRoutes {
         return Reply.ok(JsonValue.object().put("person", person(c.person()))
                 .put("passwordChanged", t.passwordChanged().toString()).put("pinChanged", t.pinChanged().toString())
                 .put("changeBy", t.changeBy().toString()).put("changeDue", JsonValue.bool(t.due()))
-                .put("rotationDays", JsonValue.num(t.rotationDays())).put("passkeySet", JsonValue.bool(t.passkeySet()))
+                .put("rotationDays", JsonValue.num(t.rotationDays())).put("passkeySet", JsonValue.bool(s.passkeys.isSet(c.person().id()).orElse(t.passkeySet())))
+                .put("passkeyKind", s.passkeys.kind())
                 .put("passkeyNeeded", JsonValue.bool(needsPasskey(c.person())))
                 .put("passkeyLock", JsonValue.bool(s.passkeyWindow != null))
                 .put("unlocked", JsonValue.bool(s.sessions.unlocked(c.session)))
@@ -274,8 +277,44 @@ final class ConsoleRoutes {
             return Reply.error(403, "your role opens nothing confidential, so it needs no passkey");
         }
         Ctx.Fields f = c.fields(Set.of("password", "pin", "passkey"));
-        return changed(s, c, s.auth.setPasskey(c.person().id(), f.text("password", 1024), f.text("pin", 64),
-                f.text("passkey", 1024), c.source), "passkey", false);
+        return changed(s, c, s.passkeys.register(s.auth, c.person().id(), f.text("password", 1024), f.text("pin", 64),
+                f.text("passkey", MAX_EVIDENCE), c.source), "passkey", false);
+    }
+
+    /** A device passkey comes as JSON text (a few hundred characters, more for a long RSA signature). */
+    private static final int MAX_EVIDENCE = 4096;
+
+    /** The first half of registering a device passkey: password and PIN prove who asks, then the device gets a fresh challenge. */
+    private static Reply beginPasskey(ConsoleServer s, Ctx c) {
+        if (!needsPasskey(c.person())) {
+            return Reply.error(403, "your role opens nothing confidential, so it needs no passkey");
+        }
+        if (!(s.passkeys instanceof WebAuthnStepUp device)) {
+            return Reply.error(404, "not found");
+        }
+        Ctx.Fields f = c.fields(Set.of("password", "pin"));
+        ConsoleAuth.Changed proof = s.auth.proveOwner(c.person().id(), f.text("password", 1024), f.text("pin", 64), c.source);
+        if (proof.status() != ConsoleAuth.Change.OK) {
+            return changed(s, c, proof, "passkey", false);
+        }
+        WebAuthnStepUp.Registration r = device.registrationOptions(c.person().id(), c.person().display());
+        return Reply.ok(JsonValue.object().put("challenge", r.challenge()).put("rpId", r.rpId()).put("userId", r.userId())
+                .put("userName", r.userName()).put("displayName", r.displayName()).put("timeoutMs", JsonValue.num(r.timeoutMs())).build());
+    }
+
+    /** A fresh challenge for the person's device to sign, when this console uses device passkeys. */
+    private static Reply passkeyChallenge(ConsoleServer s, Ctx c) {
+        if (!needsPasskey(c.person())) {
+            return Reply.error(403, "your role opens nothing confidential, so it needs no passkey");
+        }
+        if (!(s.passkeys instanceof WebAuthnStepUp device)) {
+            return Reply.ok(JsonValue.object().put("kind", "typed").build());
+        }
+        WebAuthnStepUp.Options o = device.assertionOptions(c.person().id());
+        List<JsonValue> ids = new ArrayList<>();
+        o.credentialIds().forEach(i -> ids.add(JsonValue.str(i)));
+        return Reply.ok(JsonValue.object().put("kind", "webauthn").put("challenge", o.challenge()).put("rpId", o.rpId())
+                .put("credentialIds", new JsonValue.JArray(ids)).put("timeoutMs", JsonValue.num(o.timeoutMs())).build());
     }
 
     private static Reply backupCodes(ConsoleServer s, Ctx c) {
@@ -302,10 +341,10 @@ final class ConsoleRoutes {
         String scope;
         try {
             Ctx.Fields f = c.fields(Set.of("passkey", "scope"));
-            passkey = f.text("passkey", 1024);
+            passkey = f.text("passkey", MAX_EVIDENCE);
             scope = f.text("scope", 10);
         } catch (dev.dwarpal.wire.JsonException withoutScope) {
-            passkey = c.fields(Set.of("passkey")).text("passkey", 1024);
+            passkey = c.fields(Set.of("passkey")).text("passkey", MAX_EVIDENCE);
             scope = "window";
         }
         if (!Set.of("window", "audit", "once").contains(scope)) {
@@ -340,7 +379,7 @@ final class ConsoleRoutes {
         }
         Ctx.Fields f = c.fields(Set.of("pin", "passkey", "reason"));
         String pin = f.text("pin", 64);
-        String passkey = f.text("passkey", 1024);
+        String passkey = f.text("passkey", MAX_EVIDENCE);
         String reason = f.text("reason", 300).strip();
         if (reason.length() < 5 || reason.length() > 200) {
             return Reply.error(400, "give a reason of 5 to 200 characters");
@@ -484,7 +523,8 @@ final class ConsoleRoutes {
                 .put("stepUpFresh", JsonValue.bool(s.sessions.stepUpFresh(x)))
                 .put("stepUpUntil", s.sessions.stepUpUntil(x).toString())
                 .put("changeDue", JsonValue.bool(s.auth.changeDue(x.person.id())))
-                .put("passkeySet", JsonValue.bool(s.auth.standing(x.person.id()).passkeySet()))
+                .put("passkeySet", JsonValue.bool(s.passkeys.isSet(x.person.id()).orElse(s.auth.standing(x.person.id()).passkeySet())))
+                .put("passkeyKind", s.passkeys.kind())
                 .put("passkeyNeeded", JsonValue.bool(needsPasskey(x.person)))
                 .put("unlocked", JsonValue.bool(s.sessions.unlocked(x)))
                 .put("unlockedSeconds", JsonValue.num(s.sessions.unlockedSeconds(x)))

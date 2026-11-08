@@ -54,10 +54,16 @@ account than the requester, and one account can never approve its own request. S
       actions (administrators only), "Vault log" shows who, when, on whom and the kind of action (leads only; an administrator who is
       not a lead gets "not found"). Read only: it has no write route. Test: `MonitorEndToEndTest`. Stage 6 only has to write
       `VAULT_` records with `action` and `target`.
-- [ ] **S5 -> step-up function:** Stage 5 replaces the typed passkey with a real Windows Hello passkey by swapping the
-      implementation behind `PasskeyStepUp`; the callers (the unlock routes and the elevation) do not change. Spector
-      registers his own passkey.
-- [ ] **S5 -> S6 gate:** the administrator's passkey gates the vault and the elevation, never ordinary sign-in.
+- [x] **S5 -> step-up function:** the lab now uses a real device passkey (WebAuthn: Windows Hello, a phone or a security
+      key) by swapping the implementation behind `PasskeyStepUp` (`WebAuthnStepUp`); the callers (the unlock routes and the
+      elevation) did not change. Each person, Spector included, registers their own on the Profile page (password and PIN
+      first, then the device). The console checks everything with the JDK only: the challenge (fresh, once, per person), the
+      origin, the relying party (`localhost`), presence and verification flags, the signature (ES256 or RS256) and the counter.
+      The private key never leaves the device; the console keeps only the public key in the owner-only `console/passkeys.txt`.
+      `--passkey typed` keeps the old typed passkey for a machine with no device passkey. Tests: `WebAuthnEndToEndTest`
+      (software authenticator with real CBOR and signatures), `CborTest`, and a browser run with Edge's virtual authenticator.
+- [x] **S5 -> S6 gate:** the administrator's passkey gates the vault and the elevation, never ordinary sign-in
+      (the sign-in itself still asks only for password and security-key PIN).
 - [ ] **S6 elevation for the vault and emergency passwords:** an emergency password activation and a vault reveal need an
       elevation (PIN, passkey, reason). The OTHER administrator is only NOTIFIED (no approval, because an emergency cannot
       wait), and so is Cleo.

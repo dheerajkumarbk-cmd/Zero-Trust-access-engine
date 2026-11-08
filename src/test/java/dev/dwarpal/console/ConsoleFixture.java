@@ -110,10 +110,16 @@ final class ConsoleFixture implements AutoCloseable {
     }
 
     static ConsoleFixture start(Consumer<ConsoleServer.Builder> tweak, ConsoleSettings settings) throws Exception {
+        return new ConsoleFixture((b, auth) -> tweak.accept(b), settings);
+    }
+
+    /** Like {@link #start(Consumer, ConsoleSettings)}, and the tweak also gets the console's own authentication (for a passkey step-up). */
+    static ConsoleFixture startWithAuth(java.util.function.BiConsumer<ConsoleServer.Builder, ConsoleAuth> tweak, ConsoleSettings settings)
+            throws Exception {
         return new ConsoleFixture(tweak, settings);
     }
 
-    private ConsoleFixture(Consumer<ConsoleServer.Builder> tweak, ConsoleSettings settings) throws Exception {
+    private ConsoleFixture(java.util.function.BiConsumer<ConsoleServer.Builder, ConsoleAuth> tweak, ConsoleSettings settings) throws Exception {
         world = world();
         pki = world.pki;
         SSLContext serverTls = TlsContexts.create(pki.keyStore("console"), pki.password(), pki.trustStore(), pki.password());
@@ -125,7 +131,7 @@ final class ConsoleFixture implements AutoCloseable {
         ConsoleServer.Builder b = ConsoleServer.builder(lab, channel, new LabVerdictSigner(lab), auth, serverTls)
                 .settings(settings).wallClock(clock).staticRoot("consolefixture");
         b.address(new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), 0));
-        tweak.accept(b);
+        tweak.accept(b, auth);
         server = b.build().start();
         base = "https://localhost:" + server.port();
         origin = base;
