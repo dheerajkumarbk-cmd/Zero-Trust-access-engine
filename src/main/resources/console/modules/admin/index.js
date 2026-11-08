@@ -1,5 +1,6 @@
 // Administration and the requester's own page. Everything the server sends is shown as text.
 import { el, clear, button, stylesheet } from './dom.js';
+import { adminQueue } from '../access/ui.js';
 
 function table(headers, rows) {
   return el('table', { class: 'adm-table' },
@@ -256,6 +257,14 @@ function view(root, shell) {
     await pages.get(key).draw(body);
   }
 
+  async function accessQueue(box) {
+    try {
+      await adminQueue(box, { api, say, call, privileged });
+    } catch (e) {
+      say(e && e.message ? e.message : 'The access requests are unavailable.', true);
+    }
+  }
+
   function addTab(key, label, draw) {
     const tab = button(label, () => open(key), { role: 'tab', 'aria-selected': 'false' });
     pages.set(key, { tab, draw });
@@ -272,6 +281,7 @@ function view(root, shell) {
       addTab('playbooks', 'Playbooks', playbooks);
       addTab('pam', 'Privileged access', pam);
       addTab('directory', 'Directory', directory);
+      addTab('access', 'Access requests', accessQueue);
       addTab('sessions', 'Sessions and devices', sessions);
       addTab('lab', 'Lab', labBox);
     }

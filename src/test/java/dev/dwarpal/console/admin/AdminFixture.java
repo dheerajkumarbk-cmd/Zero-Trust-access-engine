@@ -185,6 +185,14 @@ final class AdminFixture implements AdminServices {
     /** The directory the page reads; null means the lab runs without its database. */
     dev.dwarpal.directory.Directory people;
 
+    /** The access process; null means the lab runs without its database. */
+    dev.dwarpal.console.access.AccessApi access;
+
+    @Override
+    public java.util.Optional<dev.dwarpal.console.access.AccessApi> access() {
+        return java.util.Optional.ofNullable(access);
+    }
+
     @Override
     public java.util.Optional<dev.dwarpal.directory.Directory> people() {
         return java.util.Optional.ofNullable(people);

@@ -56,6 +56,11 @@ public interface AdminServices {
         return Optional.empty();
     }
 
+    /** The access process (joiners, approvals), when the lab runs with its database; empty when the database is switched off. */
+    default Optional<dev.dwarpal.console.access.AccessApi> access() {
+        return Optional.empty();
+    }
+
     /** The newest {@code max} records of the audit chain, oldest first. */
     List<AuditRecord> recentAudit(int max);
 

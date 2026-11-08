@@ -41,6 +41,7 @@ public final class LabAdminServices implements AdminServices {
 
     private final LabSession session;
     private final Directory people;
+    private final dev.dwarpal.console.access.AccessApi access;
     private final PlaybookCompiler compiler = new PlaybookCompiler(RuleCatalogue.reference(), ResponseSettings.defaults(),
             Set.of("ticket", "chat"), true);
     private final Object lock = new Object();
@@ -53,8 +54,19 @@ public final class LabAdminServices implements AdminServices {
 
     /** @param people the directory database, or null when the lab runs without it */
     public LabAdminServices(LabSession session, Directory people) {
+        this(session, people, null);
+    }
+
+    /** @param access the access process (joiners, approvals), or null when the lab runs without the database */
+    public LabAdminServices(LabSession session, Directory people, dev.dwarpal.console.access.AccessApi access) {
         this.session = session;
         this.people = people;
+        this.access = access;
+    }
+
+    @Override
+    public Optional<dev.dwarpal.console.access.AccessApi> access() {
+        return Optional.ofNullable(access);
     }
 
     @Override

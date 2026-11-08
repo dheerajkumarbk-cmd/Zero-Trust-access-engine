@@ -54,8 +54,9 @@ class DirectoryPersonTest {
     }
 
     @Test
-    void aPersonHoldsOneOrMoreKnownRolesAndNothingElse() {
-        assertThrows(IllegalArgumentException.class, () -> person("ana", "Ana"));
+    void aPersonHoldsKnownRolesAndNothingElseAndMayHoldNoneAtAll() {
+        // a leaver, or a joiner whose items still wait for approval, holds no console role
+        assertTrue(person("ana", "Ana").consoleRoles().isEmpty());
         assertThrows(IllegalArgumentException.class, () -> person("ana", "Ana", "ROOT"));
         assertThrows(IllegalArgumentException.class, () -> person("ana", "Ana", "ADMIN' OR '1'='1"));
         assertThrows(IllegalArgumentException.class, () -> person("ana", "Ana", "admin"));

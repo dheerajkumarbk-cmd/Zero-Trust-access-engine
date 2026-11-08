@@ -78,6 +78,24 @@ public final class DemoPeople {
         }
     }
 
+    /**
+     * First secrets for a person the directory has and the people file does not (a joiner approved since the last start):
+     * random, written to the owner-only people file like everyone's, and returned so they can sign in at once.
+     */
+    public static Enrolment issue(Path labDir, Person person) {
+        Enrolment e = new Enrolment(person, random(16), random(8));
+        Path file = labDir.resolve("console").resolve("people.txt");
+        try {
+            String text = Files.isRegularFile(file) ? Files.readString(file, StandardCharsets.UTF_8) : "";
+            String lead = text.isEmpty() || text.endsWith("\n") ? "" : "\n";
+            Files.writeString(file, text + lead + line(e), StandardCharsets.UTF_8);
+            OwnerOnly.restrict(file);
+        } catch (IOException ex) {
+            throw new java.io.UncheckedIOException("the people file cannot be written", ex);
+        }
+        return e;
+    }
+
     /** Reads {@code <lab>/console/people.txt}, making it (owner-only) on the first start. */
     public static List<Enrolment> loadOrCreate(Path labDir) throws IOException {
         Path dir = labDir.resolve("console");

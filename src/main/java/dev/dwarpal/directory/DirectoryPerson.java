@@ -43,8 +43,9 @@ public record DirectoryPerson(String id, String displayName, String department, 
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(createdAt, "createdAt");
         Objects.requireNonNull(consoleRoles, "consoleRoles");
-        if (consoleRoles.isEmpty() || !ROLES.containsAll(consoleRoles)) {
-            throw new IllegalArgumentException("a person holds one or more of " + new TreeSet<>(ROLES));
+        // a person who left, or a joiner whose items still wait for approval, holds no console role
+        if (!ROLES.containsAll(consoleRoles)) {
+            throw new IllegalArgumentException("console roles come from " + new TreeSet<>(ROLES));
         }
         consoleRoles = Set.copyOf(new TreeSet<>(consoleRoles));
     }

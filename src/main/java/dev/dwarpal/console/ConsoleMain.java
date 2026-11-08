@@ -5,6 +5,10 @@ import dev.dwarpal.directory.DbSettings;
 import dev.dwarpal.directory.Directory;
 import dev.dwarpal.directory.DirectoryException;
 import dev.dwarpal.directory.Migrator;
+import dev.dwarpal.console.access.AccessApi;
+import dev.dwarpal.console.access.AccessModule;
+import dev.dwarpal.directory.CredentialLifecycle;
+import dev.dwarpal.directory.PostgresAccess;
 import dev.dwarpal.directory.PostgresDirectory;
 import dev.dwarpal.edge.DevPki;
 import dev.dwarpal.edge.TlsContexts;
@@ -82,16 +86,21 @@ public final class ConsoleMain {
                 + " users, seed " + config.seed() + ")...");
         List<ConsoleAuth.Enrolment> people = DemoPeople.loadOrCreate(config.dir());
         // the directory decides who exists and with which roles; the people file only keeps their first secrets
-        Directory directory = openDirectory(dbMode);
+        Database database = openDatabase(dbMode);
+        Directory directory = database == null ? null : new PostgresDirectory(database);
+        AccessApi accessApi = database == null ? null
+                : new AccessApi(new PostgresAccess(database), directory, CredentialLifecycle.NONE);
         if (directory == null) {
             out.println("Directory database: switched off for this run (--db off); the people come from the people file.");
         } else {
-            DirectoryPeople.Result joined = DirectoryPeople.sync(directory, people, Clock.systemUTC());
+            Path labDir = config.dir();
+            DirectoryPeople.Result joined = DirectoryPeople.sync(directory, people, Clock.systemUTC(), p -> DemoPeople.issue(labDir, p));
             people = joined.people();
             Directory.Health health = directory.health();
             out.println("Directory: " + health.server() + ", tables at version " + health.schemaVersion() + ", "
                     + people.size() + " people can sign in (" + joined.movedIn() + " moved in by this start, "
-                    + joined.skipped() + " not enrolled).");
+                    + joined.skipped() + " not enrolled" + (joined.issued() > 0 ? ", " + joined.issued()
+                    + " new people given first secrets" : "") + ").");
         }
         ConsoleSettings settings = ConsoleSettings.defaults();
         // the session owns the world and the scenario clock and can rebuild both (reset to day zero)
@@ -132,7 +141,11 @@ public final class ConsoleMain {
                     .address(new InetSocketAddress(InetAddress.getLoopbackAddress(), consolePort));
             b.module(new dev.dwarpal.console.lab.LabModule(session));
             b.module(new dev.dwarpal.console.lab.GuideModule());
-            b.module(new dev.dwarpal.console.admin.AdminModule(new dev.dwarpal.console.admin.LabAdminServices(session, directory)));
+            b.module(new dev.dwarpal.console.admin.AdminModule(new dev.dwarpal.console.admin.LabAdminServices(session, directory,
+                    accessApi)));
+            if (accessApi != null) {
+                b.module(new AccessModule(accessApi));
+            }
             if (trail != null) {
                 b.trail(trail);
             }
@@ -169,6 +182,11 @@ public final class ConsoleMain {
      * (the migrator's password is never read here) and refuses to start on tables of the wrong version.
      */
     static Directory openDirectory(String mode) {
+        Database database = openDatabase(mode);
+        return database == null ? null : new PostgresDirectory(database);
+    }
+
+    static Database openDatabase(String mode) {
         DbSettings.Target target = switch (mode) {
             case "off" -> null;
             case "on" -> DbSettings.Target.LAB;
@@ -179,14 +197,14 @@ public final class ConsoleMain {
             return null;
         }
         try {
-            Directory directory = new PostgresDirectory(new Database(DbSettings.fromEnvironment().app(target)));
-            int version = directory.health().schemaVersion();
+            Database database = new Database(DbSettings.fromEnvironment().app(target));
+            int version = new PostgresDirectory(database).health().schemaVersion();
             if (version != Migrator.expectedVersion()) {
                 throw new IllegalStateException("The directory tables are at version " + version + " but this build needs "
                         + Migrator.expectedVersion() + ". Build them first: java -cp target/classes;<postgresql jar> "
                         + "dev.dwarpal.directory.MigrateMain");
             }
-            return directory;
+            return database;
         } catch (DirectoryException e) {
             throw new IllegalStateException("The directory database is not available (" + e.getMessage()
                     + "). Start the PostgreSQL service, check db/local.properties, or run with --db off.", e);

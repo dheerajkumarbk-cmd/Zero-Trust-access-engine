@@ -78,4 +78,17 @@ public interface ConsoleModule {
     Role minimum();
 
     void routes(Routes routes);
+
+    /** What a module may do besides answering a request: both go through the console, never around it. */
+    interface Host {
+        /** Writes a record under {@code person} into the console's audit trail; false if the trail could not take it. */
+        boolean audit(String type, String person, Map<String, String> fields);
+
+        /** Ends every session of the person and refuses their next sign-in (a leaver). */
+        void closeAccount(String personId);
+    }
+
+    /** Called once, before {@link #routes}, with the console's host. Most modules need nothing from it. */
+    default void attach(Host host) {
+    }
 }

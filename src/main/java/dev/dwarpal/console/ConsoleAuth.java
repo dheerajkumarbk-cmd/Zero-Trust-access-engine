@@ -320,9 +320,10 @@ public final class ConsoleAuth {
         boolean set = e != null && !e.passkeyHash().isEmpty();
         byte[] salt = set ? Base64.getDecoder().decode(e.passkeySalt()) : randomBytes(16);
         byte[] made = pinHash(passkey.length() > 128 ? "" : passkey, salt, passwordIterations);
-        if (set && MessageDigest.isEqual(made, Base64.getDecoder().decode(e.passkeyHash()))) {
+        Card card = cards.get(subject);
+        if (set && card != null && MessageDigest.isEqual(made, Base64.getDecoder().decode(e.passkeyHash()))) {
             throttle.success(account, source);
-            return new Authenticated(Status.OK, cards.get(subject).person(), 0, subject);
+            return new Authenticated(Status.OK, card.person(), 0, subject);
         }
         throttle.failure(account, source);
         long after = throttle.retryAfterSeconds(account, source);
@@ -501,6 +502,11 @@ public final class ConsoleAuth {
 
     private static String text(byte[] b) {
         return Base64.getEncoder().encodeToString(b);
+    }
+
+    /** Takes a person off the sign-in list at once (a leaver): their next sign-in fails like an unknown user's. */
+    public void block(String id) {
+        cards.remove(id);
     }
 
     public Optional<Person> person(String id) {

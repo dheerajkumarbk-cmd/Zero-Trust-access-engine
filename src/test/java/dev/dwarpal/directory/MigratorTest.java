@@ -81,7 +81,8 @@ class MigratorTest {
 
     @Test
     void theTablesTheLabNeedsAreThere() {
-        assertEquals(3, count("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'"));
+        // the version table, the directory (2), and the access process (6)
+        assertEquals(9, count("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'"));
     }
 
     @Test

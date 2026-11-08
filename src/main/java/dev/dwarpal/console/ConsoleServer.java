@@ -98,6 +98,22 @@ public final class ConsoleServer implements AutoCloseable {
     final Clock wall;
     final ConsoleSessions sessions;
     final ConsoleAudit audit;
+    /** What a module may do beyond answering: write to the audit trail, and end a leaver's sessions. */
+    private final ConsoleModule.Host host = new ConsoleModule.Host() {
+        @Override
+        public boolean audit(String type, String person, Map<String, String> fields) {
+            return ConsoleServer.this.audit.write(type, person, fields);
+        }
+
+        @Override
+        public void closeAccount(String personId) {
+            ConsoleServer.this.auth.block(personId);
+            for (ConsoleSessions.Session s : ConsoleServer.this.sessions.of(personId)) {
+                ConsoleServer.this.hub.closeSession(s.id);
+                ConsoleServer.this.sessions.end(s.id);
+            }
+        }
+    };
     /** The saved audit trail (kept across restarts); null when this server writes into the lab's chain only. */
     final ConsoleTrail trail;
     /** A sensitive read repeated within a minute is one record with a count; an ordinary view, within five minutes. */
@@ -270,6 +286,7 @@ public final class ConsoleServer implements AutoCloseable {
         if (routes.stream().anyMatch(r -> id.equals(r.moduleId()))) {
             throw new IllegalArgumentException("two modules with the id " + id);
         }
+        m.attach(host);
         m.routes(new ConsoleModule.Routes() {
             @Override
             public void get(String pattern, ConsoleModule.Role minimum, ConsoleModule.Handler handler) {

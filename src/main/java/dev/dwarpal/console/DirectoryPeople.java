@@ -34,14 +34,24 @@ final class DirectoryPeople {
             "hana", new String[]{"Human Resources", "HR officer"});
 
     /** The people to enrol, and how many were moved into the directory by this start. */
-    record Result(List<Enrolment> people, int movedIn, int skipped) {
+    record Result(List<Enrolment> people, int movedIn, int skipped, int issued) {
     }
 
     private DirectoryPeople() {
     }
 
     static Result sync(Directory directory, List<Enrolment> fromFile, Clock clock) {
+        return sync(directory, fromFile, clock, p -> null);
+    }
+
+    /**
+     * @param issuer gives first secrets to an active person with a console role who has none yet (a joiner), or null
+     *               to leave that person out until somebody does
+     */
+    static Result sync(Directory directory, List<Enrolment> fromFile, Clock clock,
+                       java.util.function.Function<Person, Enrolment> issuer) {
         int moved = 0;
+        int issued = 0;
         for (Enrolment e : fromFile) {
             if (directory.addIfAbsent(seed(e.person(), clock))) {
                 moved++;
@@ -55,15 +65,25 @@ final class DirectoryPeople {
         int skipped = 0;
         for (DirectoryPerson p : directory.people()) {
             Enrolment known = secrets.get(p.id());
-            if (p.status() != DirectoryPerson.Status.ACTIVE || known == null) {
+            // a person who left, or who holds no console role yet, cannot sign in
+            if (p.status() != DirectoryPerson.Status.ACTIVE || p.consoleRoles().isEmpty()) {
                 skipped++;
                 continue;
             }
             Set<Role> roles = EnumSet.noneOf(Role.class);
             p.consoleRoles().forEach(r -> roles.add(Role.valueOf(r)));
-            out.add(new Enrolment(new Person(p.id(), p.displayName(), roles), known.password(), known.pin()));
+            Person person = new Person(p.id(), p.displayName(), roles);
+            if (known == null) {
+                known = issuer.apply(person);
+                if (known == null) {
+                    skipped++;
+                    continue;
+                }
+                issued++;
+            }
+            out.add(new Enrolment(person, known.password(), known.pin()));
         }
-        return new Result(List.copyOf(out), moved, skipped);
+        return new Result(List.copyOf(out), moved, skipped, issued);
     }
 
     private static DirectoryPerson seed(Person p, Clock clock) {

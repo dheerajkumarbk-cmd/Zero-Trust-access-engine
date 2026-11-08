@@ -97,6 +97,15 @@ public final class AdminModule implements ConsoleModule {
     }
 
     @Override
+    public void attach(Host host) {
+        services.access().ifPresent(a -> a.attach(host));
+    }
+
+    private Response access(java.util.function.Function<dev.dwarpal.console.access.AccessApi, Response> call) {
+        return services.access().map(call).orElseGet(() -> Response.error(404, "the directory database is switched off for this run"));
+    }
+
+    @Override
     public void routes(Routes routes) {
         routes.get("whoami", Role.USER, ModuleKit.guard(Role.USER, this::whoami));
         routes.get("me/decisions", Role.USER, ModuleKit.guard(Role.USER, this::myDecisions));
@@ -126,6 +135,15 @@ public final class AdminModule implements ConsoleModule {
         routes.get("devices", Role.ADMIN, ModuleKit.guard(Role.ADMIN, this::devices));
         routes.get("decisions/{}", Role.ADMIN, ModuleKit.guard(Role.ADMIN, this::decision));
         routes.get("directory", Role.ADMIN, ModuleKit.guard(Role.ADMIN, this::directory));
+
+        // the access process: joiners to decide, sensitive grants waiting for the administrator
+        routes.get("access/queue", Role.ADMIN, ModuleKit.guard(Role.ADMIN, (r, p) -> access(a -> a.adminQueue(r))));
+        routes.post("access/joiners/{}/save", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN,
+                (r, p) -> access(a -> a.saveJoiner(r, ModuleKit.id(p.get(0))))));
+        routes.post("access/joiners/{}/reject", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN,
+                (r, p) -> access(a -> a.rejectJoiner(r, ModuleKit.id(p.get(0))))));
+        routes.post("access/approvals/{}/decision", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN,
+                (r, p) -> access(a -> a.decide(r, ModuleKit.id(p.get(0)), Role.ADMIN))));
     }
 
     // ---- the person's own page ------------------------------------------------------------------------

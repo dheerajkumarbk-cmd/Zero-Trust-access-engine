@@ -5,7 +5,14 @@ Tick a box only when the code and its test exist. Build order: Stage 0 setup, 1 
 
 - [ ] **S3 -> S6 hook (joiner):** the joiner flow calls one clear hook that creates the new person's switched-off backup
       credential. Until Stage 6 the hook does nothing and says so.
+      Built in Stage 3: `CredentialLifecycle.personCreated(personId)`, called by `AccessApi.saveJoiner` after the person
+      is saved. `ConsoleMain` passes `CredentialLifecycle.NONE`; Stage 6 passes the real one and ticks this box.
 - [ ] **S3 -> S6 hook (leaver):** the leaver flow calls one clear hook that deletes that person's backup credential.
+      Built in Stage 3: `CredentialLifecycle.personRemoved(personId)`, called by `AccessApi.submitLeaver` after the
+      removal committed and the person's sessions were ended. Same swap in Stage 6.
+- [ ] **S3 -> S6 first sign-in of a joiner:** until Stage 6 a joiner gets first secrets at the lab's next start
+      (`DirectoryPeople.sync` with `DemoPeople.issue`, written to the owner-only people file like the demo people). Stage 6
+      replaces this with the switched-off backup credential and a first-sign-in flow.
 - [ ] **S2 -> S6 record type:** vault events use the separate audit record type added in Stage 2 (analysts cannot read it).
       Built in Stage 2: any record whose type starts `VAULT_` goes into the saved console trail (`ConsoleTrail`). Analysts
       get "not found" for it and never see it listed; a lead sees only its `action` and `target` fields (plus the

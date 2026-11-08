@@ -46,7 +46,7 @@ class DwApp extends HTMLElement {
   }
 
   connectedCallback() {
-    setUnlocker(() => this.needUnlock());
+    setUnlocker((scope) => this.needUnlock(scope));
     window.addEventListener('dw:unlock', (e) => this.needUnlock(e.detail && e.detail.scope).then(() => this.route()).catch(() => {}));
     window.addEventListener('dw:change-due', () => this.mustChange());
     window.addEventListener('hashchange', () => this.moved());
@@ -82,7 +82,7 @@ class DwApp extends HTMLElement {
 
   paintClock() {
     const el = this.clockEl;
-    if (!el || !el.isConnected) return;
+    if (!el) return;
     if (!this.unlockState) {
       fill(el);
       return;
