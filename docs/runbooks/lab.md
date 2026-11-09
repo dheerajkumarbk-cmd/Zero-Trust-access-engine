@@ -10,10 +10,11 @@ bin\lab.cmd                  (Windows)
 bin/lab.sh                   (macOS, Linux)
 ```
 
-The first start builds `target/dwarpal-lab.jar` (the profile `lab-jar`: one jar with the one dependency inside)
+The first start builds `target/dwarpal-lab.jar` (the profile `lab-jar`: one jar with the two dependencies inside, SnakeYAML and the PostgreSQL driver)
 and makes the lab's certificates under `lab/pki`. Later starts reuse both. The program prints the console address
-(`https://localhost:8443`) and the demo logins: `ana` and `ben` (analysts), `cleo` (SOC lead), `dana` (administrator)
-and `uma` (an ordinary user), each with a password and a security-key PIN.
+(`https://localhost:8443`) and the demo logins: `ana` and `ben` (analysts), `cleo` (SOC lead), `dana` and `spector`
+(administrators), `hana` (HR) and `uma` (an ordinary user), each with a password and a security-key PIN. The directory
+database must be set up first: see [setup.md](../setup.md).
 
 **Trust the lab's certificate authority once** so your browser opens the console without a warning: import
 `lab/pki/ca.pem` as a trusted authority for your own user. Do this only for the lab; remove it when you delete the lab.
@@ -30,6 +31,9 @@ Options, all optional:
 | `--port` | `8443` | The console's port (`0` picks a free one) |
 | `--soc-port` | `0` | The SOC API's port; only the console calls it |
 | `--rotate-days` | `7` | How many days a password and PIN last before they must be changed |
+| `--db` | `on` | `on` the directory database, `test` the throwaway test database, `off` no database |
+| `--passkey` | `device` | `device` real device passkeys (Windows Hello, phone, security key); `typed` the old typed passkey |
+| `--trail` | `on` | `on` saves the audit trail to disk and checks it at every start; `off` keeps it in memory |
 
 ## What you get
 
@@ -56,6 +60,8 @@ Options, all optional:
 * **Stolen or forgotten:** make backup codes under Profile, Backup codes. On the sign-in page, "Use a backup code" asks for
   your user and one code, and only a right code then asks for a new password and PIN. That ends every session of that
   person. Each code works once, and new codes replace old ones. Keep them away from this computer.
+  If you have no code left, an administrator can switch on your **emergency password** from the vault; it is entered on
+  the same page, works once, and you then choose a new password and PIN.
 * **What is stored:** `lab/console/credentials.txt` holds salted one-way hashes only, and a person's plain first
   password and PIN are overwritten in `people.txt` once they change either.
 * **Limits:** the lock protects what the web console shows. Someone with your Windows account can still read the
@@ -80,6 +86,7 @@ loaded from any other server.
 
 ## Difference from a company deployment
 
-A company runs the SIEM, SOAR and the console as separate services with a database, single sign-on, hardware key
-storage and monitoring. The lab runs them in one process with in-memory state so one person can run it at home
-and study every part.
+A company runs the SIEM, SOAR and the console as separate services with single sign-on, hardware key storage and
+monitoring. The lab runs them in one process so one person can run it at home and study every part. The people, roles,
+access grants and approvals are in PostgreSQL; the SOC simulation itself is in memory. See
+[iam-architecture.md](../iam-architecture.md) for the identity-and-access side and its limits.

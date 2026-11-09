@@ -92,6 +92,19 @@ the attacks on demand with a guide, and administrator pages for two-person polic
 built to a stated baseline (OWASP ASVS, NIST SP 800-53 and 800-207, SOC 2, ISO 27001) and costs nothing to run. See the
 [Layer 6 report](docs/layer-6-report.md) and the [runbook](docs/runbooks/lab.md).
 
+## Identity and access (the directory, the vault, elevation)
+
+The lab keeps its people, roles, access grants and approvals in **PostgreSQL** behind one small data-access layer (prepared
+statements only). HR raises joiners and leavers; the administrator ticks the access to grant; sensitive access needs an
+administrator **and** a lead; a second administrator approves privileged changes; privileged actions need an **elevation**
+(PIN, device passkey, reason; 10 real minutes); and a hidden, sealed **vault** holds each person's switched-off emergency
+password for a severe situation. Every step is an audit record that nobody can edit or delete.
+
+* [Setup guide](docs/setup.md) and [dependencies](docs/dependencies.md)
+* [How it is built](docs/iam-architecture.md), including the roles, the single-tester note and the known limitations
+* [Requirements coverage](docs/requirements-coverage.md) and the [stage checklist](docs/iam-stage-links.md)
+* [A 10-minute demo walkthrough](docs/demo-walkthrough.md)
+
 ## The maths
 
 - **M3, Bayes with base rate** (Axelsson 2000): `logit P(attack|x) = logit P(attack) + Σ ln LR_k`
