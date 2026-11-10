@@ -219,8 +219,28 @@ public final class ConsoleAuth {
 
     // ---- login ------------------------------------------------------------------------------------------------
 
+    /**
+     * The name as the person is known: a typed name made only of printable ASCII (no spaces) is folded to lower case, so
+     * "Dana" and "DANA" are "dana" and share one lockout counter. ASCII only on purpose: Unicode case mapping is refused
+     * because, for example, the Kelvin sign U+212A lower-cases to "k" and Cyrillic look-alikes would map onto real names.
+     * Anything else is returned unchanged, fails the well-formed check and is refused like any bad name.
+     */
+    static String typedName(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c < 0x21 || c > 0x7E) {
+                return raw;
+            }
+        }
+        return raw.toLowerCase(java.util.Locale.ROOT);
+    }
+
     /** Step one: user and password. The password is checked only in step two, together with the second factor. */
-    public Begun begin(String user, String password, String source) {
+    public Begun begin(String typed, String password, String source) {
+        String user = typedName(typed);
         long wait = throttle.retryAfterSeconds(user, source);
         if (wait > 0) {
             return new Begun(Status.LOCKED, null, wait, Duration.ZERO);
@@ -412,7 +432,8 @@ public final class ConsoleAuth {
      * for step two and nothing else; the code itself is used up only when new secrets are saved. Wrong guesses cost the
      * same growing wait as wrong passwords.
      */
-    public Recovering checkBackupCode(String user, String code, String source) {
+    public Recovering checkBackupCode(String typed, String code, String source) {
+        String user = typedName(typed);
         long wait = throttle.retryAfterSeconds(user, source);
         if (wait > 0) {
             return new Recovering(Change.LOCKED, null, wait);
