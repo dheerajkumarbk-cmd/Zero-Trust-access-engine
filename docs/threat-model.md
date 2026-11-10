@@ -782,6 +782,24 @@ checked again; the seal and the audit record of the original approval take their
 Residual risk: deleting the saved file (and nothing else) returns the lab to the shipped defaults. That is an operator
 action outside the console and is not detected.
 
+### Elevation for administrator actions
+
+Five administrator actions no longer ask for a fresh password, PIN and single-use passkey each time: requesting, approving
+and revoking privileged access (`pam/request`, `pam/approve/{}`, `pam/revoke/{}`) and the lab reset (`lab/reset` on the
+administration page, `control/reset` on the lab page). They need an open elevation instead (PIN, passkey and a reason given
+once, ten real minutes, ended by sign-out), answered with 423 "elevation required" when there is none. This gives one prompt
+per ten-minute window, and every one of these writes carries the elevation id on its audit record. Approving and installing
+a policy or playbook change (`proposals/{}/approve`, `proposals/{}/install`) and the break-glass review (`pam/review/{}`)
+keep a fresh step-up and a single-use passkey, because they change what the engine enforces or use a signing key.
+
+| # | STRIDE | Threat | Control | Test |
+|---|---|---|---|---|
+| E1 | Elevation | One of the five actions is done without an elevation | The handler refuses with 423 before it reads the body; the host still checks the role first; nothing is changed or recorded as done | `AdminElevationTest` (one test per route) |
+| E2 | Repudiation | A write inside an elevation cannot be tied to it | The host puts the elevation id on the record of every write made inside one | `AdminElevationTest` (audit record carries the id) |
+| E3 | Elevation | An elevation is used as a fresh proof for a policy install or a signing action | The three kept routes still need a fresh step-up, whatever elevation is open | `AdminElevationTest.theThreeKeptActionsStillNeedAFreshStepUp...` |
+| E4 | Elevation | The elevation is used after its ten minutes | The host closes it by the real clock; the same call is refused again | `AdminElevationTest` (clock moved past ten minutes) |
+| E5 | Elevation | A hijacked session inside an open elevation | Accepted: it can act for at most ten minutes, and the elevation ends on sign-out; the opening needed the PIN and the passkey | residual risk |
+
 ## Residual risks (accepted for this layer, scheduled)
 
 | Risk | Why accepted now | Planned in |

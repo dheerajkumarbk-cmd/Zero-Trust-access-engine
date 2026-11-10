@@ -224,9 +224,13 @@ class LabConsoleRedTeamTest {
         unlock(ana, "audit");
         HttpResponse<String> before = send("GET", "/console/api/audit/verify", ana, null, false, null);
         assertTrue(before.body().contains("\"intact\":true"), before.body());
-        Session dana = stepUp(login("dana"));
+        Session dana = login("dana");
         setPasskey(dana, "dana");
-        unlock(dana, "once");
+        HttpResponse<String> noElevation = send("POST", "/console/api/admin/lab/reset", dana, base, true, "{}");
+        assertEquals(423, noElevation.statusCode(), "the reset needs an open elevation: " + noElevation.body());
+        HttpResponse<String> elevated = send("POST", "/console/api/session/elevate", dana, base, true,
+                "{\"pin\":\"" + people.get("dana")[1] + "\",\"passkey\":\"red-team-passkey\",\"reason\":\"resetting the lab\"}");
+        assertEquals(200, elevated.statusCode(), elevated.body());
         HttpResponse<String> reset = send("POST", "/console/api/admin/lab/reset", dana, base, true, "{}");
         assertEquals(200, reset.statusCode(), reset.body());
         // the analyst was never told: her session, the SOC channel and the new chain all work

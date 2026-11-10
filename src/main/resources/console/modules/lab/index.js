@@ -84,8 +84,6 @@ function view(root, shell) {
       }),
       !roles.includes('ADMIN') ? null : button('Reset to day zero', async () => {
         if (!window.confirm('Reset the lab? All cases, risk and launched scenarios are forgotten.')) return;
-        const ok = await act(shell.needStepUp());
-        if (ok === null) return;
         say('Resetting; this takes a few seconds...');
         await act(api.post('control/reset', {}), (s) => {
           drawStatus(s);

@@ -34,6 +34,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class LabModuleTest {
 
+    /** An administrator inside an open elevation: the lab reset needs one, and no fresh second factor. */
+    private static final dev.dwarpal.console.ConsoleModule.Principal ADMIN_ELEVATED = new dev.dwarpal.console.ConsoleModule.Principal(
+            "dana", java.util.Set.of(Role.ADMIN), false, new dev.dwarpal.console.ConsoleModule.Elevation("elv-test",
+            "testing the lab reset", Instant.parse("2099-01-01T00:00:00Z")));
+
     private static LabSession session;
     private static FakeRoutes routes;
 
@@ -58,7 +63,7 @@ class LabModuleTest {
     @Order(1)
     void everyRouteIsRegisteredWithItsRoleAndStepUp() {
         assertEquals(Role.ADMIN, routes.route("POST", "control/reset").minimum());
-        assertTrue(routes.route("POST", "control/reset").stepUp(), "reset is a privileged write");
+        assertFalse(routes.route("POST", "control/reset").stepUp(), "reset asks for an open elevation, not a fresh proof");
         assertEquals(Role.LEAD, routes.route("POST", "control/speed").minimum());
         assertEquals(Role.LEAD, routes.route("POST", "control/fastforward").minimum());
         assertEquals(Role.LEAD, routes.route("POST", "control/pause").minimum());
@@ -87,10 +92,12 @@ class LabModuleTest {
 
     @Test
     @Order(3)
-    void resetNeedsAFreshSecondFactorEvenForAnAdministrator() {
+    void resetNeedsAnOpenElevationEvenForAnAdministrator() {
         long before = session.generation();
         Response r = routes.call("POST", "control/reset", ADMIN_STALE, "{}");
-        assertEquals(403, r.status());
+        assertEquals(423, r.status());
+        assertTrue(r.body().contains("elevation required"));
+        assertEquals(423, routes.call("POST", "control/reset", ADMIN, "{}").status(), "a fresh second factor alone is not enough");
         assertEquals(before, session.generation(), "nothing was reset");
     }
 
@@ -258,7 +265,7 @@ class LabModuleTest {
                     if (l.status() == 409 && f.status() == 409) {
                         during.set(1);
                     }
-                    Response again = routes.call("POST", "control/reset", ADMIN, "");
+                    Response again = routes.call("POST", "control/reset", ADMIN_ELEVATED, "");
                     if (again.status() != 429 && again.status() != 409) {
                         during.set(-1);
                     }
@@ -266,7 +273,7 @@ class LabModuleTest {
             }
         });
         watcher.start();
-        Response r = routes.call("POST", "control/reset", ADMIN, "");
+        Response r = routes.call("POST", "control/reset", ADMIN_ELEVATED, "");
         watcher.join();
         assertEquals(1, during.get(), "launch and fast-forward refused with 409 during a reset; a second reset is refused");
         assertEquals(200, r.status(), r.body());

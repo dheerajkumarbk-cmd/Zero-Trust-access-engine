@@ -35,8 +35,9 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Admin and user views as a console module (id {@code admin}). Every privileged write (approve, install, request or
- * approve an elevation, revoke, review) needs a fresh second factor, checked by the host and again here, and is carried
+ * Admin and user views as a console module (id {@code admin}). Approving or installing a change and the break-glass
+ * review need a fresh second factor, checked by the host and again here; requesting, approving and revoking privileged
+ * access and resetting the lab need an open elevation instead. All are carried
  * out by the real installers and the real privileged access manager with the administrator's own signature: the
  * module can neither skip a check they make nor approve anything on its own. Reads of other people's decisions are
  * for administrators; an ordinary person sees only their own, and only in the words the engine allows itself to
@@ -125,12 +126,12 @@ public final class AdminModule implements ConsoleModule {
         routes.post("proposals/{}/withdraw", Role.ADMIN, false, ModuleKit.guard(Role.ADMIN, this::withdraw));
 
         routes.get("pam", Role.ADMIN, ModuleKit.guard(Role.ADMIN, this::pam));
-        routes.post("pam/request", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN, this::pamRequest));
-        routes.post("pam/approve/{}", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN, this::pamApprove));
-        routes.post("pam/revoke/{}", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN, this::pamRevoke));
+        routes.post("pam/request", Role.ADMIN, false, ModuleKit.guard(Role.ADMIN, this::pamRequest));
+        routes.post("pam/approve/{}", Role.ADMIN, false, ModuleKit.guard(Role.ADMIN, this::pamApprove));
+        routes.post("pam/revoke/{}", Role.ADMIN, false, ModuleKit.guard(Role.ADMIN, this::pamRevoke));
         routes.post("pam/review/{}", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN, this::pamReview));
 
-        routes.post("lab/reset", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN, this::resetLab));
+        routes.post("lab/reset", Role.ADMIN, false, ModuleKit.guard(Role.ADMIN, this::resetLab));
         routes.get("sessions", Role.ADMIN, ModuleKit.guard(Role.ADMIN, this::sessions));
         routes.get("devices", Role.ADMIN, ModuleKit.guard(Role.ADMIN, this::devices));
         routes.get("decisions/{}", Role.ADMIN, ModuleKit.guard(Role.ADMIN, this::decision));
@@ -329,6 +330,13 @@ public final class AdminModule implements ConsoleModule {
         }
     }
 
+    /** The five actions that run inside an open elevation: the same refusal as the vault and the access decisions. */
+    private static void requireElevation(Request r) {
+        if (!r.who().elevated()) {
+            throw new ModuleKit.Refusal(423, "elevation required");
+        }
+    }
+
     // ---- privileged access ----------------------------------------------------------------------------
 
     private Response pam(Request r, List<String> p) {
@@ -342,7 +350,7 @@ public final class AdminModule implements ConsoleModule {
     }
 
     private Response pamRequest(Request r, List<String> p) {
-        fresh(r);
+        requireElevation(r);
         JsonValue.JObject b = ModuleKit.body(r, Set.of("role", "minutes", "justification"));
         String role = ModuleKit.string(b, "role").orElseThrow(() -> new ModuleKit.Refusal(400, "role is required"));
         long minutes = ModuleKit.integer(b, "minutes").orElseThrow(() -> new ModuleKit.Refusal(400, "minutes is required"));
@@ -363,7 +371,7 @@ public final class AdminModule implements ConsoleModule {
     }
 
     private Response pamApprove(Request r, List<String> p) {
-        fresh(r);
+        requireElevation(r);
         String id = ModuleKit.id(p.get(0));
         ModuleKit.body(r, Set.of());
         PrivilegedAccessManager.ElevationRequest req = services.pam().pendingRequests().stream()
@@ -379,7 +387,7 @@ public final class AdminModule implements ConsoleModule {
     }
 
     private Response pamRevoke(Request r, List<String> p) {
-        fresh(r);
+        requireElevation(r);
         String id = ModuleKit.id(p.get(0));
         JsonValue.JObject b = ModuleKit.body(r, Set.of("reason"));
         String reason = ModuleKit.string(b, "reason").orElse("revoked from the console");
@@ -405,7 +413,7 @@ public final class AdminModule implements ConsoleModule {
 
     /** An administrator is not an analyst in the console, so the lab's reset is also reachable from here. */
     private Response resetLab(Request r, List<String> p) throws java.io.IOException, InterruptedException {
-        fresh(r);
+        requireElevation(r);
         ModuleKit.body(r, Set.of());
         if (services.resetting()) {
             throw new ModuleKit.Refusal(409, "the lab is already being reset");

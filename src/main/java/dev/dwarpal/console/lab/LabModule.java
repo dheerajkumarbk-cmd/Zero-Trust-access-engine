@@ -100,7 +100,7 @@ public final class LabModule implements ConsoleModule {
         }));
         routes.post("control/speed", Role.LEAD, false, ModuleKit.guard(Role.LEAD, this::speed));
         routes.post("control/fastforward", Role.LEAD, false, ModuleKit.guard(Role.LEAD, this::fastForward));
-        routes.post("control/reset", Role.ADMIN, true, ModuleKit.guard(Role.ADMIN, this::reset));
+        routes.post("control/reset", Role.ADMIN, false, ModuleKit.guard(Role.ADMIN, this::reset));
         routes.get("sandbox/examples", Role.ANALYST, ModuleKit.guard(Role.ANALYST, (r, p) ->
                 ModuleKit.json(Map.of("examples", Examples.all()))));
         routes.post("sandbox/rule", Role.ANALYST, false, ModuleKit.guard(Role.ANALYST, this::sandboxRule));
@@ -182,8 +182,8 @@ public final class LabModule implements ConsoleModule {
 
     private Response reset(Request request, List<String> params) throws IOException, InterruptedException {
         ModuleKit.body(request, Set.of());
-        if (!request.who().stepUpFresh()) {
-            throw new ModuleKit.Refusal(403, "a fresh second factor is needed to reset the lab");
+        if (!request.who().elevated()) {
+            throw new ModuleKit.Refusal(423, "elevation required");
         }
         if (!heavy.tryLock()) {
             throw new ModuleKit.Refusal(429, "the lab is busy; try again in a moment");

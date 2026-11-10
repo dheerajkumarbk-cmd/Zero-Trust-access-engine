@@ -28,6 +28,11 @@ class LabAdminModuleTest {
 
     private static final Principal ADA = new Principal("ada", Set.of(Role.ADMIN), true);
     private static final Principal RAY = new Principal("ray", Set.of(Role.ADMIN), true);
+    private static final dev.dwarpal.console.ConsoleModule.Elevation ELEVATION = new dev.dwarpal.console.ConsoleModule.Elevation(
+            "elv-test", "testing the admin actions", java.time.Instant.parse("2099-01-01T00:00:00Z"));
+    /** Privileged access is requested, approved and revoked inside an open elevation. */
+    private static final Principal ADA_E = new Principal("ada", Set.of(Role.ADMIN), false, ELEVATION);
+    private static final Principal RAY_E = new Principal("ray", Set.of(Role.ADMIN), false, ELEVATION);
 
     private static LabSession session;
     private static FakeRoutes routes;
@@ -76,17 +81,17 @@ class LabAdminModuleTest {
 
     @Test
     void sessionsDevicesAndPrivilegedAccessWorkOnTheRealComponents() {
-        assertTrue(((JsonValue.JArray) json(routes.call("GET", "sessions", ADA, "")).get("sessions").orElseThrow()).size() > 0);
-        assertTrue(((JsonValue.JArray) json(routes.call("GET", "devices", ADA, "")).get("devices").orElseThrow()).size() > 0);
+        assertTrue(((JsonValue.JArray) json(routes.call("GET", "sessions", ADA_E, "")).get("sessions").orElseThrow()).size() > 0);
+        assertTrue(((JsonValue.JArray) json(routes.call("GET", "devices", ADA_E, "")).get("devices").orElseThrow()).size() > 0);
         String req = "{\"role\":\"prod-admin\",\"minutes\":30,\"justification\":\"rotate the certificates\"}";
-        JsonValue.JObject made = json(routes.call("POST", "pam/request", ADA, req));
+        JsonValue.JObject made = json(routes.call("POST", "pam/request", ADA_E, req));
         assertEquals(JsonValue.bool(true), made.get("ok").orElseThrow(), made.toString());
         String reqId = text(made.get("id").orElseThrow());
-        assertEquals(JsonValue.bool(false), json(routes.call("POST", "pam/approve/" + reqId, ADA, "")).get("ok").orElseThrow());
-        JsonValue.JObject granted = json(routes.call("POST", "pam/approve/" + reqId, RAY, ""));
+        assertEquals(JsonValue.bool(false), json(routes.call("POST", "pam/approve/" + reqId, ADA_E, "")).get("ok").orElseThrow());
+        JsonValue.JObject granted = json(routes.call("POST", "pam/approve/" + reqId, RAY_E, ""));
         assertEquals(JsonValue.bool(true), granted.get("ok").orElseThrow(), granted.toString());
         assertFalse(session.world().pam.activeRoles("ada", session.world().now()).isEmpty());
-        assertEquals(200, routes.call("POST", "pam/revoke/" + text(granted.get("id").orElseThrow()), RAY, "{}").status());
+        assertEquals(200, routes.call("POST", "pam/revoke/" + text(granted.get("id").orElseThrow()), RAY_E, "{}").status());
         assertTrue(session.world().pam.activeRoles("ada", session.world().now()).isEmpty());
     }
 

@@ -1,5 +1,6 @@
 package dev.dwarpal.console.admin;
 
+import dev.dwarpal.console.ConsoleModule;
 import dev.dwarpal.console.ConsoleModule.Principal;
 import dev.dwarpal.console.ConsoleModule.Response;
 import dev.dwarpal.console.ConsoleModule.Role;
@@ -27,6 +28,12 @@ class AdminModuleTest {
     private static final Principal ADA_STALE = new Principal("ada", Set.of(Role.ADMIN), false);
     private static final Principal RAY = new Principal("ray", Set.of(Role.ADMIN), true);
     private static final Principal MALLORY = new Principal("mallory", Set.of(Role.ADMIN), true);
+    private static final ConsoleModule.Elevation ELEVATION = new ConsoleModule.Elevation("elv-test", "testing the admin actions",
+            java.time.Instant.parse("2099-01-01T00:00:00Z"));
+    /** The same people inside an open elevation: the five actions that need one. */
+    private static final Principal ADA_E = new Principal("ada", Set.of(Role.ADMIN), false, ELEVATION);
+    private static final Principal RAY_E = new Principal("ray", Set.of(Role.ADMIN), false, ELEVATION);
+    private static final Principal MALLORY_E = new Principal("mallory", Set.of(Role.ADMIN), false, ELEVATION);
     private static final Principal ANALYST = new Principal("ana", Set.of(Role.ANALYST), true);
 
     private AdminFixture fx;
@@ -51,10 +58,13 @@ class AdminModuleTest {
     // ---- the route table -------------------------------------------------------------------------------
 
     @Test
-    void everyPrivilegedWriteNeedsAStepUpAndEveryReadOfOthersDataIsForAdministrators() {
-        for (String p : List.of("proposals/{}/approve", "proposals/{}/install", "pam/request", "pam/approve/{}",
-                "pam/revoke/{}", "pam/review/{}")) {
+    void everyPrivilegedWriteNeedsAStepUpOrAnElevationAndEveryReadOfOthersDataIsForAdministrators() {
+        for (String p : List.of("proposals/{}/approve", "proposals/{}/install", "pam/review/{}")) {
             assertTrue(routes.route("POST", p).stepUp(), p + " is a privileged write");
+            assertEquals(Role.ADMIN, routes.route("POST", p).minimum(), p);
+        }
+        for (String p : List.of("pam/request", "pam/approve/{}", "pam/revoke/{}", "lab/reset")) {
+            assertFalse(routes.route("POST", p).stepUp(), p + " asks for an open elevation, not a fresh proof");
             assertEquals(Role.ADMIN, routes.route("POST", p).minimum(), p);
         }
         for (String p : List.of("policy", "playbooks", "proposals", "pam", "sessions", "devices", "decisions/{}")) {
@@ -86,19 +96,24 @@ class AdminModuleTest {
         String id = propose("policy/propose", ADA, fx.policyWithVersion("2026.11.06-1"));
         assertEquals(403, routes.call("POST", "proposals/" + id + "/approve", ADA_STALE, "").status());
         assertEquals(403, routes.call("POST", "proposals/" + id + "/install", ADA_STALE, "").status());
-        assertEquals(403, routes.call("POST", "pam/request", ADA_STALE,
-                "{\"role\":\"prod-admin\",\"minutes\":30,\"justification\":\"deploy the fix for ticket 42\"}").status());
         assertEquals(0, fx.installer.currentSequence());
+        // the five actions inside an elevation do not look at the second factor; outside one they are refused
+        Response noElevation = routes.call("POST", "pam/request", ADA,
+                "{\"role\":\"prod-admin\",\"minutes\":30,\"justification\":\"deploy the fix for ticket 42\"}");
+        assertEquals(423, noElevation.status());
+        assertTrue(noElevation.body().contains("elevation required"));
+        assertTrue(fx.pam.pendingRequests().isEmpty());
     }
 
     @Test
-    void anAdministratorCanResetTheLabButOnlyWithAFreshSecondFactor() {
+    void anAdministratorCanResetTheLabButOnlyInsideAnOpenElevation() {
         assertEquals(Role.ADMIN, routes.route("POST", "lab/reset").minimum());
-        assertTrue(routes.route("POST", "lab/reset").stepUp());
+        assertFalse(routes.route("POST", "lab/reset").stepUp());
         assertEquals(403, routes.call("POST", "lab/reset", ANALYST, "").status());
-        assertEquals(403, routes.call("POST", "lab/reset", ADA_STALE, "").status());
+        assertEquals(423, routes.call("POST", "lab/reset", ADA_STALE, "").status());
+        assertEquals(423, routes.call("POST", "lab/reset", ADA, "").status(), "a fresh second factor alone is not enough");
         assertFalse(fx.resetCalled);
-        assertEquals(200, routes.call("POST", "lab/reset", ADA, "").status());
+        assertEquals(200, routes.call("POST", "lab/reset", ADA_E, "").status(), "no fresh second factor is needed inside one");
         assertTrue(fx.resetCalled);
     }
 
@@ -251,22 +266,22 @@ class AdminModuleTest {
     @Test
     void anElevationNeedsADifferentApproverAndCanBeRevoked() {
         String req = "{\"role\":\"prod-admin\",\"minutes\":30,\"justification\":\"deploy the fix for ticket 42\"}";
-        JsonValue.JObject made = json(routes.call("POST", "pam/request", ADA, req));
+        JsonValue.JObject made = json(routes.call("POST", "pam/request", ADA_E, req));
         assertEquals(JsonValue.bool(true), made.get("ok").orElseThrow(), made.toString());
         String reqId = text(made.get("id").orElseThrow());
 
-        JsonValue.JObject own = json(routes.call("POST", "pam/approve/" + reqId, ADA, ""));
+        JsonValue.JObject own = json(routes.call("POST", "pam/approve/" + reqId, ADA_E, ""));
         assertEquals(JsonValue.bool(false), own.get("ok").orElseThrow(), "nobody approves their own elevation");
         assertTrue(text(own.get("reason").orElseThrow()).contains("own"));
 
-        JsonValue.JObject granted = json(routes.call("POST", "pam/approve/" + reqId, RAY, ""));
+        JsonValue.JObject granted = json(routes.call("POST", "pam/approve/" + reqId, RAY_E, ""));
         assertEquals(JsonValue.bool(true), granted.get("ok").orElseThrow(), granted.toString());
         assertFalse(fx.pam.activeRoles("ada", fx.org.clock.instant()).isEmpty());
         String grantId = text(granted.get("id").orElseThrow());
-        assertTrue(routes.call("GET", "pam", RAY, "").body().contains(grantId));
+        assertTrue(routes.call("GET", "pam", RAY_E, "").body().contains(grantId));
 
-        assertEquals(404, routes.call("POST", "pam/revoke/nonesuch", RAY, "{}").status());
-        assertEquals(200, routes.call("POST", "pam/revoke/" + grantId, RAY, "{\"reason\":\"done\"}").status());
+        assertEquals(404, routes.call("POST", "pam/revoke/nonesuch", RAY_E, "{}").status());
+        assertEquals(200, routes.call("POST", "pam/revoke/" + grantId, RAY_E, "{\"reason\":\"done\"}").status());
         assertTrue(fx.pam.activeRoles("ada", fx.org.clock.instant()).isEmpty());
     }
 
@@ -276,14 +291,14 @@ class AdminModuleTest {
                 "{\"role\":\"root\",\"minutes\":30,\"justification\":\"deploy the fix for ticket 42\"}",
                 "{\"role\":\"prod-admin\",\"minutes\":30,\"justification\":\"x\"}",
                 "{\"role\":\"prod-admin\",\"minutes\":600,\"justification\":\"deploy the fix for ticket 42\"}")) {
-            Response r = routes.call("POST", "pam/request", ADA, req);
+            Response r = routes.call("POST", "pam/request", ADA_E, req);
             assertTrue(r.status() == 400 || json(r).get("ok").map(v -> v.equals(JsonValue.bool(false))).orElse(false), req + r.body());
         }
-        JsonValue.JObject stranger = json(routes.call("POST", "pam/request", MALLORY,
+        JsonValue.JObject stranger = json(routes.call("POST", "pam/request", MALLORY_E,
                 "{\"role\":\"prod-admin\",\"minutes\":30,\"justification\":\"deploy the fix for ticket 42\"}"));
         assertEquals(JsonValue.bool(false), stranger.get("ok").orElseThrow(), "mallory is not eligible");
         assertTrue(fx.pam.pendingRequests().isEmpty());
-        assertEquals(400, routes.call("POST", "pam/request", ADA, "{\"role\":\"prod-admin\"}").status());
+        assertEquals(400, routes.call("POST", "pam/request", ADA_E, "{\"role\":\"prod-admin\"}").status());
         assertEquals(400, routes.call("POST", "pam/review/x", ADA, "{\"verdict\":\"fine\"}").status());
     }
 

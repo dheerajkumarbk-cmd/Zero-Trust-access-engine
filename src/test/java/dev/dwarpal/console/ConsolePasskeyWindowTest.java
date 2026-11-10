@@ -280,9 +280,11 @@ class ConsolePasskeyWindowTest {
         for (String p : List.of("soc/reports/{}", "lab/export")) {
             assertEquals(Gate.EVERY_TIME, ConsoleRoutes.gate(p, false), p);
         }
-        for (String p : List.of("soc/verdicts", "admin/proposals/{}/approve", "admin/proposals/{}/install", "admin/pam/request",
-                "admin/pam/approve/{}", "admin/pam/revoke/{}", "admin/pam/review/{}", "admin/lab/reset")) {
+        for (String p : List.of("soc/verdicts", "admin/proposals/{}/approve", "admin/proposals/{}/install", "admin/pam/review/{}")) {
             assertEquals(Gate.EVERY_TIME, ConsoleRoutes.gate(p, true), "every change that needs a fresh step-up: " + p);
+        }
+        for (String p : List.of("admin/pam/request", "admin/pam/approve/{}", "admin/pam/revoke/{}", "admin/lab/reset", "lab/control/reset")) {
+            assertEquals(Gate.NONE, ConsoleRoutes.gate(p, false), "an open elevation replaces the single-use passkey: " + p);
         }
         assertEquals(Gate.NONE, ConsoleRoutes.gate("soc/queue", false), "the queue list shows no confidential detail");
         assertEquals(Gate.NONE, ConsoleRoutes.gate("me", false));

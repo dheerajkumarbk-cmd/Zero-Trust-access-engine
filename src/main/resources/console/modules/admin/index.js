@@ -38,6 +38,11 @@ function view(root, shell) {
     return call(api.post(path, data || {}));
   }
 
+  // an elevation covers these: the server answers 423 until one is open and the shell then asks for it and repeats the call
+  function elevated(path, data) {
+    return call(api.post(path, data || {}));
+  }
+
   // ---- the requester's page -----------------------------------------------------------------------
   async function whyDenied(box) {
     const r = await call(api.get('me/decisions'));
@@ -159,7 +164,7 @@ function view(root, shell) {
     const why = el('input', { type: 'text', placeholder: 'why you need it (at least 10 characters)', 'aria-label': 'justification' });
     box.append(el('h3', {}, 'Ask for elevated access'),
       el('div', { class: 'adm-row' }, role, minutes, why, button('Request', async () => {
-        const x = await privileged('pam/request', { role: role.value, minutes: Number(minutes.value), justification: why.value });
+        const x = await elevated('pam/request', { role: role.value, minutes: Number(minutes.value), justification: why.value });
         if (x) {
           say(x.reason, !x.ok);
           refresh();
@@ -168,7 +173,7 @@ function view(root, shell) {
       el('h3', {}, 'Waiting for an approver'),
       r.pending.length ? table(['Request', 'Who', 'Role', 'Minutes', 'Why', ''], r.pending.map((q) => [q.requestId, q.subjectId, q.role,
         Math.round(q.duration ? parseDuration(q.duration) : 0), q.justification, button('Approve', async () => {
-          const x = await privileged('pam/approve/' + q.requestId);
+          const x = await elevated('pam/approve/' + q.requestId);
           if (x) {
             say(x.reason, !x.ok);
             refresh();
@@ -177,7 +182,7 @@ function view(root, shell) {
       el('h3', {}, 'Grants'),
       r.grants.length ? table(['Grant', 'Who', 'Role', 'From', 'Until', 'Approved by', 'Break-glass', ''], r.grants.map((g) => [g.grantId, g.subjectId, g.role,
         g.from, g.until, g.approvedBy || '-', g.breakGlass ? 'yes' : 'no', button('Revoke', async () => {
-          const x = await privileged('pam/revoke/' + g.grantId, { reason: 'revoked from the console' });
+          const x = await elevated('pam/revoke/' + g.grantId, { reason: 'revoked from the console' });
           if (x) {
             say('Revoked.');
             refresh();
@@ -238,7 +243,7 @@ function view(root, shell) {
       button('Reset the lab', async () => {
         if (!window.confirm('Reset the lab?')) return;
         say('Resetting; this takes a few seconds...');
-        const r = await privileged('lab/reset');
+        const r = await elevated('lab/reset');
         if (r) say('The lab is back at day zero.');
       }));
   }
