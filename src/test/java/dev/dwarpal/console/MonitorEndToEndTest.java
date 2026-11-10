@@ -81,8 +81,9 @@ class MonitorEndToEndTest {
         assertEquals(403, f.get("/console/api/monitor/me", ana).status());
         assertEquals(403, f.get("/console/api/monitor/admins", ana).status());
         assertEquals(403, f.get("/console/api/monitor/vault", ana).status());
+        assertEquals(403, f.get("/console/api/monitor/team", ana).status());
         Sess dana = f.login("dana");
-        for (String path : new String[]{"/console/api/monitor/admins", "/console/api/monitor/vault", "/console/api/monitor/me"}) {
+        for (String path : new String[]{"/console/api/monitor/admins", "/console/api/monitor/vault", "/console/api/monitor/team", "/console/api/monitor/me"}) {
             assertTrue(f.post(path, dana, "{}").status() >= 400, path);
         }
     }

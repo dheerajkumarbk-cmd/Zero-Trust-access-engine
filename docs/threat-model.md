@@ -800,6 +800,22 @@ keep a fresh step-up and a single-use passkey, because they change what the engi
 | E4 | Elevation | The elevation is used after its ten minutes | The host closes it by the real clock; the same call is refused again | `AdminElevationTest` (clock moved past ten minutes) |
 | E5 | Elevation | A hijacked session inside an open elevation | Accepted: it can act for at most ten minutes, and the elevation ends on sign-out; the opening needed the PIN and the passkey | residual risk |
 
+### Team activity view
+
+The monitoring page gains `GET monitor/team`, a read-only list of what team members did, taken from the tamper-checked console
+trail (newest first, filters `person`, `type`, paging `before`). It widens who can read the trail's contents: an administrator
+sees every actor except themself, a lead who is not an administrator sees every actor who is neither an administrator nor
+themself (the host cannot tell analysts from other non-administrators, so this is the rule), anyone else is refused as on the other
+monitor routes. Plain page views are not listed.
+
+| # | STRIDE | Threat | Control | Test |
+|---|---|---|---|---|
+| T1 | Information disclosure | A person sees more of the team than intended, or sees their own rows or a hidden administrator's | The actor set is fixed on the server from the caller's role and the live administrator list; filters can only narrow it; the lists for the menus are built from the visible rows only | `TeamActivityTest` (administrator, lead, analyst cases) |
+| T2 | Information disclosure | A secret or reason from a vault record, or a housekeeping field, is shown | Vault types always go through the lead view (action and target only); the same quiet-field removal as the administrator view; no other payload field is returned | `TeamActivityTest.aVaultRecordNeverShowsASecretOrReason` |
+| T3 | Tampering | The view is used to change or delete a record | Only a GET route exists; the host has no write path for it; the module can only read the trail | `TeamActivityTest.thereIsNoWayToWriteThroughTheRoute` |
+| T4 | Denial of service | A large trail makes the view slow | The scan is the latest 2,000 records, a page is at most 100 rows, and the answer says the window | `TeamActivityTest` (paging) |
+| T5 | Injection | A trail value runs as markup in the page | Malformed filters are refused with 400; the page builds elements and sets text only, never HTML from row data | `TeamActivityTest` (malformed), `FrontEndRulesTest` |
+
 ## Residual risks (accepted for this layer, scheduled)
 
 | Risk | Why accepted now | Planned in |

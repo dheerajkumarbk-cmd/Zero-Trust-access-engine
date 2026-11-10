@@ -45,6 +45,67 @@ function view(root, shell) {
       : el('p', {}, 'No vault events yet.'));
   }
 
+  // Team activity: read only, filtered by person and type, paged with "Older" (the server's `next`). Everything is text.
+  async function team(box) {
+    let person = '';
+    let type = '';
+    const note = el('p', { class: 'mon-note' }, 'From the latest 2,000 records of the saved trail. Nobody can change these rows.');
+    const bar = el('div', { class: 'mon-tabs' });
+    const out = el('div', {});
+    box.append(note, bar, out);
+
+    function menu(label, values, current, onPick) {
+      const s = el('select', { 'aria-label': label },
+        el('option', { value: '' }, 'All (' + label.toLowerCase() + ')'),
+        values.map((v) => el('option', { value: v }, v)));
+      s.value = values.includes(current) ? current : '';
+      s.addEventListener('change', () => onPick(s.value));
+      return s;
+    }
+
+    async function load(before, append) {
+      const q = [];
+      if (person) q.push('person=' + encodeURIComponent(person));
+      if (type) q.push('type=' + encodeURIComponent(type));
+      if (before !== null && before !== undefined) q.push('before=' + encodeURIComponent(String(before)));
+      const r = await api.get('team' + (q.length ? '?' + q.join('&') : ''));
+      if (!append) {
+        clear(bar);
+        bar.append(menu('Person', r.persons, person, (v) => { person = v; reload(); }),
+          menu('Type', r.types, type, (v) => { type = v; reload(); }));
+        clear(out);
+        out.append(el('div', {}));
+      }
+      const holder = out.lastChild;
+      if (append) holder.querySelectorAll('button').forEach((b) => b.remove());
+      if (!append && !r.rows.length) {
+        holder.append(el('p', {}, 'Nothing yet.'));
+        return;
+      }
+      if (r.rows.length) {
+        const tbl = table(['When', 'Who', 'What', 'Details'], r.rows.map((a) => [when(a.at), a.actor, a.type, a.what]),
+          [null, null, null, 'mon-what']);
+        holder.append(tbl);
+      }
+      if (r.next !== null && r.next !== undefined) {
+        holder.append(button('Older', async () => {
+          try {
+            say('');
+            await load(r.next, true);
+          } catch (e) {
+            say(e && e.message ? e.message : 'That is unavailable.', true);
+          }
+        }));
+      }
+    }
+
+    function reload() {
+      load(null, false).catch((e) => say(e && e.message ? e.message : 'That is unavailable.', true));
+    }
+
+    await load(null, false);
+  }
+
   async function open(key) {
     for (const [k, p] of pages) p.tab.setAttribute('aria-selected', k === key ? 'true' : 'false');
     say('');
@@ -69,6 +130,7 @@ function view(root, shell) {
     try {
       const me = await api.get('me');
       if (me.admin) addTab('admins', 'Administrators', admins);
+      addTab('team', 'Team activity', team);
       if (me.lead) addTab('vault', 'Vault log', vault);
       const first = me.admin ? 'admins' : 'vault';
       open(first);

@@ -165,7 +165,8 @@ public final class ConsoleMain {
                 b.module(new AccessModule(accessApi));
             }
             List<ConsoleAuth.Enrolment> enrolled = people;
-            b.module(new MonitorModule(() -> idsWithRole(directory, enrolled, "ADMIN")));
+            b.module(new MonitorModule(() -> idsWithRole(directory, enrolled, "ADMIN"),
+                    () -> activePeople(directory, enrolled).stream().map(VaultModule.Person::id).collect(java.util.stream.Collectors.toSet())));
             auth.emergency(vault);
             b.noticesFile(consoleDir.resolve("notices.txt"));
             b.module(new VaultModule(vault, () -> activePeople(directory, enrolled), () -> idsWithRole(directory, enrolled, "ADMIN"),
