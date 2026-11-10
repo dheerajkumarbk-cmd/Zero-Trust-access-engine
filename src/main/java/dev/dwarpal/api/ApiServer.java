@@ -29,6 +29,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -83,7 +84,10 @@ public final class ApiServer implements AutoCloseable {
         PAM_APPROVAL("POST", "/v1/pam/approvals", EnumSet.of(CallerRole.ADMIN_CONSOLE)),
         PAM_BREAK_GLASS("POST", "/v1/pam/break-glass", EnumSet.of(CallerRole.ADMIN_CONSOLE)),
         PAM_REVIEW("POST", "/v1/pam/reviews", EnumSet.of(CallerRole.ADMIN_CONSOLE)),
-        HEALTH("GET", "/v1/health", EnumSet.allOf(CallerRole.class));
+        /** Liveness: the process answers. Says nothing about whether its parts work; see {@link #READY}. */
+        HEALTH("GET", "/v1/health", EnumSet.allOf(CallerRole.class)),
+        /** Readiness: every registered {@link Readiness} check passes (200), or 503 naming the failing checks. */
+        READY("GET", "/v1/ready", EnumSet.allOf(CallerRole.class));
 
         private final String method;
         private final String path;
@@ -138,6 +142,7 @@ public final class ApiServer implements AutoCloseable {
     /** Keyed by the RFC 2253 form of the subject: compared exactly, not canonically (finding A5). */
     private final Map<String, Caller> callers;
     private final JsonReader json;
+    private final List<Readiness> readiness;
     private final Semaphore inFlight;
     private final RateLimiter callerLimit;
     private final RateLimiter refusalAudits;
@@ -162,6 +167,7 @@ public final class ApiServer implements AutoCloseable {
             throw new IllegalArgumentException("no callers configured");
         }
         this.callers = Map.copyOf(byPrincipal);
+        this.readiness = List.copyOf(Objects.requireNonNull(b.readiness, "readiness"));
         JsonLimits d = JsonLimits.defaults();
         this.json = new JsonReader(new JsonLimits(settings.maxBodyBytes(), d.maxDepth(), d.maxStringChars(),
                 d.maxMembers(), d.maxElements(), d.maxNumberChars(), d.maxValues()));
@@ -343,6 +349,9 @@ public final class ApiServer implements AutoCloseable {
             if (e == Endpoint.HEALTH) {
                 return new Answer(200, JsonValue.object().put("status", "ok").build(), "ok", Optional.empty(), "", false);
             }
+            if (e == Endpoint.READY) {
+                return ready();
+            }
             if (!jsonContent(ex.getRequestHeaders().getFirst("Content-Type"))) {
                 return Answer.refuse(415, "unsupported media type", "content type is not application/json");
             }
@@ -358,6 +367,29 @@ public final class ApiServer implements AutoCloseable {
         } finally {
             inFlight.release();
         }
+    }
+
+    /** Runs every check; an exception is "not ready". Only the fixed names of failing checks leave this method. */
+    private Answer ready() {
+        List<String> failing = new ArrayList<>();
+        for (Readiness r : readiness) {
+            boolean ok;
+            try {
+                ok = r.ready();
+            } catch (RuntimeException | Error ignored) {
+                ok = false;
+            }
+            if (!ok) {
+                failing.add(r.name());
+            }
+        }
+        if (failing.isEmpty()) {
+            return new Answer(200, JsonValue.object().put("status", "ready").build(), "ready", Optional.empty(), "",
+                    false);
+        }
+        JsonValue names = new JsonValue.JArray(failing.stream().<JsonValue>map(JsonValue::str).toList());
+        JsonValue body = JsonValue.object().put("status", "not ready").put("failing", names).build();
+        return new Answer(503, body, "not ready", Optional.empty(), "failing: " + String.join(",", failing), false);
     }
 
     private Answer work(Endpoint e, Caller c, JsonValue body) {
@@ -410,7 +442,7 @@ public final class ApiServer implements AutoCloseable {
                 ApiBodies.ReviewBody b = ApiBodies.readReview(body);
                 yield pam(pam.review(b.grantId(), b.reviewerId(), b.verdict(), b.signed()));
             }
-            case HEALTH -> throw new IllegalStateException("health has no body");
+            case HEALTH, READY -> throw new IllegalStateException("health and readiness have no body");
         };
     }
 
@@ -464,7 +496,7 @@ public final class ApiServer implements AutoCloseable {
 
     private Answer audited(Answer a, String caller, Optional<Endpoint> endpoint) {
         boolean refusal = a.status() != 200;
-        boolean routine = endpoint.orElse(null) == Endpoint.HEALTH;
+        boolean routine = endpoint.orElse(null) == Endpoint.HEALTH || endpoint.orElse(null) == Endpoint.READY;
         if ((refusal || routine) && !refusalAudits.tryAcquire(caller + ":" + a.status(), clock.instant())) {
             return a;
         }
@@ -520,6 +552,7 @@ public final class ApiServer implements AutoCloseable {
         private Clock clock = Clock.systemUTC();
         private List<Caller> callers = List.of();
         private ApiSettings settings = ApiSettings.defaults();
+        private List<Readiness> readiness = List.of();
 
         private Builder(AuditLog audit, PrivilegedAccessManager pam) {
             this.audit = audit;
@@ -560,6 +593,14 @@ public final class ApiServer implements AutoCloseable {
 
         public Builder settings(ApiSettings v) {
             settings = v;
+            return this;
+        }
+
+        /** The checks behind {@code GET /v1/ready}. Default: none (always ready). Names are validated. */
+        public Builder readiness(List<Readiness> v) {
+            List<Readiness> copy = List.copyOf(v);
+            copy.forEach(r -> Readiness.checkName(r.name()));
+            readiness = copy;
             return this;
         }
 

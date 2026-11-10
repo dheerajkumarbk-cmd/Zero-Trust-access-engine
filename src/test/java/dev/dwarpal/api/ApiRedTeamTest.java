@@ -248,7 +248,7 @@ class ApiRedTeamTest {
              ApiKit.Raw console = h.raw("console")) {
             String valid = JsonWriter.write(WireFormat.decide(new WireFormat.DecideBody(h.world.request().build())));
             for (ApiServer.Endpoint e : ApiServer.Endpoint.values()) {
-                if (e == ApiServer.Endpoint.HEALTH) {
+                if (e == ApiServer.Endpoint.HEALTH || e == ApiServer.Endpoint.READY) {
                     continue;
                 }
                 ApiKit.Raw who = e.serves(CallerRole.PEP) ? pep : console;

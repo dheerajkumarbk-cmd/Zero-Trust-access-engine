@@ -35,7 +35,9 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.time.Instant;
 
 /**
  * {@link SessionAuthority} over the network: the enforcement point's client for {@link ApiServer}.
@@ -54,9 +56,15 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li><b>The answer must fit the question</b> (A4): its reference is this request's id, and a login is
  *       never answered with a bare grant, nor a request with a new session.</li>
  * </ul>
+ *
+ * <p><b>Engine-down alarm:</b> after {@value #DEFAULT_ALARM_THRESHOLD} (settable) consecutive unacceptable
+ * answers the {@link EngineAlarm} is told once; the first acceptable answer afterwards tells it once more.
+ * The alarm never changes an answer, and an alarm that throws is counted ({@link #alarmFailures()}) and ignored.
  */
 public final class RemoteSessionAuthority implements SessionAuthority, AutoCloseable {
 
+    /** Consecutive failures before the alarm fires, unless set. */
+    public static final int DEFAULT_ALARM_THRESHOLD = 5;
     private static final int MAX_ANSWER_BYTES = 64 * 1024;
     private static final Set<EdgeResult.Status> OPEN_ANSWERS = EnumSet.of(EdgeResult.Status.OPENED,
             EdgeResult.Status.STEP_UP, EdgeResult.Status.DENIED, EdgeResult.Status.REJECTED);
@@ -67,8 +75,18 @@ public final class RemoteSessionAuthority implements SessionAuthority, AutoClose
     private final Duration timeout;
     private final JsonReader json = new JsonReader();
     private final AtomicLong failures = new AtomicLong();
+    private final EngineAlarm alarm;
+    private final long alarmThreshold;
+    private final AtomicLong consecutive = new AtomicLong();
+    private final AtomicBoolean down = new AtomicBoolean();
+    private final AtomicLong alarmFailures = new AtomicLong();
 
-    private RemoteSessionAuthority(URI base, SSLContext tls, Duration timeout) {
+    private RemoteSessionAuthority(URI base, SSLContext tls, Duration timeout, EngineAlarm alarm, int threshold) {
+        this.alarm = Objects.requireNonNull(alarm, "alarm");
+        if (threshold < 1) {
+            throw new IllegalArgumentException("threshold must be at least 1");
+        }
+        this.alarmThreshold = threshold;
         this.base = Objects.requireNonNull(base, "base");
         if (!"https".equals(base.getScheme()) || base.getHost() == null
                 || (base.getRawPath() != null && !base.getRawPath().isEmpty())) {
@@ -100,13 +118,28 @@ public final class RemoteSessionAuthority implements SessionAuthority, AutoClose
     public static RemoteSessionAuthority connect(URI base, Path keyStore, char[] keyStorePassword, Path trustStore,
                                                  char[] trustStorePassword, X500Principal api, Duration timeout)
             throws IOException, GeneralSecurityException {
+        return connect(base, keyStore, keyStorePassword, trustStore, trustStorePassword, api, timeout,
+                EngineAlarm.NONE, DEFAULT_ALARM_THRESHOLD);
+    }
+
+    /** As above, with an alarm told when {@code threshold} calls in a row fail, and when the engine answers again. */
+    public static RemoteSessionAuthority connect(URI base, Path keyStore, char[] keyStorePassword, Path trustStore,
+                                                 char[] trustStorePassword, X500Principal api, Duration timeout,
+                                                 EngineAlarm alarm, int threshold)
+            throws IOException, GeneralSecurityException {
         return new RemoteSessionAuthority(base,
-                TlsContexts.createPinned(keyStore, keyStorePassword, trustStore, trustStorePassword, api), timeout);
+                TlsContexts.createPinned(keyStore, keyStorePassword, trustStore, trustStorePassword, api), timeout,
+                alarm, threshold);
     }
 
     /** With a context made elsewhere (tests only: such a context trusts any component as the server). */
     static RemoteSessionAuthority create(URI base, SSLContext tls, Duration timeout) {
-        return new RemoteSessionAuthority(base, tls, timeout);
+        return new RemoteSessionAuthority(base, tls, timeout, EngineAlarm.NONE, DEFAULT_ALARM_THRESHOLD);
+    }
+
+    /** With a context made elsewhere and an alarm (tests only). */
+    static RemoteSessionAuthority create(URI base, SSLContext tls, Duration timeout, EngineAlarm alarm, int threshold) {
+        return new RemoteSessionAuthority(base, tls, timeout, alarm, threshold);
     }
 
     @Override
@@ -159,6 +192,11 @@ public final class RemoteSessionAuthority implements SessionAuthority, AutoClose
         return failures.get();
     }
 
+    /** Alarm calls that threw (the answer was still DENIED). */
+    public long alarmFailures() {
+        return alarmFailures.get();
+    }
+
     private EdgeResult call(ApiServer.Endpoint endpoint, JsonValue body, String reference,
                             Set<EdgeResult.Status> fitting) {
         HttpRequest req = HttpRequest.newBuilder(base.resolve(endpoint.path()))
@@ -185,11 +223,35 @@ public final class RemoteSessionAuthority implements SessionAuthority, AutoClose
         if (!r.reference().equals(reference) || !fitting.contains(r.status())) {
             return denied(reference);
         }
+        succeeded();
         return r;
+    }
+
+    private void succeeded() {
+        consecutive.set(0);
+        if (down.compareAndSet(true, false)) {
+            try {
+                alarm.engineBack(Instant.now());
+            } catch (RuntimeException | Error e) {
+                alarmFailures.incrementAndGet();
+            }
+        }
+    }
+
+    private void failed() {
+        long n = consecutive.incrementAndGet();
+        if (n >= alarmThreshold && down.compareAndSet(false, true)) {
+            try {
+                alarm.engineDown(n, Instant.now());
+            } catch (RuntimeException | Error e) {
+                alarmFailures.incrementAndGet();
+            }
+        }
     }
 
     private EdgeResult denied(String reference) {
         failures.incrementAndGet();
+        failed();
         return answer(EdgeResult.Status.DENIED, reference);
     }
 
