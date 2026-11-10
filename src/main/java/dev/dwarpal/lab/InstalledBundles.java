@@ -38,6 +38,9 @@ public final class InstalledBundles {
     /** A bundle read back from its file and found intact. */
     public record Saved(Kind kind, long sequence, String sha256, List<String> approvers, Instant installedAt,
                         String yaml) {
+        public Saved {
+            approvers = List.copyOf(approvers);
+        }
     }
 
     static final String DIR = "installed";
