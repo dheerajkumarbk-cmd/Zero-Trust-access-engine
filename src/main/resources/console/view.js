@@ -2,7 +2,7 @@
 // before it is attached, loads its data through api.js, and shows "unavailable" when a load fails.
 import {h, fill, unavailable} from './dom.js';
 
-/** The top of each page: label, title, the words of the title shown in mint, and what the page is for. */
+/** The top of each page: label, title, the words of the title shown in the accent colour, and what the page is for. */
 const PAGES = {
   Overview: ['Shift handover', 'Overview of ', 'this shift', 'What happened, what needs attention, and where to go next.'],
   'Alert queue': ['Open work', 'Alert ', 'queue', 'Open cases, highest priority first. This is what is waiting for an analyst.'],

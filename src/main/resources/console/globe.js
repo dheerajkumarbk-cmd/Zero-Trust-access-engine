@@ -1,12 +1,10 @@
 // The Earth behind the sign-in page, as a camera on a satellite sees it: the planet below, its curved edge and a thin
 // band of air against space. The satellite circles on a tilted orbit, faster than a real one so the motion shows, and
 // the camera looks north, so east is on the right. Day and night follow the real clock: the lit side is where it is
-// daytime now. Requests arc between cities: green ones arrive, red ones are refused on the way.
+// daytime now. Requests arc between cities: cyan ones arrive, red ones are refused on the way.
 // Decoration only: nothing here comes from the lab or from any other server, and the page says so.
 import {COAST} from './globedata.js';
 
-const MINT = '#8fd9b6';
-const REFUSED = '#ff8f87';
 const RAD = Math.PI / 180;
 const ALT = 1.45; // the satellite's distance from the centre, in Earth radii: about 2,900 km up
 const LOOK = 37 * RAD; // the camera leans from straight down towards the northern horizon
@@ -24,12 +22,16 @@ const GRID_H = 1024;
 const CITIES = [[28.6, 77.2], [19.1, 72.9], [12.97, 77.6], [22.6, 88.4], [1.35, 103.8], [35.7, 139.7], [31.2, 121.5], [25.2, 55.3],
   [51.5, -0.1], [50.1, 8.7], [-1.3, 36.8], [6.5, 3.4], [-33.9, 151.2], [-23.6, -46.6], [40.7, -74], [37.8, -122.4], [55.8, 37.6]];
 
-// colours of the ground, lit and unlit, and of the air
-const OCEAN_DAY = [34, 98, 88];
-const OCEAN_NIGHT = [16, 48, 42];
-const LAND_DAY = [140, 194, 166];
-const LAND_NIGHT = [44, 80, 66];
-const HAZE = [170, 226, 204];
+/** One colour of the theme: the --globe-* variable of the style sheet, or the fallback if the page has none. */
+function themed(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return /^#[0-9a-f]{6}$/i.test(v) ? v : fallback;
+}
+
+/** '#rrggbb' to [r, g, b]. */
+function channels(hex) {
+  return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+}
 
 function bytes(text) {
   const raw = atob(text.replace(/-/g, '+').replace(/_/g, '/'));
@@ -152,6 +154,17 @@ export function startGlobe(canvas) {
   const shade = document.createElement('canvas');
   const s2 = shade.getContext('2d');
   if (!c || !s2) return () => {};
+  // colours of the ground (lit and unlit), the air, stars, coast, city lights and requests: all from the style sheet's variables
+  const OCEAN_DAY = channels(themed('--globe-ocean-day', '#1a52a0'));
+  const OCEAN_NIGHT = channels(themed('--globe-ocean-night', '#081a38'));
+  const LAND_DAY = channels(themed('--globe-land-day', '#80beee'));
+  const LAND_NIGHT = channels(themed('--globe-land-night', '#1c3862'));
+  const HAZE = channels(themed('--globe-air', '#8cd6fa'));
+  const STAR = themed('--globe-star', '#e8f4ff');
+  const COAST_LINE = themed('--globe-coast', '#dcf0ff');
+  const CITY = themed('--globe-city', '#f5d06f');
+  const ARRIVES = themed('--globe-ok', '#22d3ee');
+  const REFUSED = themed('--globe-refused', '#ff8f87');
   const grid = landGrid();
   const coast = coastLines();
   const arcs = Array.from({length: ARCS}, newArc);
@@ -288,7 +301,7 @@ export function startGlobe(canvas) {
     c.clearRect(0, 0, width, height);
 
     // stars
-    c.fillStyle = '#e8f5ee';
+    c.fillStyle = STAR;
     for (const [x, y, r, phase] of stars) {
       c.globalAlpha = 0.25 + 0.35 * (0.5 + 0.5 * Math.sin(phase + clock * 0.8));
       c.fillRect(x * width, y * height, r, r);
@@ -326,7 +339,8 @@ export function startGlobe(canvas) {
     };
 
     // coasts
-    c.strokeStyle = 'rgba(226, 246, 236, .5)';
+    c.strokeStyle = COAST_LINE;
+    c.globalAlpha = 0.5;
     c.lineWidth = 0.9;
     c.beginPath();
     const q = [0, 0, 0];
@@ -346,9 +360,10 @@ export function startGlobe(canvas) {
       }
     }
     c.stroke();
+    c.globalAlpha = 1;
 
     // city lights on the night side
-    c.fillStyle = '#f5d06f';
+    c.fillStyle = CITY;
     for (const [lat, lon] of CITIES) {
       const p = unit(lat, lon);
       const night = 1 - smooth(-0.15, 0.05, p[0] * sun[0] + p[1] * sun[1] + p[2] * sun[2]);
@@ -375,7 +390,7 @@ export function startGlobe(canvas) {
       if (a.t < 0) return;
       const head = Math.min(a.t, stop);
       const tail = Math.max(0, head - 0.3);
-      const colour = a.ok ? MINT : REFUSED;
+      const colour = a.ok ? ARRIVES : REFUSED;
       c.strokeStyle = colour;
       c.lineWidth = 1.6;
       c.beginPath();

@@ -61,7 +61,7 @@ export function spot(name, el) {
   return el;
 }
 
-/** A panel on warm paper instead of the green ground. */
+/** A panel on ice paper instead of the navy ground. */
 export function cream(title, ...kids) {
   const el = panel(title, ...kids);
   el.classList.add('cream');
