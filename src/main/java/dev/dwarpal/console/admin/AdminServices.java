@@ -39,6 +39,16 @@ public interface AdminServices {
     /** Called after a playbook change was installed, with the exact text that was installed. */
     void playbookInstalled(String yaml);
 
+    /**
+     * Called after a policy or playbook change was installed: keeps it so that it survives a restart.
+     *
+     * @param kind {@code "policy"} or {@code "playbook"}
+     * @return true when it was kept; false when it was not (the install stands either way)
+     */
+    default boolean bundleInstalled(String kind, long sequence, String yaml, List<String> approvers) {
+        return true;
+    }
+
     PrivilegedAccessManager pam();
 
     /** Recent requests the engine decided (data-minimised, without signed evidence), for what-if replay. */

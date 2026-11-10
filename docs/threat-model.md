@@ -762,6 +762,26 @@ succeeded would be a breach; none of the eight cross-part probes succeeded.
 Cross-part red-team pass: eight probes, none succeeded. Open items named by the parts are in the residual risks
 below.
 
+### Saved policy and playbook bundles
+
+An installed policy or playbook bundle is kept in the lab folder (`installed/policy.bundle`, `installed/playbook.bundle`)
+so that it survives a restart and a lab reset. Each file holds the kind, sequence, SHA-256 of the text, approvers, real
+install time and the text, sealed with HMAC-SHA256 under `installed-key/seal.key` (32 random bytes, made once, owner-only
+like the vault key). The administrators' signing keys are made fresh at every start, so the original signatures cannot be
+checked again; the seal and the audit record of the original approval take their place.
+
+| # | STRIDE | Threat | Control | Test |
+|---|---|---|---|---|
+| B1 | Tampering | A saved file is edited (text, sequence, kind, approvers) | The seal covers every byte; a bad seal, hash, kind or form is refused and counted; the lab refuses to start (fail-closed, no silent rollback to the shipped defaults); the message names the file and a plain reason, never the text or key | `InstalledBundlesTest.oneFlippedByteAnywhereIsRefused`, `InstalledBundlesEndToEndTest` |
+| B2 | Elevation | The unsigned restore path is used to install a policy while the lab runs | `restore` is allowed once, only while the installer has installed or restored nothing, only for a higher sequence; same strict loader and lint gate as an install; audited (`POLICY_RESTORED`, `PLAYBOOKS_RESTORED`) before it takes effect | `PolicyRestoreTest`, `PlaybookRestoreTest` |
+| B3 | Tampering | A file with write access to the lab folder and the seal key installs a policy at the next start | Accepted: same trust level as the vault key; the restore is on the audit chain | residual risk |
+| B4 | Information disclosure | The text or key reaches a log or an error | Never logged; refusals carry fixed reasons only; the key file and folder are owner-only | `InstalledBundlesTest.aRefusalIsCountedAndNamedWithoutAnyContent` |
+| B5 | Denial of service | A new key orphans saved files | A save never makes a new key while a saved file exists; a missing or changed key refuses the load | `InstalledBundlesTest.aMissingOrChangedKeyRefuses...` |
+| B6 | Repudiation | An install that could not be kept is not noticed | The install answer says "installed, but not kept for a restart" and the failure is counted | `LabAdminServices.keepFailures` |
+
+Residual risk: deleting the saved file (and nothing else) returns the lab to the shipped defaults. That is an operator
+action outside the console and is not detected.
+
 ## Residual risks (accepted for this layer, scheduled)
 
 | Risk | Why accepted now | Planned in |

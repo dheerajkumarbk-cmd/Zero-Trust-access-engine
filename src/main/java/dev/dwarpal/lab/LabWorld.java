@@ -153,6 +153,11 @@ public final class LabWorld implements AutoCloseable {
     public final PolicyEngine engine;
     public final PolicyInstaller policies;
     public final PlaybookInstaller playbooks;
+    /** The installed policy and playbook bundles kept in the lab folder (they survive a restart and a reset). */
+    public final InstalledBundles bundles;
+    /** What was put back from the lab folder at start, in words (no policy text); empty when nothing was saved. */
+    public final List<String> notices = new CopyOnWriteArrayList<>();
+    private String restoredPlaybookYaml;
     public final PrivilegedAccessManager pam;
     public final RequestRecorder recorder;
     /** Break-glass pages the privileged-access manager raised (the lab's stand-in for the SOC pager). */
@@ -212,6 +217,7 @@ public final class LabWorld implements AutoCloseable {
         this.pki = pki;
         this.directory = directory;
         Files.createDirectories(config.dir().resolve("connectors"));
+        bundles = new InstalledBundles(config.dir());
         org = SimOrganisation.create(config.seed(), config.users());
         delegationClock = Clock.offset(Clock.systemUTC(), Duration.between(Instant.now(), org.clock.instant()));
         // the chain starts again with every lab (state is not persisted yet), so the anchor of an earlier run goes
@@ -267,6 +273,7 @@ public final class LabWorld implements AutoCloseable {
                 .aggregator(new BayesianRiskAggregator(0.001, Math.log(1000)))
                 .costModel(new CostModel(1000, 1, 20, 0.05)).build();
         policies = new PolicyInstaller(engine, 0, org.keys, 2, org.audit, org.clock);
+        restorePolicy();
         recorder = new RequestRecorder(org.pipeline(policies), 20_000, 500);
         pdp = recorder;
         pam = new PrivilegedAccessManager(org.keys,
@@ -293,6 +300,7 @@ public final class LabWorld implements AutoCloseable {
                 .playbooks(c.set().get()).assets(assets).build();
         playbooks = new PlaybookInstaller(new PlaybookCompiler(RuleCatalogue.reference(), settings,
                 Set.of("ticket", "chat"), true), org.keys, 2, 0, org.audit, org.clock, soar::activate);
+        restorePlaybooks();
 
         // ---- the engines that read the chain, kept between calls so each one reads only what is new
         detection = new DetectionEngine(org.sink, org.auditKey, a -> pending.add(new Raised(a, "A")), Optional::empty,
@@ -324,6 +332,56 @@ public final class LabWorld implements AutoCloseable {
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("the lab certificates do not load", e);
         }
+    }
+
+    /** The playbook text put back at start, if a saved bundle was restored (the console shows it as the active set). */
+    public Optional<String> restoredPlaybookYaml() {
+        return Optional.ofNullable(restoredPlaybookYaml);
+    }
+
+    /**
+     * A saved bundle that is present but cannot be put back stops the lab: starting on the shipped defaults would be a
+     * silent rollback to a possibly weaker policy. No saved file means the defaults, as before.
+     */
+    private void restorePolicy() {
+        InstalledBundles.Kind kind = InstalledBundles.Kind.POLICY;
+        if (!bundles.exists(kind)) {
+            return;
+        }
+        InstalledBundles.Saved saved = bundles.load(kind).orElseThrow(() -> refusal(kind, bundles.lastRefusal()));
+        PolicyInstaller.Result r = policies.restore(saved.yaml(), saved.sequence(), note(saved));
+        if (!r.installed()) {
+            throw refusal(kind, r.reason());
+        }
+        notices.add("restored policy sequence " + saved.sequence() + " (installed " + saved.installedAt()
+                + ", approved by " + String.join(", ", saved.approvers()) + ")");
+    }
+
+    private void restorePlaybooks() {
+        InstalledBundles.Kind kind = InstalledBundles.Kind.PLAYBOOK;
+        if (!bundles.exists(kind)) {
+            return;
+        }
+        InstalledBundles.Saved saved = bundles.load(kind).orElseThrow(() -> refusal(kind, bundles.lastRefusal()));
+        PlaybookInstaller.Result r = playbooks.restore(saved.yaml(), saved.sequence(), note(saved));
+        if (!r.installed()) {
+            throw refusal(kind, r.reason());
+        }
+        restoredPlaybookYaml = saved.yaml();
+        notices.add("restored playbook sequence " + saved.sequence() + " (installed " + saved.installedAt()
+                + ", approved by " + String.join(", ", saved.approvers()) + ")");
+    }
+
+    private static String note(InstalledBundles.Saved s) {
+        return "installed " + s.installedAt() + ", approved by " + String.join(", ", s.approvers());
+    }
+
+    private IllegalStateException refusal(InstalledBundles.Kind kind, String why) {
+        return new IllegalStateException("The lab cannot start: the saved " + kind.name().toLowerCase(java.util.Locale.ROOT)
+                + " bundle in " + bundles.file(kind) + " was not accepted (" + why + "). It is left exactly as it is. "
+                + "Starting on the shipped defaults would silently undo an installed change. Restore the file and its "
+                + "key, or move the folders " + InstalledBundles.DIR + " and " + InstalledBundles.KEY_DIR
+                + " aside to start with the defaults.");
     }
 
     /** Makes (or reuses) the lab certificates and builds the world; nothing runs until {@link #advanceTo}. */

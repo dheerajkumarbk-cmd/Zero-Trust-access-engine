@@ -47,6 +47,7 @@ public final class LabAdminServices implements AdminServices {
     private final Object lock = new Object();
     private long generation = -1;
     private String playbookYaml;
+    private final java.util.concurrent.atomic.AtomicLong keepFailures = new java.util.concurrent.atomic.AtomicLong();
 
     public LabAdminServices(LabSession session) {
         this(session, null);
@@ -98,7 +99,7 @@ public final class LabAdminServices implements AdminServices {
         synchronized (lock) {
             if (generation != session.generation() || playbookYaml == null) {
                 generation = session.generation();
-                playbookYaml = reference();
+                playbookYaml = world().restoredPlaybookYaml().orElseGet(LabAdminServices::reference);
             }
             return playbookYaml;
         }
@@ -110,6 +111,23 @@ public final class LabAdminServices implements AdminServices {
             generation = session.generation();
             playbookYaml = yaml;
         }
+    }
+
+    @Override
+    public boolean bundleInstalled(String kind, long sequence, String yaml, List<String> approvers) {
+        try {
+            world().bundles.save(kind.equals("policy") ? dev.dwarpal.lab.InstalledBundles.Kind.POLICY
+                    : dev.dwarpal.lab.InstalledBundles.Kind.PLAYBOOK, sequence, yaml, approvers);
+            return true;
+        } catch (IOException | RuntimeException e) {
+            keepFailures.incrementAndGet();
+            return false;
+        }
+    }
+
+    /** Installs that stood but could not be kept for a restart. */
+    public long keepFailures() {
+        return keepFailures.get();
     }
 
     private static String reference() {

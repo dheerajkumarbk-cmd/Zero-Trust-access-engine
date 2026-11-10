@@ -195,10 +195,16 @@ final class Changes {
                 services.playbookInstalled(c.yaml);
             }
         }
+        List<String> approvedBy = c.approvals.keySet().stream().sorted().toList();
         if (installed) {
             open.remove(id);
+            boolean kept = services.bundleInstalled(c.kind == Kind.POLICY ? "policy" : "playbook", c.sequence, c.yaml,
+                    approvedBy);
+            if (!kept) {
+                reason = reason + " (installed, but not kept for a restart)";
+            }
         }
-        return new InstallResult(installed, reason, c.approvals.keySet().stream().sorted().toList());
+        return new InstallResult(installed, reason, approvedBy);
     }
 
     /** The installers' answer, and who signed. */

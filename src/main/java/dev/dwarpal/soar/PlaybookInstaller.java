@@ -55,6 +55,7 @@ public final class PlaybookInstaller {
     private final Consumer<Installed> activate;
     private final RateLimiter rejectionAudits = new RateLimiter(20, Duration.ofHours(1), 1);
     private long sequence;
+    private boolean changed;
     private long suppressed;
 
     /**
@@ -130,7 +131,50 @@ public final class PlaybookInstaller {
         }
         activate.accept(new Installed(bundle.sequence(), set));
         sequence = bundle.sequence();
+        changed = true;
         return new Result(true, "installed sequence " + bundle.sequence() + " approved by " + approvers, c.findings());
+    }
+
+    /**
+     * Puts back a bundle that was installed before a restart or lab reset. The only unsigned way in, so it is narrow:
+     * once, and only while this installer has not installed or restored anything (the start of a lab), for a sequence
+     * above the one it was built with. The text goes through the same strict compiler as an install, the restore is
+     * audited (PLAYBOOKS_RESTORED) before it takes effect, and the set is activated the same way. The caller vouches
+     * for the text (the lab checks its own seal first).
+     */
+    public synchronized Result restore(String yaml, long restoredSequence, String note) {
+        Objects.requireNonNull(yaml, "yaml");
+        if (changed) {
+            return new Result(false, "restore refused: this installer already installed or restored a bundle", List.of());
+        }
+        if (restoredSequence <= sequence) {
+            return new Result(false, "restore refused: sequence is not newer than the current one", List.of());
+        }
+        PlaybookCompiler.Compilation c;
+        try {
+            c = compiler.compile(yaml);
+        } catch (PlaybookException e) {
+            return new Result(false, "restore refused: unreadable: " + e.getMessage(), List.of());
+        }
+        if (!c.accepted()) {
+            return new Result(false, "restore refused: the linter refused it (" + c.findings().size() + " findings)",
+                    c.findings());
+        }
+        PlaybookSet set = c.set().orElseThrow();
+        Map<String, String> f = new LinkedHashMap<>();
+        f.put("sequence", Long.toString(restoredSequence));
+        f.put("sha256", Digests.sha256Hex(yaml));
+        f.put("note", Sanitize.text(note == null ? "" : note, 300));
+        f.put("version", set.version());
+        try {
+            audit.append("PLAYBOOKS_RESTORED", ACTOR, clock.instant(), f);
+        } catch (RuntimeException e) {
+            return new Result(false, "restore refused: audit trail unavailable", List.of());
+        }
+        activate.accept(new Installed(restoredSequence, set));
+        sequence = restoredSequence;
+        changed = true;
+        return new Result(true, "restored sequence " + restoredSequence, c.findings());
     }
 
     private Result reject(PlaybookBundle b, String hash, String requestedBy, Instant now, String reason,
