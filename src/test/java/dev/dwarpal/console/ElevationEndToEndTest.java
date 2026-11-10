@@ -51,7 +51,7 @@ class ElevationEndToEndTest {
 
     @AfterEach
     void stop() {
-        f.close();
+        if (f != null) f.close();
     }
 
     /** Signs in and gives the person a passkey, as the profile page does. */

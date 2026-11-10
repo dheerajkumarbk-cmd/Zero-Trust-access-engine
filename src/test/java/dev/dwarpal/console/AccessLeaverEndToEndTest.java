@@ -44,7 +44,7 @@ class AccessLeaverEndToEndTest {
 
     @AfterEach
     void stop() {
-        f.close();
+        if (f != null) f.close();
     }
 
     private static final String LEAVER = "{\"id\":\"uma\",\"reason\":\"last day was Friday\"}";
