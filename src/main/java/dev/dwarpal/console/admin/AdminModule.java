@@ -330,7 +330,7 @@ public final class AdminModule implements ConsoleModule {
         }
     }
 
-    /** The five actions that run inside an open elevation: the same refusal as the vault and the access decisions. */
+    /** The five actions that run inside an open elevation: the same refusal as the access decisions. */
     private static void requireElevation(Request r) {
         if (!r.who().elevated()) {
             throw new ModuleKit.Refusal(423, "elevation required");

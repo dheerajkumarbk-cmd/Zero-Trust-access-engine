@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * The policy and playbook bundles an administrator installed, kept in the lab folder so that they survive a restart
  * and a lab reset. A file is sealed with HMAC-SHA256 under a seal key of its own, which sits in a separate owner-only
- * folder (made the first time, like the vault key). The administrators' signing keys are made fresh at every start,
+ * folder (made the first time, owner-only). The administrators' signing keys are made fresh at every start,
  * so the original approvals cannot be checked again later; the seal and the audit record of the original approval
  * take their place. A file that is present but fails its seal is reported as refused and never installed; the lab
  * then refuses to start (see {@link LabWorld}). Nothing here ever logs the text or the key.
