@@ -32,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ScenarioToolsTest {
 
     private static LabWorld world;
-    private static final String SECRET_MARKER = "SECRET-MARKER-98765";
+    private static final String CANARY = "CANARY-MARKER-98765";
     private static final String HOST = "secret-host-77";
     private static final String HEX = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
 
@@ -183,29 +183,29 @@ class ScenarioToolsTest {
 
     @Test
     void lintingNeverEchoesWhatWasSubmitted() {
-        String dangerous = "version: 1\nrules:\n  - id: x\n    title: " + SECRET_MARKER + "\n    severity: MEDIUM\n"
-                + "    techniques: [T1052.001]\n    match: 'dataset = " + SECRET_MARKER + " and and'\n";
+        String dangerous = "version: 1\nrules:\n  - id: x\n    title: " + CANARY + "\n    severity: MEDIUM\n"
+                + "    techniques: [T1052.001]\n    match: 'dataset = " + CANARY + " and and'\n";
         RuleSandbox.RuleResult r = sandbox().rule(world, "p", dangerous, false);
         assertFalse(r.accepted());
-        assertFalse(r.toString().contains(SECRET_MARKER), "findings name places, not content: " + r);
+        assertFalse(r.toString().contains(CANARY), "findings name places, not content: " + r);
     }
 
     @Test
     void yamlTagsAliasesAndBombsAreRefusedWithoutAStackTraceOrAnEcho() {
         List<String> attacks = List.of(
-                "!!javax.script.ScriptEngineManager [!!java.net.URLClassLoader [[!!java.net.URL [\"http://127.0.0.1/" + SECRET_MARKER + "\"]]]]",
+                "!!javax.script.ScriptEngineManager [!!java.net.URLClassLoader [[!!java.net.URL [\"http://127.0.0.1/" + CANARY + "\"]]]]",
                 "version: 1\nrules: !!java.lang.ProcessBuilder [calc]\n",
                 "a: &a [x, x, x, x, x, x, x, x, x]\nb: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a]\nc: &c [*b, *b, *b, *b, *b, *b, *b, *b]\n",
                 "[".repeat(5_000),
                 "version: 1\nversion: 2\nrules: []\n",
                 "x".repeat(RuleSandbox.MAX_YAML + 1),
-                "\u0000\u0001 " + SECRET_MARKER,
+                "\u0000\u0001 " + CANARY,
                 "");
         for (String a : attacks) {
             RuleSandbox.RuleResult r = sandbox().rule(world, "p", a, true);
             assertFalse(r.accepted(), a.substring(0, Math.min(40, a.length())));
             assertFalse(r.ran());
-            assertFalse(r.toString().contains(SECRET_MARKER));
+            assertFalse(r.toString().contains(CANARY));
             assertFalse(r.toString().contains("	at ") || r.toString().contains("at dev.") || r.toString().contains("java."), r.toString());
         }
     }
@@ -258,10 +258,10 @@ class ScenarioToolsTest {
                 "version: \"lab.9\"\nplaybooks:\n  - rule: honeytoken-touched\n    steps:\n      - exec: rm -rf /\n",
                 "version: \"lab.9\"\nplaybooks:\n  - rule: honeytoken-touched\n    steps:\n      - notify: {connector: ticket, template: action-taken, extra: 1}\n",
                 "!!java.lang.Runtime {}",
-                "version: \"" + SECRET_MARKER + "\"\nplaybooks: [[[[")) {
+                "version: \"" + CANARY + "\"\nplaybooks: [[[[")) {
             RuleSandbox.PlaybookResult p = sb.playbook(bad);
             assertFalse(p.accepted(), bad);
-            assertFalse(p.toString().contains(SECRET_MARKER));
+            assertFalse(p.toString().contains(CANARY));
         }
     }
 
