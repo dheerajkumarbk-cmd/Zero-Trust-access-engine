@@ -816,6 +816,33 @@ monitor routes. Plain page views are not listed.
 | T4 | Denial of service | A large trail makes the view slow | The scan is the latest 2,000 records, a page is at most 100 rows, and the answer says the window | `TeamActivityTest` (paging) |
 | T5 | Injection | A trail value runs as markup in the page | Malformed filters are refused with 400; the page builds elements and sets text only, never HTML from row data | `TeamActivityTest` (malformed), `FrontEndRulesTest` |
 
+## OIDC token verification (not yet wired in)
+
+Package `dev.dwarpal.oidc`. No console route uses this yet: nothing here is reachable from a request, and no network access
+exists in part A. `IdTokenVerifier` checks an ID token against keys and a policy the caller hands it (OIDC Core 3.1.3.7, RFC 8725,
+RFC 7515/7517/7518/8037). The later parts (discovery, key fetching, the sign-in routes) add their own rows below.
+
+### Part A: the ID-token verifier
+
+| # | STRIDE | Threat | Control | Test |
+|---|---|---|---|---|
+| O1 | Spoofing | Forged or altered token (changed claim, header, or signature; truncated or longer signature; DER-encoded ES256) | Signature is checked first, over the exact `header.payload` bytes, and before any claim is read; RS256, ES256 (raw R and S, 64 bytes) and EdDSA only; every failure gives the same reason and message | `IdTokenVerifierTest` (tampered payload, header, signature; DER ES256), `IdTokenMutationTest` (1,500 one-byte changes, none accepted) |
+| O2 | Spoofing | Algorithm confusion: `alg` none, HS256 signed with the public key as the secret, an RSA key under an ES256 header, a key that names another algorithm | The policy lists only RS256, ES256 and EdDSA and refuses to be built with HS* or anything else; `none` and unknown values are refused; the key type must match the header algorithm, and a key's own `alg` and `use` must agree; `oct` keys are never loaded | `IdTokenVerifierTest` (none, HS256 with RSA key, outside the list, key mismatch, key `alg`, key `use`), `JwkSetTest` (oct skipped), policy test |
+| O3 | Spoofing | Key confusion: header `kid`, `jku`, `x5u`, `x5c` or `jwk` steers the verifier to an attacker's key | Only the key set the caller passes is used; `jku`, `x5u`, `x5c`, `jwk` are ignored; a `kid` must exist in the set; no `kid` works only with exactly one key of the right type; duplicate `kid` refuses the whole set; `crit` refuses the token | `IdTokenVerifierTest` (embedded jwk, kid at another key, unknown kid, no kid with two keys, crit), `JwkSetTest` (duplicate kid) |
+| O4 | Spoofing | Weak or invalid public key (RSA under 2048 bits, an EC point off the curve, a malformed Ed25519 point) | Key rules at parsing: RSA modulus 2048 to 8192 bits, odd modulus, odd exponent; the P-256 point is checked against the curve equation by hand (the JDK `KeyFactory` accepts an off-curve point); Ed25519 point checked per RFC 8032; a bad key refuses the whole set | `JwkSetTest` (1024-bit RSA, off-curve EC, wrong lengths, Ed25519 points) |
+| O5 | Spoofing | Wrong audience or issuer mix-up (token for another client or another provider) | `iss` must equal the configured issuer exactly (no trailing slash or case folding); `aud` must contain the client id; an audience list needs `azp`, and `azp` must be this client | `IdTokenVerifierTest` (issuer, audience, azp cases) |
+| O6 | Spoofing | Replay of an earlier token | The nonce must be present and equal the one the caller sent (constant-time compare); an empty expected nonce is a programming error; one-time use of state and nonce belongs to the sign-in flow (later part) | `IdTokenVerifierTest` (nonce cases) |
+| O7 | Spoofing | Stale or early token; clock skew abused | `exp` (plus 2 minutes of skew), `iat` (not more than the skew in the future, not older than 10 minutes), `nbf`, and optional `auth_time` age; clock passed in by the caller; times must be whole seconds up to the year 2200 (floats, strings, huge values refused) | `IdTokenVerifierTest` (boundaries just inside and outside, float and huge times, auth age) |
+| O8 | Spoofing | Cross-token confusion: a logout token or other JWT presented as an ID token | A header type of `logout+jwt` (also as `application/logout+jwt`) is refused; the nonce claim is required | `IdTokenVerifierTest.aLogoutTokenTypeIsRefused` |
+| O9 | Denial of service | Oversized or hostile input (huge token, deep JSON, huge key set, padded or odd base64) | Token at most 16 KiB; exactly three parts; strict base64url with no padding and no spare bits; JSON through the bounded strict reader; key set at most 256 KiB and 20 keys | `IdTokenVerifierTest` (oversized, five-part, padding, characters), `JwkSetTest` (size, count) |
+| O10 | Information disclosure | Error messages leak token content, claim values or keys | `OidcException` has one fixed message per reason and never a cause; a parse error is replaced, not echoed | `IdTokenVerifierTest` (every refusal checks the message against the token, claims and key ids) |
+| O11 | Elevation | A claim shape that a loose parser accepts (duplicate members, wrong types, odd `sub`, long `amr`) | Duplicate members refused by the reader; `sub` 1 to 255 printable ASCII; `acr` up to 128; `amr` at most 16 short safe strings; result has no map of raw claims | `IdTokenVerifierTest` (sub, acr, amr, duplicate member) |
+
+### Part B: discovery, key fetching, fake provider
+
+Rows are added with that part (SSRF and redirects on discovery and key fetches, key-set poisoning and fetch flooding, fail-closed
+after an outage).
+
 ## Residual risks (accepted for this layer, scheduled)
 
 | Risk | Why accepted now | Planned in |
