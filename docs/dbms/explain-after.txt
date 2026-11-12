@@ -1,0 +1,342 @@
+
+=== Q1 last 50 events for one account (composite B-tree account_id, occurred_at DESC)
+                                                                                                   QUERY PLAN                                                                                                   
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=3.02..193.79 rows=50 width=92) (actual time=0.296..0.336 rows=50.00 loops=1)
+   Buffers: shared hit=57 read=18
+   ->  Merge Append  (cost=3.02..4043.58 rows=1059 width=92) (actual time=0.295..0.333 rows=50.00 loops=1)
+         Sort Key: security_event.occurred_at DESC
+         Buffers: shared hit=57 read=18
+         ->  Index Scan using security_event_2026_05_account_id_occurred_at_idx on security_event_2026_05 security_event_1  (cost=0.42..828.30 rows=222 width=92) (actual time=0.064..0.064 rows=1.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=1 read=3
+         ->  Index Scan using security_event_2026_06_account_id_occurred_at_idx on security_event_2026_06 security_event_2  (cost=0.42..591.12 rows=155 width=92) (actual time=0.040..0.040 rows=1.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=1 read=3
+         ->  Index Scan using security_event_2026_07_account_id_occurred_at_idx on security_event_2026_07 security_event_3  (cost=0.42..767.99 rows=205 width=92) (actual time=0.046..0.047 rows=1.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=1 read=3
+         ->  Index Scan using security_event_2026_08_account_id_occurred_at_idx on security_event_2026_08 security_event_4  (cost=0.42..611.20 rows=160 width=92) (actual time=0.044..0.044 rows=1.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=1 read=3
+         ->  Index Scan using security_event_2026_09_account_id_occurred_at_idx on security_event_2026_09 security_event_5  (cost=0.42..591.13 rows=155 width=92) (actual time=0.043..0.043 rows=1.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=1 read=3
+         ->  Index Scan using security_event_2026_10_account_id_occurred_at_idx on security_event_2026_10 security_event_6  (cost=0.42..607.19 rows=159 width=92) (actual time=0.043..0.077 rows=50.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=46 read=3
+         ->  Index Scan using security_event_2026_11_account_id_occurred_at_idx on security_event_2026_11 security_event_7  (cost=0.12..8.14 rows=1 width=152) (actual time=0.004..0.004 rows=0.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=2
+         ->  Index Scan using security_event_2026_12_account_id_occurred_at_idx on security_event_2026_12 security_event_8  (cost=0.12..8.14 rows=1 width=152) (actual time=0.004..0.004 rows=0.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=2
+         ->  Index Scan using security_event_default_account_id_occurred_at_idx on security_event_default security_event_9  (cost=0.12..8.14 rows=1 width=152) (actual time=0.004..0.004 rows=0.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=190
+ Planning Time: 1.153 ms
+ Execution Time: 0.534 ms
+
+                                                                                                   QUERY PLAN                                                                                                   
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=3.02..193.79 rows=50 width=92) (actual time=0.060..0.093 rows=50.00 loops=1)
+   Buffers: shared hit=75
+   ->  Merge Append  (cost=3.02..4043.58 rows=1059 width=92) (actual time=0.060..0.090 rows=50.00 loops=1)
+         Sort Key: security_event.occurred_at DESC
+         Buffers: shared hit=75
+         ->  Index Scan using security_event_2026_05_account_id_occurred_at_idx on security_event_2026_05 security_event_1  (cost=0.42..828.30 rows=222 width=92) (actual time=0.015..0.015 rows=1.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=4
+         ->  Index Scan using security_event_2026_06_account_id_occurred_at_idx on security_event_2026_06 security_event_2  (cost=0.42..591.12 rows=155 width=92) (actual time=0.008..0.008 rows=1.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=4
+         ->  Index Scan using security_event_2026_07_account_id_occurred_at_idx on security_event_2026_07 security_event_3  (cost=0.42..767.99 rows=205 width=92) (actual time=0.006..0.006 rows=1.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=4
+         ->  Index Scan using security_event_2026_08_account_id_occurred_at_idx on security_event_2026_08 security_event_4  (cost=0.42..611.20 rows=160 width=92) (actual time=0.008..0.008 rows=1.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=4
+         ->  Index Scan using security_event_2026_09_account_id_occurred_at_idx on security_event_2026_09 security_event_5  (cost=0.42..591.13 rows=155 width=92) (actual time=0.006..0.006 rows=1.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=4
+         ->  Index Scan using security_event_2026_10_account_id_occurred_at_idx on security_event_2026_10 security_event_6  (cost=0.42..607.19 rows=159 width=92) (actual time=0.008..0.034 rows=50.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=49
+         ->  Index Scan using security_event_2026_11_account_id_occurred_at_idx on security_event_2026_11 security_event_7  (cost=0.12..8.14 rows=1 width=152) (actual time=0.003..0.003 rows=0.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=2
+         ->  Index Scan using security_event_2026_12_account_id_occurred_at_idx on security_event_2026_12 security_event_8  (cost=0.12..8.14 rows=1 width=152) (actual time=0.003..0.003 rows=0.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=2
+         ->  Index Scan using security_event_default_account_id_occurred_at_idx on security_event_default security_event_9  (cost=0.12..8.14 rows=1 width=152) (actual time=0.001..0.001 rows=0.00 loops=1)
+               Index Cond: (account_id = 424)
+               Index Searches: 1
+               Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=6
+ Planning Time: 0.275 ms
+ Execution Time: 0.129 ms
+
+
+=== Q2 time-range scan, 1 day (BRIN on occurred_at, inside one partition)
+                                                                                  QUERY PLAN                                                                                  
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=1416.97..1416.98 rows=1 width=8) (actual time=1.448..1.450 rows=1.00 loops=1)
+   Buffers: shared hit=264
+   ->  Bitmap Heap Scan on security_event_2026_08 security_event  (cost=12.71..1410.15 rows=2727 width=0) (actual time=0.550..1.358 rows=2717.00 loops=1)
+         Recheck Cond: ((occurred_at >= '2026-08-10 05:30:00+05:30'::timestamp with time zone) AND (occurred_at < '2026-08-11 05:30:00+05:30'::timestamp with time zone))
+         Rows Removed by Index Recheck: 14263
+         Heap Blocks: lossy=256
+         Buffers: shared hit=264
+         ->  Bitmap Index Scan on security_event_2026_08_occurred_at_idx  (cost=0.00..12.03 rows=8429 width=0) (actual time=0.031..0.031 rows=2560.00 loops=1)
+               Index Cond: ((occurred_at >= '2026-08-10 05:30:00+05:30'::timestamp with time zone) AND (occurred_at < '2026-08-11 05:30:00+05:30'::timestamp with time zone))
+               Index Searches: 1
+               Buffers: shared hit=8
+ Planning:
+   Buffers: shared hit=31
+ Planning Time: 0.129 ms
+ Execution Time: 1.485 ms
+
+                                                                                  QUERY PLAN                                                                                  
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=1416.97..1416.98 rows=1 width=8) (actual time=1.119..1.120 rows=1.00 loops=1)
+   Buffers: shared hit=258
+   ->  Bitmap Heap Scan on security_event_2026_08 security_event  (cost=12.71..1410.15 rows=2727 width=0) (actual time=0.437..1.032 rows=2717.00 loops=1)
+         Recheck Cond: ((occurred_at >= '2026-08-10 05:30:00+05:30'::timestamp with time zone) AND (occurred_at < '2026-08-11 05:30:00+05:30'::timestamp with time zone))
+         Rows Removed by Index Recheck: 14263
+         Heap Blocks: lossy=256
+         Buffers: shared hit=258
+         ->  Bitmap Index Scan on security_event_2026_08_occurred_at_idx  (cost=0.00..12.03 rows=8429 width=0) (actual time=0.012..0.012 rows=2560.00 loops=1)
+               Index Cond: ((occurred_at >= '2026-08-10 05:30:00+05:30'::timestamp with time zone) AND (occurred_at < '2026-08-11 05:30:00+05:30'::timestamp with time zone))
+               Index Searches: 1
+               Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=1
+ Planning Time: 0.122 ms
+ Execution Time: 1.139 ms
+
+
+=== Q3 search inside JSONB (GIN on details)
+                                                                         QUERY PLAN                                                                         
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=468.08..468.09 rows=1 width=8) (actual time=0.799..0.801 rows=1.00 loops=1)
+   Buffers: shared hit=65
+   ->  Append  (cost=75.36..468.06 rows=9 width=0) (actual time=0.518..0.796 rows=30.00 loops=1)
+         Buffers: shared hit=65
+         ->  Bitmap Heap Scan on security_event_2026_05 security_event_1  (cost=75.36..79.38 rows=1 width=0) (actual time=0.319..0.319 rows=0.00 loops=1)
+               Recheck Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+               Buffers: shared hit=9
+               ->  Bitmap Index Scan on security_event_2026_05_details_idx  (cost=0.00..75.36 rows=1 width=0) (actual time=0.309..0.309 rows=0.00 loops=1)
+                     Index Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     Index Searches: 1
+                     Buffers: shared hit=9
+         ->  Bitmap Heap Scan on security_event_2026_06 security_event_2  (cost=75.36..79.38 rows=1 width=0) (actual time=0.076..0.077 rows=0.00 loops=1)
+               Recheck Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+               Buffers: shared hit=9
+               ->  Bitmap Index Scan on security_event_2026_06_details_idx  (cost=0.00..75.36 rows=1 width=0) (actual time=0.072..0.072 rows=0.00 loops=1)
+                     Index Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     Index Searches: 1
+                     Buffers: shared hit=9
+         ->  Bitmap Heap Scan on security_event_2026_07 security_event_3  (cost=71.24..75.25 rows=1 width=0) (actual time=0.122..0.128 rows=15.00 loops=1)
+               Recheck Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+               Heap Blocks: exact=2
+               Buffers: shared hit=15
+               ->  Bitmap Index Scan on security_event_2026_07_details_idx  (cost=0.00..71.24 rows=1 width=0) (actual time=0.110..0.110 rows=15.00 loops=1)
+                     Index Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     Index Searches: 1
+                     Buffers: shared hit=13
+         ->  Bitmap Heap Scan on security_event_2026_08 security_event_4  (cost=75.36..79.38 rows=1 width=0) (actual time=0.073..0.073 rows=0.00 loops=1)
+               Recheck Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+               Buffers: shared hit=9
+               ->  Bitmap Index Scan on security_event_2026_08_details_idx  (cost=0.00..75.36 rows=1 width=0) (actual time=0.069..0.070 rows=0.00 loops=1)
+                     Index Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     Index Searches: 1
+                     Buffers: shared hit=9
+         ->  Bitmap Heap Scan on security_event_2026_09 security_event_5  (cost=71.24..75.25 rows=1 width=0) (actual time=0.068..0.069 rows=0.00 loops=1)
+               Recheck Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+               Buffers: shared hit=9
+               ->  Bitmap Index Scan on security_event_2026_09_details_idx  (cost=0.00..71.24 rows=1 width=0) (actual time=0.065..0.065 rows=0.00 loops=1)
+                     Index Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     Index Searches: 1
+                     Buffers: shared hit=9
+         ->  Bitmap Heap Scan on security_event_2026_10 security_event_6  (cost=75.36..79.38 rows=1 width=0) (actual time=0.110..0.113 rows=15.00 loops=1)
+               Recheck Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+               Heap Blocks: exact=1
+               Buffers: shared hit=14
+               ->  Bitmap Index Scan on security_event_2026_10_details_idx  (cost=0.00..75.36 rows=1 width=0) (actual time=0.103..0.103 rows=15.00 loops=1)
+                     Index Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     Index Searches: 1
+                     Buffers: shared hit=13
+         ->  Seq Scan on security_event_2026_11 security_event_7  (cost=0.00..0.00 rows=1 width=0) (actual time=0.006..0.007 rows=0.00 loops=1)
+               Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+         ->  Seq Scan on security_event_2026_12 security_event_8  (cost=0.00..0.00 rows=1 width=0) (actual time=0.004..0.004 rows=0.00 loops=1)
+               Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+         ->  Seq Scan on security_event_default security_event_9  (cost=0.00..0.00 rows=1 width=0) (actual time=0.004..0.004 rows=0.00 loops=1)
+               Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+ Planning:
+   Buffers: shared hit=21
+ Planning Time: 0.464 ms
+ Execution Time: 0.973 ms
+
+                                                                         QUERY PLAN                                                                         
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=468.08..468.09 rows=1 width=8) (actual time=0.454..0.455 rows=1.00 loops=1)
+   Buffers: shared hit=65
+   ->  Append  (cost=75.36..468.06 rows=9 width=0) (actual time=0.250..0.451 rows=30.00 loops=1)
+         Buffers: shared hit=65
+         ->  Bitmap Heap Scan on security_event_2026_05 security_event_1  (cost=75.36..79.38 rows=1 width=0) (actual time=0.082..0.082 rows=0.00 loops=1)
+               Recheck Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+               Buffers: shared hit=9
+               ->  Bitmap Index Scan on security_event_2026_05_details_idx  (cost=0.00..75.36 rows=1 width=0) (actual time=0.071..0.071 rows=0.00 loops=1)
+                     Index Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     Index Searches: 1
+                     Buffers: shared hit=9
+         ->  Bitmap Heap Scan on security_event_2026_06 security_event_2  (cost=75.36..79.38 rows=1 width=0) (actual time=0.065..0.065 rows=0.00 loops=1)
+               Recheck Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+               Buffers: shared hit=9
+               ->  Bitmap Index Scan on security_event_2026_06_details_idx  (cost=0.00..75.36 rows=1 width=0) (actual time=0.061..0.061 rows=0.00 loops=1)
+                     Index Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     Index Searches: 1
+                     Buffers: shared hit=9
+         ->  Bitmap Heap Scan on security_event_2026_07 security_event_3  (cost=71.24..75.25 rows=1 width=0) (actual time=0.102..0.106 rows=15.00 loops=1)
+               Recheck Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+               Heap Blocks: exact=2
+               Buffers: shared hit=15
+               ->  Bitmap Index Scan on security_event_2026_07_details_idx  (cost=0.00..71.24 rows=1 width=0) (actual time=0.090..0.091 rows=15.00 loops=1)
+                     Index Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     Index Searches: 1
+                     Buffers: shared hit=13
+         ->  Bitmap Heap Scan on security_event_2026_08 security_event_4  (cost=75.36..79.38 rows=1 width=0) (actual time=0.027..0.027 rows=0.00 loops=1)
+               Recheck Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+               Buffers: shared hit=9
+               ->  Bitmap Index Scan on security_event_2026_08_details_idx  (cost=0.00..75.36 rows=1 width=0) (actual time=0.024..0.024 rows=0.00 loops=1)
+                     Index Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     Index Searches: 1
+                     Buffers: shared hit=9
+         ->  Bitmap Heap Scan on security_event_2026_09 security_event_5  (cost=71.24..75.25 rows=1 width=0) (actual time=0.059..0.059 rows=0.00 loops=1)
+               Recheck Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+               Buffers: shared hit=9
+               ->  Bitmap Index Scan on security_event_2026_09_details_idx  (cost=0.00..71.24 rows=1 width=0) (actual time=0.055..0.055 rows=0.00 loops=1)
+                     Index Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     Index Searches: 1
+                     Buffers: shared hit=9
+         ->  Bitmap Heap Scan on security_event_2026_10 security_event_6  (cost=75.36..79.38 rows=1 width=0) (actual time=0.093..0.096 rows=15.00 loops=1)
+               Recheck Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+               Heap Blocks: exact=1
+               Buffers: shared hit=14
+               ->  Bitmap Index Scan on security_event_2026_10_details_idx  (cost=0.00..75.36 rows=1 width=0) (actual time=0.086..0.086 rows=15.00 loops=1)
+                     Index Cond: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     Index Searches: 1
+                     Buffers: shared hit=13
+         ->  Seq Scan on security_event_2026_11 security_event_7  (cost=0.00..0.00 rows=1 width=0) (actual time=0.005..0.005 rows=0.00 loops=1)
+               Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+         ->  Seq Scan on security_event_2026_12 security_event_8  (cost=0.00..0.00 rows=1 width=0) (actual time=0.003..0.003 rows=0.00 loops=1)
+               Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+         ->  Seq Scan on security_event_default security_event_9  (cost=0.00..0.00 rows=1 width=0) (actual time=0.004..0.004 rows=0.00 loops=1)
+               Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+ Planning:
+   Buffers: shared hit=15
+ Planning Time: 0.522 ms
+ Execution Time: 0.582 ms
+
+
+=== Q4 live grants of one account (partial B-tree WHERE revoked_at IS NULL)
+                                                            QUERY PLAN                                                             
+-----------------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on role_assignment  (cost=4.29..9.32 rows=2 width=64) (actual time=0.041..0.044 rows=2.00 loops=1)
+   Recheck Cond: ((account_id = 100) AND (revoked_at IS NULL))
+   Heap Blocks: exact=2
+   Buffers: shared hit=2 read=2
+   ->  Bitmap Index Scan on ix_role_assignment_live  (cost=0.00..4.29 rows=2 width=0) (actual time=0.032..0.032 rows=2.00 loops=1)
+         Index Cond: (account_id = 100)
+         Index Searches: 1
+         Buffers: shared read=2
+ Planning:
+   Buffers: shared hit=80 read=1
+ Planning Time: 2.082 ms
+ Execution Time: 0.057 ms
+
+                                                            QUERY PLAN                                                             
+-----------------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on role_assignment  (cost=4.29..9.32 rows=2 width=64) (actual time=0.011..0.012 rows=2.00 loops=1)
+   Recheck Cond: ((account_id = 100) AND (revoked_at IS NULL))
+   Heap Blocks: exact=2
+   Buffers: shared hit=4
+   ->  Bitmap Index Scan on ix_role_assignment_live  (cost=0.00..4.29 rows=2 width=0) (actual time=0.005..0.005 rows=2.00 loops=1)
+         Index Cond: (account_id = 100)
+         Index Searches: 1
+         Buffers: shared hit=2
+ Planning Time: 0.056 ms
+ Execution Time: 0.021 ms
+
+
+=== Q5 dormant account report (partial B-tree on last_login_at WHERE status = active)
+                                                            QUERY PLAN                                                             
+-----------------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on account  (cost=4.31..11.90 rows=5 width=14) (actual time=0.036..0.037 rows=6.00 loops=1)
+   Recheck Cond: ((last_login_at < '2026-08-01 05:30:00+05:30'::timestamp with time zone) AND (status = 'active'::text))
+   Heap Blocks: exact=1
+   Buffers: shared hit=1 read=2
+   ->  Bitmap Index Scan on ix_account_active_login  (cost=0.00..4.31 rows=5 width=0) (actual time=0.026..0.026 rows=6.00 loops=1)
+         Index Cond: (last_login_at < '2026-08-01 05:30:00+05:30'::timestamp with time zone)
+         Index Searches: 1
+         Buffers: shared read=2
+ Planning:
+   Buffers: shared hit=73 read=1
+ Planning Time: 1.812 ms
+ Execution Time: 0.051 ms
+
+                                                            QUERY PLAN                                                             
+-----------------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on account  (cost=4.31..11.90 rows=5 width=14) (actual time=0.009..0.009 rows=6.00 loops=1)
+   Recheck Cond: ((last_login_at < '2026-08-01 05:30:00+05:30'::timestamp with time zone) AND (status = 'active'::text))
+   Heap Blocks: exact=1
+   Buffers: shared hit=3
+   ->  Bitmap Index Scan on ix_account_active_login  (cost=0.00..4.31 rows=5 width=0) (actual time=0.004..0.004 rows=6.00 loops=1)
+         Index Cond: (last_login_at < '2026-08-01 05:30:00+05:30'::timestamp with time zone)
+         Index Searches: 1
+         Buffers: shared hit=2
+ Planning Time: 0.049 ms
+ Execution Time: 0.017 ms
+
+
+=== Q6 case-insensitive e-mail lookup (expression index lower(email))
+                                                            QUERY PLAN                                                            
+----------------------------------------------------------------------------------------------------------------------------------
+ Index Scan using ix_person_email_lower on person  (cost=0.14..8.16 rows=1 width=19) (actual time=0.038..0.041 rows=1.00 loops=1)
+   Index Cond: (lower(email) = 'e0077@dwarpal.example'::text)
+   Index Searches: 1
+   Buffers: shared hit=1 read=1
+ Planning:
+   Buffers: shared hit=11
+ Planning Time: 0.063 ms
+ Execution Time: 0.046 ms
+
+                                                            QUERY PLAN                                                            
+----------------------------------------------------------------------------------------------------------------------------------
+ Index Scan using ix_person_email_lower on person  (cost=0.14..8.16 rows=1 width=19) (actual time=0.012..0.012 rows=1.00 loops=1)
+   Index Cond: (lower(email) = 'e0077@dwarpal.example'::text)
+   Index Searches: 1
+   Buffers: shared hit=2
+ Planning Time: 0.043 ms
+ Execution Time: 0.020 ms
+

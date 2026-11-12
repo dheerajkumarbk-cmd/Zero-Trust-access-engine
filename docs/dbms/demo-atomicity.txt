@@ -1,0 +1,115 @@
+DEMO 1 - ATOMICITY (iga.joiner is all-or-nothing)
+Database: dwarpal_dbms_restore (restore copy of the iga schema, built from 01..04). Timings, process ids, transaction ids, ids and ordering come from this one run.
+Reproduce: db/iga/run.sh --db dwarpal_dbms_restore db/iga/demos/atomicity.sql -v ON_ERROR_STOP=0
+
+SET
+SET
+=== 0. Fixture (committed): department, system, role, birthright mapping ===
+DELETE 0
+DELETE 0
+DELETE 0
+DELETE 0
+DELETE 0
+DELETE 0
+DELETE 0
+DELETE 0
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+Fixture ids: dept= 9  system= 7
+CREATE VIEW
+audit_log rows before the demo: 114
+
+=== 1. Baseline: nothing exists for the demo people ===
+ persons | accounts | assignments | lifecycle_events 
+---------+----------+-------------+------------------
+       0 |        0 |           0 |                0
+(1 row)
+
+
+=== 2. joiner with a role that does not exist (autocommit: the CALL is its own transaction) ===
+Expect: ERROR P0002 "role no_such_role does not exist"
+psql:db/iga/demos/atomicity.sql:47: ERROR:  P0002: role no_such_role does not exist
+CONTEXT:  PL/pgSQL function joiner(text,text,text,bigint,bigint,date,bigint[],text[],bigint) line 43 at RAISE
+LOCATION:  exec_stmt_raise, pl_exec.c:3923
+
+=== 3. After the failure: no person, account, assignment or lifecycle row remained ===
+ persons | accounts | assignments | lifecycle_events 
+---------+----------+-------------+------------------
+       0 |        0 |           0 |                0
+(1 row)
+
+ audit_log_unchanged 
+---------------------
+ t
+(1 row)
+
+
+=== 4. A successful joiner inside BEGIN .. ROLLBACK ===
+BEGIN
+ p_person_id 
+-------------
+          24
+(1 row)
+
+Inside the transaction (visible to this session only): everything was created
+ persons | accounts | assignments | lifecycle_events 
+---------+----------+-------------+------------------
+       1 |        1 |           1 |                1
+(1 row)
+
+ROLLBACK
+After ROLLBACK: everything is gone again
+ persons | accounts | assignments | lifecycle_events 
+---------+----------+-------------+------------------
+       0 |        0 |           0 |                0
+(1 row)
+
+
+=== 5. SAVEPOINT: partial rollback inside one transaction ===
+BEGIN
+ p_person_id 
+-------------
+          25
+(1 row)
+
+SAVEPOINT
+Second joiner fails (missing role); the transaction is now in the aborted state:
+psql:db/iga/demos/atomicity.sql:73: ERROR:  P0002: role no_such_role does not exist
+CONTEXT:  PL/pgSQL function joiner(text,text,text,bigint,bigint,date,bigint[],text[],bigint) line 43 at RAISE
+LOCATION:  exec_stmt_raise, pl_exec.c:3923
+ROLLBACK
+After ROLLBACK TO SAVEPOINT: DEMO-ATOM-2 is still there, DEMO-ATOM-3 is not
+ employee_no 
+-------------
+ DEMO-ATOM-2
+(1 row)
+
+COMMIT
+After COMMIT only DEMO-ATOM-2 is permanent:
+ employee_no | status 
+-------------+--------
+ DEMO-ATOM-2 | active
+(1 row)
+
+ persons | accounts | assignments | lifecycle_events 
+---------+----------+-------------+------------------
+       1 |        1 |           1 |                1
+(1 row)
+
+
+=== 6. Cleanup of the fixture ===
+DELETE 1
+DELETE 1
+DELETE 1
+DELETE 1
+DELETE 1
+DELETE 1
+DELETE 1
+DELETE 1
+ persons | accounts | assignments | lifecycle_events 
+---------+----------+-------------+------------------
+       0 |        0 |           0 |                0
+(1 row)
+

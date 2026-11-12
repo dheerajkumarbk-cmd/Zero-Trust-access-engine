@@ -1,0 +1,39 @@
+=== A. Recursive query: the management chain above one person (person_id 150), nearest manager first
+ levels_above | person_id |   full_name    
+--------------+-----------+----------------
+            0 |       150 | Arjun Shetty
+            1 |        50 | Arjun Rao
+            2 |        17 | Pooja Kulkarni
+            3 |         6 | Vihaan Reddy
+            4 |         2 | Neel Iyer
+            5 |         1 | Meera Singh
+(6 rows)
+
+
+=== B. Window function: top 3 accounts per day by failed logins (rank), for the 5 days with the largest single-account count (accounts with fewer than 3 failures omitted)
+    day     | rnk | account_id | username | failed | day_total 
+------------+-----+------------+----------+--------+-----------
+ 2026-05-22 |   1 |         37 | e0015    |     15 |       112
+ 2026-05-22 |   2 |        181 | e0073    |      3 |       112
+ 2026-06-12 |   1 |         74 | e0030    |     15 |       112
+ 2026-06-12 |   2 |        316 | e0127    |      3 |       112
+ 2026-07-03 |   1 |        111 | e0045    |     15 |       118
+ 2026-07-03 |   2 |        339 | e0136    |      3 |       118
+ 2026-07-24 |   1 |        148 | e0060    |     16 |        88
+ 2026-08-14 |   1 |        185 | e0074    |     15 |        93
+(8 rows)
+
+
+=== C. GROUP BY ... HAVING: brute-force candidates, more than 10 failed logins in one 5-minute window (expected 8)
+ account_id | username |   source_ip   |       window_start        | failures 
+------------+----------+---------------+---------------------------+----------
+         37 | e0015    | 203.0.113.201 | 2026-05-22 08:30:00+05:30 |       15
+         74 | e0030    | 203.0.113.202 | 2026-06-12 08:30:00+05:30 |       15
+        111 | e0045    | 203.0.113.203 | 2026-07-03 08:30:00+05:30 |       15
+        148 | e0060    | 203.0.113.204 | 2026-07-24 08:30:00+05:30 |       15
+        185 | e0074    | 203.0.113.205 | 2026-08-14 08:30:00+05:30 |       15
+        222 | e0089    | 203.0.113.206 | 2026-09-04 08:30:00+05:30 |       15
+        259 | e0104    | 203.0.113.207 | 2026-09-25 08:30:00+05:30 |       15
+        296 | e0119    | 203.0.113.208 | 2026-10-16 08:30:00+05:30 |       15
+(8 rows)
+

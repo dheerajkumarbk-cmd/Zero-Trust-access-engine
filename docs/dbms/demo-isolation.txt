@@ -1,0 +1,68 @@
+DEMO 2 - ISOLATION (two sessions take the last free slot)
+Database: dwarpal_dbms_restore (restore copy of the iga schema, built from 01..04). Timings, process ids, transaction ids, ids and ordering come from this one run.
+Reproduce: db/iga/demos/isolation.sh dwarpal_dbms_restore
+
+Database: dwarpal_dbms_restore    Run at: 2026-11-12 19:56:16 IST
+Rule under test: a privileged role may have at most 3 live holders; checked inside the transaction.
+Fixture: 2 live holders already, so exactly one slot is free, and two sessions each try to take it.
+
+================ RUN 1: READ COMMITTED (PostgreSQL default) ================
+--- before: 
+            2 | demo-iso-h1, demo-iso-h2
+
+--- session A output
+SET
+[session A] BEGIN ISOLATION LEVEL READ COMMITTED
+BEGIN
+[session A] check: live holders =2, free slot =t
+[session A] sleeping 2 s before the insert (so both sessions have read the count)
+[session A] INSERT assignment for demo-iso-c1
+INSERT 0 1
+[session A] COMMIT
+COMMIT
+--- session B output
+SET
+[session B] BEGIN ISOLATION LEVEL READ COMMITTED
+BEGIN
+[session B] check: live holders =2, free slot =t
+[session B] sleeping 3 s before the insert (so both sessions have read the count)
+[session B] INSERT assignment for demo-iso-c2
+INSERT 0 1
+[session B] COMMIT
+COMMIT
+--- after (committed state, third session): 
+            4 | demo-iso-c1, demo-iso-c2, demo-iso-h1, demo-iso-h2
+
+
+================ RUN 2: SERIALIZABLE ================
+--- before: 
+            2 | demo-iso-h1, demo-iso-h2
+
+--- session A output
+SET
+[session A] BEGIN ISOLATION LEVEL SERIALIZABLE
+BEGIN
+[session A] check: live holders =2, free slot =t
+[session A] sleeping 2 s before the insert (so both sessions have read the count)
+[session A] INSERT assignment for demo-iso-c1
+INSERT 0 1
+[session A] COMMIT
+COMMIT
+--- session B output
+SET
+[session B] BEGIN ISOLATION LEVEL SERIALIZABLE
+BEGIN
+[session B] check: live holders =2, free slot =t
+[session B] sleeping 3 s before the insert (so both sessions have read the count)
+[session B] INSERT assignment for demo-iso-c2
+psql:C:/Users/Admin/dwr/l5-try/db/iga/demos/isolation_session.sql:22: ERROR:  40001: could not serialize access due to read/write dependencies among transactions
+DETAIL:  Reason code: Canceled on identification as a pivot, during write.
+HINT:  The transaction might succeed if retried.
+LOCATION:  OnConflict_CheckForSerializationFailure, predicate.c:4668
+[session B] COMMIT
+ROLLBACK
+--- after (committed state, third session): 
+            3 | demo-iso-c1, demo-iso-h1, demo-iso-h2
+
+
+Fixture removed.

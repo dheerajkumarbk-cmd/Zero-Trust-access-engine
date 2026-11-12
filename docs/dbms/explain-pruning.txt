@@ -1,0 +1,64 @@
+=== Q1 events of July 2026 (bounds match partition security_event_2026_07): expect ONE partition in the plan
+                                                                             QUERY PLAN                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=2745.66..2745.68 rows=1 width=8) (actual time=23.077..23.078 rows=1.00 loops=1)
+   Buffers: shared hit=1271
+   ->  Seq Scan on security_event_2026_07 security_event  (cost=0.00..2535.03 rows=84252 width=0) (actual time=0.080..19.787 rows=84269.00 loops=1)
+         Filter: ((occurred_at >= '2026-07-01 05:30:00+05:30'::timestamp with time zone) AND (occurred_at < '2026-08-01 05:30:00+05:30'::timestamp with time zone))
+         Buffers: shared hit=1271
+ Planning:
+   Buffers: shared hit=305
+ Planning Time: 5.954 ms
+ Execution Time: 23.149 ms
+(9 rows)
+
+
+=== Q2 same query, no time filter: every partition is visited (for contrast)
+                                                                                   QUERY PLAN                                                                                    
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate  (cost=13043.91..13043.92 rows=1 width=8) (actual time=91.798..100.915 rows=1.00 loops=1)
+   Buffers: shared hit=7540
+   ->  Gather  (cost=13043.69..13043.90 rows=2 width=8) (actual time=91.307..100.903 rows=3.00 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=7540
+         ->  Partial Aggregate  (cost=12043.69..12043.70 rows=1 width=8) (actual time=42.969..42.974 rows=1.00 loops=3)
+               Buffers: shared hit=7540
+               ->  Parallel Append  (cost=0.00..11522.85 rows=208337 width=0) (actual time=0.043..34.765 rows=166666.67 loops=3)
+                     Buffers: shared hit=7540
+                     ->  Seq Scan on security_event_2026_11 security_event_7  (cost=0.00..0.00 rows=1 width=0) (actual time=0.048..0.048 rows=0.00 loops=1)
+                     ->  Seq Scan on security_event_2026_12 security_event_8  (cost=0.00..0.00 rows=1 width=0) (actual time=0.018..0.018 rows=0.00 loops=1)
+                     ->  Seq Scan on security_event_default security_event_9  (cost=0.00..0.00 rows=1 width=0) (actual time=0.015..0.015 rows=0.00 loops=1)
+                     ->  Parallel Seq Scan on security_event_2026_07 security_event_3  (cost=0.00..1766.70 rows=49570 width=0) (actual time=0.011..6.304 rows=84269.00 loops=1)
+                           Buffers: shared hit=1271
+                     ->  Parallel Seq Scan on security_event_2026_08 security_event_4  (cost=0.00..1766.61 rows=49561 width=0) (actual time=0.034..8.257 rows=28084.67 loops=3)
+                           Buffers: shared hit=1271
+                     ->  Parallel Seq Scan on security_event_2026_05 security_event_1  (cost=0.00..1765.61 rows=49561 width=0) (actual time=0.005..5.352 rows=84254.00 loops=1)
+                           Buffers: shared hit=1270
+                     ->  Parallel Seq Scan on security_event_2026_10 security_event_6  (cost=0.00..1763.91 rows=49491 width=0) (actual time=0.004..15.530 rows=84134.00 loops=1)
+                           Buffers: shared hit=1269
+                     ->  Parallel Seq Scan on security_event_2026_09 security_event_5  (cost=0.00..1709.72 rows=47972 width=0) (actual time=0.011..15.220 rows=81552.00 loops=1)
+                           Buffers: shared hit=1230
+                     ->  Parallel Seq Scan on security_event_2026_06 security_event_2  (cost=0.00..1708.63 rows=47963 width=0) (actual time=0.009..6.678 rows=81537.00 loops=1)
+                           Buffers: shared hit=1229
+ Planning:
+   Buffers: shared hit=648
+ Planning Time: 17.019 ms
+ Execution Time: 100.977 ms
+(29 rows)
+
+
+=== Q3 partitions that actually exist and their sizes
+       partition        | approx_rows | heap_size 
+------------------------+-------------+-----------
+ security_event_2026_05 |       84254 | 10160 kB
+ security_event_2026_06 |       81537 | 9832 kB
+ security_event_2026_07 |       84269 | 10168 kB
+ security_event_2026_08 |       84254 | 10168 kB
+ security_event_2026_09 |       81552 | 9840 kB
+ security_event_2026_10 |       84134 | 10152 kB
+ security_event_2026_11 |           0 | 0 bytes
+ security_event_2026_12 |           0 | 0 bytes
+ security_event_default |           0 | 0 bytes
+(9 rows)
+

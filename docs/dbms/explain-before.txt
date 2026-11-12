@@ -1,0 +1,302 @@
+
+=== Q1 last 50 events for one account (composite B-tree account_id, occurred_at DESC)
+                                                                                 QUERY PLAN                                                                                  
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=12237.11..12242.93 rows=50 width=92) (actual time=105.684..120.130 rows=50.00 loops=1)
+   Buffers: shared hit=7618
+   ->  Gather Merge  (cost=12237.11..12354.86 rows=1011 width=92) (actual time=105.683..120.124 rows=50.00 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=7618
+         ->  Sort  (cost=11237.08..11238.14 rows=424 width=92) (actual time=16.722..16.725 rows=16.67 loops=3)
+               Sort Key: security_event.occurred_at DESC
+               Sort Method: top-N heapsort  Memory: 39kB
+               Buffers: shared hit=7618
+               Worker 0:  Sort Method: quicksort  Memory: 25kB
+               Worker 1:  Sort Method: quicksort  Memory: 25kB
+               ->  Parallel Append  (cost=0.00..11218.58 rows=424 width=92) (actual time=0.013..16.536 rows=350.00 loops=3)
+                     Buffers: shared hit=7540
+                     ->  Seq Scan on security_event_2026_11 security_event_7  (cost=0.00..0.00 rows=1 width=152) (actual time=0.004..0.004 rows=0.00 loops=1)
+                           Filter: (account_id = 424)
+                     ->  Seq Scan on security_event_2026_12 security_event_8  (cost=0.00..0.00 rows=1 width=152) (actual time=0.004..0.004 rows=0.00 loops=1)
+                           Filter: (account_id = 424)
+                     ->  Seq Scan on security_event_default security_event_9  (cost=0.00..0.00 rows=1 width=152) (actual time=0.025..0.025 rows=0.00 loops=1)
+                           Filter: (account_id = 424)
+                     ->  Parallel Seq Scan on security_event_2026_07 security_event_3  (cost=0.00..1890.62 rows=94 width=92) (actual time=0.044..9.950 rows=175.00 loops=1)
+                           Filter: (account_id = 424)
+                           Rows Removed by Filter: 84094
+                           Buffers: shared hit=1271
+                     ->  Parallel Seq Scan on security_event_2026_08 security_event_4  (cost=0.00..1890.51 rows=94 width=92) (actual time=0.020..3.582 rows=173.00 loops=1)
+                           Filter: (account_id = 424)
+                           Rows Removed by Filter: 84081
+                           Buffers: shared hit=1271
+                     ->  Parallel Seq Scan on security_event_2026_05 security_event_1  (cost=0.00..1889.51 rows=94 width=92) (actual time=0.007..7.421 rows=194.00 loops=1)
+                           Filter: (account_id = 424)
+                           Rows Removed by Filter: 84060
+                           Buffers: shared hit=1270
+                     ->  Parallel Seq Scan on security_event_2026_10 security_event_6  (cost=0.00..1887.63 rows=95 width=92) (actual time=0.020..10.708 rows=171.00 loops=1)
+                           Filter: (account_id = 424)
+                           Rows Removed by Filter: 83963
+                           Buffers: shared hit=1269
+                     ->  Parallel Seq Scan on security_event_2026_09 security_event_5  (cost=0.00..1829.65 rows=125 width=92) (actual time=0.021..6.317 rows=182.00 loops=1)
+                           Filter: (account_id = 424)
+                           Rows Removed by Filter: 81370
+                           Buffers: shared hit=1230
+                     ->  Parallel Seq Scan on security_event_2026_06 security_event_2  (cost=0.00..1828.54 rows=91 width=92) (actual time=0.035..11.410 rows=155.00 loops=1)
+                           Filter: (account_id = 424)
+                           Rows Removed by Filter: 81382
+                           Buffers: shared hit=1229
+ Planning:
+   Buffers: shared hit=174
+ Planning Time: 0.500 ms
+ Execution Time: 120.194 ms
+
+                                                                                 QUERY PLAN                                                                                  
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=12237.11..12242.93 rows=50 width=92) (actual time=60.968..70.076 rows=50.00 loops=1)
+   Buffers: shared hit=7618
+   ->  Gather Merge  (cost=12237.11..12354.86 rows=1011 width=92) (actual time=60.966..70.065 rows=50.00 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=7618
+         ->  Sort  (cost=11237.08..11238.14 rows=424 width=92) (actual time=10.462..10.468 rows=16.67 loops=3)
+               Sort Key: security_event.occurred_at DESC
+               Sort Method: top-N heapsort  Memory: 39kB
+               Buffers: shared hit=7618
+               Worker 0:  Sort Method: quicksort  Memory: 25kB
+               Worker 1:  Sort Method: quicksort  Memory: 25kB
+               ->  Parallel Append  (cost=0.00..11218.58 rows=424 width=92) (actual time=0.006..10.268 rows=350.00 loops=3)
+                     Buffers: shared hit=7540
+                     ->  Seq Scan on security_event_2026_11 security_event_7  (cost=0.00..0.00 rows=1 width=152) (actual time=0.005..0.005 rows=0.00 loops=1)
+                           Filter: (account_id = 424)
+                     ->  Seq Scan on security_event_2026_12 security_event_8  (cost=0.00..0.00 rows=1 width=152) (actual time=0.005..0.005 rows=0.00 loops=1)
+                           Filter: (account_id = 424)
+                     ->  Seq Scan on security_event_default security_event_9  (cost=0.00..0.00 rows=1 width=152) (actual time=0.021..0.021 rows=0.00 loops=1)
+                           Filter: (account_id = 424)
+                     ->  Parallel Seq Scan on security_event_2026_07 security_event_3  (cost=0.00..1890.62 rows=94 width=92) (actual time=0.011..6.159 rows=175.00 loops=1)
+                           Filter: (account_id = 424)
+                           Rows Removed by Filter: 84094
+                           Buffers: shared hit=1271
+                     ->  Parallel Seq Scan on security_event_2026_08 security_event_4  (cost=0.00..1890.51 rows=94 width=92) (actual time=0.018..5.889 rows=173.00 loops=1)
+                           Filter: (account_id = 424)
+                           Rows Removed by Filter: 84081
+                           Buffers: shared hit=1271
+                     ->  Parallel Seq Scan on security_event_2026_05 security_event_1  (cost=0.00..1889.51 rows=94 width=92) (actual time=0.010..4.556 rows=194.00 loops=1)
+                           Filter: (account_id = 424)
+                           Rows Removed by Filter: 84060
+                           Buffers: shared hit=1270
+                     ->  Parallel Seq Scan on security_event_2026_10 security_event_6  (cost=0.00..1887.63 rows=95 width=92) (actual time=0.006..6.736 rows=171.00 loops=1)
+                           Filter: (account_id = 424)
+                           Rows Removed by Filter: 83963
+                           Buffers: shared hit=1269
+                     ->  Parallel Seq Scan on security_event_2026_09 security_event_5  (cost=0.00..1829.65 rows=125 width=92) (actual time=0.006..4.378 rows=182.00 loops=1)
+                           Filter: (account_id = 424)
+                           Rows Removed by Filter: 81370
+                           Buffers: shared hit=1230
+                     ->  Parallel Seq Scan on security_event_2026_06 security_event_2  (cost=0.00..1828.54 rows=91 width=92) (actual time=0.013..2.930 rows=155.00 loops=1)
+                           Filter: (account_id = 424)
+                           Rows Removed by Filter: 81382
+                           Buffers: shared hit=1229
+ Planning:
+   Buffers: shared hit=3
+ Planning Time: 0.220 ms
+ Execution Time: 70.140 ms
+
+
+=== Q2 time-range scan, 1 day (BRIN on occurred_at, inside one partition)
+                                                                                        QUERY PLAN                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=2176.77..2176.78 rows=1 width=8) (actual time=8.823..8.824 rows=1.00 loops=1)
+   Buffers: shared hit=328
+   ->  Index Only Scan using security_event_2026_08_pkey on security_event_2026_08 security_event  (cost=0.29..2169.98 rows=2715 width=0) (actual time=2.427..8.736 rows=2717.00 loops=1)
+         Index Cond: ((occurred_at >= '2026-08-10 05:30:00+05:30'::timestamp with time zone) AND (occurred_at < '2026-08-11 05:30:00+05:30'::timestamp with time zone))
+         Heap Fetches: 0
+         Index Searches: 1
+         Buffers: shared hit=328
+ Planning:
+   Buffers: shared hit=30
+ Planning Time: 0.179 ms
+ Execution Time: 8.850 ms
+
+                                                                                        QUERY PLAN                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=2176.77..2176.78 rows=1 width=8) (actual time=3.514..3.515 rows=1.00 loops=1)
+   Buffers: shared hit=325
+   ->  Index Only Scan using security_event_2026_08_pkey on security_event_2026_08 security_event  (cost=0.29..2169.98 rows=2715 width=0) (actual time=0.474..3.377 rows=2717.00 loops=1)
+         Index Cond: ((occurred_at >= '2026-08-10 05:30:00+05:30'::timestamp with time zone) AND (occurred_at < '2026-08-11 05:30:00+05:30'::timestamp with time zone))
+         Heap Fetches: 0
+         Index Searches: 1
+         Buffers: shared hit=325
+ Planning Time: 0.152 ms
+ Execution Time: 3.543 ms
+
+
+=== Q3 search inside JSONB (GIN on details)
+                                                                                QUERY PLAN                                                                                 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate  (cost=12216.74..12216.75 rows=1 width=8) (actual time=80.686..96.046 rows=1.00 loops=1)
+   Buffers: shared hit=7540
+   ->  Gather  (cost=12216.53..12216.74 rows=2 width=8) (actual time=80.364..96.034 rows=3.00 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=7540
+         ->  Partial Aggregate  (cost=11216.53..11216.54 rows=1 width=8) (actual time=37.845..37.849 rows=1.00 loops=3)
+               Buffers: shared hit=7540
+               ->  Parallel Append  (cost=0.00..11216.51 rows=9 width=0) (actual time=28.461..37.838 rows=10.00 loops=3)
+                     Buffers: shared hit=7540
+                     ->  Seq Scan on security_event_2026_11 security_event_7  (cost=0.00..0.00 rows=1 width=0) (actual time=0.128..0.128 rows=0.00 loops=1)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     ->  Seq Scan on security_event_2026_12 security_event_8  (cost=0.00..0.00 rows=1 width=0) (actual time=0.050..0.050 rows=0.00 loops=1)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     ->  Seq Scan on security_event_default security_event_9  (cost=0.00..0.00 rows=1 width=0) (actual time=0.052..0.053 rows=0.00 loops=1)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     ->  Parallel Seq Scan on security_event_2026_07 security_event_3  (cost=0.00..1890.62 rows=1 width=0) (actual time=8.016..8.021 rows=5.00 loops=3)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                           Rows Removed by Filter: 28085
+                           Buffers: shared hit=1271
+                     ->  Parallel Seq Scan on security_event_2026_08 security_event_4  (cost=0.00..1890.51 rows=1 width=0) (actual time=9.532..9.532 rows=0.00 loops=2)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                           Rows Removed by Filter: 42127
+                           Buffers: shared hit=1271
+                     ->  Parallel Seq Scan on security_event_2026_05 security_event_1  (cost=0.00..1889.51 rows=1 width=0) (actual time=18.320..18.320 rows=0.00 loops=1)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                           Rows Removed by Filter: 84254
+                           Buffers: shared hit=1270
+                     ->  Parallel Seq Scan on security_event_2026_10 security_event_6  (cost=0.00..1887.63 rows=1 width=0) (actual time=22.929..22.938 rows=15.00 loops=1)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                           Rows Removed by Filter: 84119
+                           Buffers: shared hit=1269
+                     ->  Parallel Seq Scan on security_event_2026_09 security_event_5  (cost=0.00..1829.65 rows=1 width=0) (actual time=14.359..14.359 rows=0.00 loops=1)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                           Rows Removed by Filter: 81552
+                           Buffers: shared hit=1230
+                     ->  Parallel Seq Scan on security_event_2026_06 security_event_2  (cost=0.00..1828.54 rows=1 width=0) (actual time=14.495..14.495 rows=0.00 loops=1)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                           Rows Removed by Filter: 81537
+                           Buffers: shared hit=1229
+ Planning:
+   Buffers: shared hit=3
+ Planning Time: 0.584 ms
+ Execution Time: 96.093 ms
+
+                                                                                QUERY PLAN                                                                                 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate  (cost=12216.74..12216.75 rows=1 width=8) (actual time=123.119..135.188 rows=1.00 loops=1)
+   Buffers: shared hit=7540
+   ->  Gather  (cost=12216.53..12216.74 rows=2 width=8) (actual time=122.704..135.177 rows=3.00 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=7540
+         ->  Partial Aggregate  (cost=11216.53..11216.54 rows=1 width=8) (actual time=53.667..53.672 rows=1.00 loops=3)
+               Buffers: shared hit=7540
+               ->  Parallel Append  (cost=0.00..11216.51 rows=9 width=0) (actual time=32.460..53.660 rows=10.00 loops=3)
+                     Buffers: shared hit=7540
+                     ->  Seq Scan on security_event_2026_11 security_event_7  (cost=0.00..0.00 rows=1 width=0) (actual time=0.049..0.049 rows=0.00 loops=1)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     ->  Seq Scan on security_event_2026_12 security_event_8  (cost=0.00..0.00 rows=1 width=0) (actual time=0.018..0.018 rows=0.00 loops=1)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     ->  Seq Scan on security_event_default security_event_9  (cost=0.00..0.00 rows=1 width=0) (actual time=0.021..0.022 rows=0.00 loops=1)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                     ->  Parallel Seq Scan on security_event_2026_07 security_event_3  (cost=0.00..1890.62 rows=1 width=0) (actual time=14.665..14.671 rows=5.00 loops=3)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                           Rows Removed by Filter: 28085
+                           Buffers: shared hit=1271
+                     ->  Parallel Seq Scan on security_event_2026_08 security_event_4  (cost=0.00..1890.51 rows=1 width=0) (actual time=18.363..18.363 rows=0.00 loops=2)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                           Rows Removed by Filter: 42127
+                           Buffers: shared hit=1271
+                     ->  Parallel Seq Scan on security_event_2026_05 security_event_1  (cost=0.00..1889.51 rows=1 width=0) (actual time=21.688..21.688 rows=0.00 loops=1)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                           Rows Removed by Filter: 84254
+                           Buffers: shared hit=1270
+                     ->  Parallel Seq Scan on security_event_2026_10 security_event_6  (cost=0.00..1887.63 rows=1 width=0) (actual time=18.471..18.475 rows=15.00 loops=1)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                           Rows Removed by Filter: 84119
+                           Buffers: shared hit=1269
+                     ->  Parallel Seq Scan on security_event_2026_09 security_event_5  (cost=0.00..1829.65 rows=1 width=0) (actual time=13.990..13.991 rows=0.00 loops=1)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                           Rows Removed by Filter: 81552
+                           Buffers: shared hit=1230
+                     ->  Parallel Seq Scan on security_event_2026_06 security_event_2  (cost=0.00..1828.54 rows=1 width=0) (actual time=25.944..25.944 rows=0.00 loops=1)
+                           Filter: (details @> '{"device": "unknown", "country": "RU"}'::jsonb)
+                           Rows Removed by Filter: 81537
+                           Buffers: shared hit=1229
+ Planning:
+   Buffers: shared hit=3
+ Planning Time: 0.482 ms
+ Execution Time: 135.247 ms
+
+
+=== Q4 live grants of one account (partial B-tree WHERE revoked_at IS NULL)
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on role_assignment  (cost=4.29..9.32 rows=2 width=64) (actual time=0.131..0.140 rows=2.00 loops=1)
+   Recheck Cond: ((account_id = 100) AND (revoked_at IS NULL))
+   Heap Blocks: exact=2
+   Buffers: shared hit=4
+   ->  Bitmap Index Scan on uq_assignment_live  (cost=0.00..4.29 rows=2 width=0) (actual time=0.091..0.092 rows=2.00 loops=1)
+         Index Cond: (account_id = 100)
+         Index Searches: 1
+         Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=56
+ Planning Time: 5.192 ms
+ Execution Time: 0.181 ms
+
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on role_assignment  (cost=4.29..9.32 rows=2 width=64) (actual time=0.015..0.017 rows=2.00 loops=1)
+   Recheck Cond: ((account_id = 100) AND (revoked_at IS NULL))
+   Heap Blocks: exact=2
+   Buffers: shared hit=4
+   ->  Bitmap Index Scan on uq_assignment_live  (cost=0.00..4.29 rows=2 width=0) (actual time=0.009..0.009 rows=2.00 loops=1)
+         Index Cond: (account_id = 100)
+         Index Searches: 1
+         Buffers: shared hit=2
+ Planning Time: 0.063 ms
+ Execution Time: 0.030 ms
+
+
+=== Q5 dormant account report (partial B-tree on last_login_at WHERE status = active)
+                                                    QUERY PLAN                                                     
+-------------------------------------------------------------------------------------------------------------------
+ Seq Scan on account  (cost=0.00..16.91 rows=6 width=14) (actual time=0.046..0.051 rows=6.00 loops=1)
+   Filter: ((last_login_at < '2026-08-01 05:30:00+05:30'::timestamp with time zone) AND (status = 'active'::text))
+   Rows Removed by Filter: 514
+   Buffers: shared hit=8
+ Planning:
+   Buffers: shared hit=53
+ Planning Time: 1.481 ms
+ Execution Time: 0.060 ms
+
+                                                    QUERY PLAN                                                     
+-------------------------------------------------------------------------------------------------------------------
+ Seq Scan on account  (cost=0.00..16.91 rows=6 width=14) (actual time=0.030..0.032 rows=6.00 loops=1)
+   Filter: ((last_login_at < '2026-08-01 05:30:00+05:30'::timestamp with time zone) AND (status = 'active'::text))
+   Rows Removed by Filter: 514
+   Buffers: shared hit=8
+ Planning Time: 0.030 ms
+ Execution Time: 0.038 ms
+
+
+=== Q6 case-insensitive e-mail lookup (expression index lower(email))
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Seq Scan on person  (cost=0.00..9.00 rows=1 width=19) (actual time=0.041..0.080 rows=1.00 loops=1)
+   Filter: (lower(email) = 'e0077@dwarpal.example'::text)
+   Rows Removed by Filter: 199
+   Buffers: shared hit=6
+ Planning:
+   Buffers: shared hit=3
+ Planning Time: 0.058 ms
+ Execution Time: 0.089 ms
+
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Seq Scan on person  (cost=0.00..9.00 rows=1 width=19) (actual time=0.032..0.066 rows=1.00 loops=1)
+   Filter: (lower(email) = 'e0077@dwarpal.example'::text)
+   Rows Removed by Filter: 199
+   Buffers: shared hit=6
+ Planning Time: 0.034 ms
+ Execution Time: 0.073 ms
+

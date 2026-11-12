@@ -183,4 +183,35 @@ CREATE TABLE audit_log (
 );
 COMMENT ON TABLE audit_log IS 'Append-only, SHA-256 hash-chained record of changes to person, account and role_assignment.';
 
+-- =============================================================================================
+-- phase 4: access review (periodic recertification of role assignments)
+-- A campaign is a review period. Each review_item asks one reviewer to decide, for one assignment,
+-- whether the access is still needed ('keep') or not ('revoke'). Row-level security on review_item
+-- (so a reviewer sees only their own items) is set up in 07_roles.sql.
+-- =============================================================================================
+CREATE TABLE review_campaign (
+    campaign_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name        text   NOT NULL,
+    starts_on   date   NOT NULL,
+    ends_on     date   NOT NULL,
+    CONSTRAINT uq_review_campaign_name UNIQUE (name),
+    CONSTRAINT ck_review_campaign_dates CHECK (ends_on >= starts_on)
+);
+COMMENT ON TABLE review_campaign IS 'One access-review period (e.g. "2026 Q4 recertification"); owns many review_items.';
+
+CREATE TABLE review_item (
+    item_id       bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    campaign_id   bigint      NOT NULL,
+    assignment_id bigint      NOT NULL,
+    reviewer_id   bigint      NOT NULL,
+    decision      text        NULL,
+    decided_at    timestamptz NULL,
+    CONSTRAINT fk_review_item_campaign_id   FOREIGN KEY (campaign_id)   REFERENCES review_campaign (campaign_id),
+    CONSTRAINT fk_review_item_assignment_id FOREIGN KEY (assignment_id) REFERENCES role_assignment (assignment_id),
+    CONSTRAINT fk_review_item_reviewer_id   FOREIGN KEY (reviewer_id)   REFERENCES person (person_id),
+    CONSTRAINT uq_review_item_campaign_assignment UNIQUE (campaign_id, assignment_id),
+    CONSTRAINT ck_review_item_decision CHECK (decision IN ('keep', 'revoke'))
+);
+COMMENT ON TABLE review_item IS 'One reviewer decision on one role assignment within a campaign; decision is NULL until the reviewer decides.';
+
 COMMIT;

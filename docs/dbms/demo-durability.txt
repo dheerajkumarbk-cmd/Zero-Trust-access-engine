@@ -1,0 +1,76 @@
+DEMO 4 - DURABILITY (write-ahead log)
+Database: dwarpal_dbms_restore (restore copy of the iga schema). LSNs, file names and times come from this one run.
+Reproduce the safe part: db/iga/demos/durability.sh safe dwarpal_dbms_restore
+PostgreSQL was NOT stopped, killed or restarted while producing this file.
+
+=== Part 1: safe part (no restart) ===
+Database: dwarpal_dbms_restore    Run at: 2026-11-12 19:56:59 IST    mode: safe
+--- durability-related settings
+        name        |    setting    
+--------------------+---------------
+ fsync              | on
+ full_page_writes   | on
+ synchronous_commit | on
+ wal_level          | replica
+ wal_sync_method    | open_datasync
+(5 rows)
+
+--- last checkpoint: crash recovery would start replaying the WAL at redo_lsn
+ checkpoint_lsn |  redo_lsn  |      redo_wal_file       |      checkpoint_time      
+----------------+------------+--------------------------+---------------------------
+ 0/1C11FE80     | 0/1B7D9DE0 | 00000001000000000000001B | 2026-11-12 19:51:45+05:30
+(1 row)
+
+--- WAL position before the insert: 0/1C8A3F50 (file 00000001000000000000001C )
+--- inside the transaction the change is only in the WAL buffers (insert position): 0/1C8A4678
+--- COMMIT returned: with synchronous_commit=on the commit record was flushed to disk first
+ lsn_after  |      wal_file_after      | flushed_to_disk_lsn | wal_bytes_written_by_the_insert 
+------------+--------------------------+---------------------+---------------------------------
+ 0/1C8A46A0 | 00000001000000000000001C | 0/1C8A46A0          |                            1872
+(1 row)
+
+ dept_id |          name          
+---------+------------------------
+      14 | DEMO_DURABILITY_MARKER
+(1 row)
+
+ marker_rows_left 
+------------------
+                0
+(1 row)
+
+
+=== Part 2: Restart step: TO BE RUN BY THE OWNER ===
+Not executed by any script. Run these by hand, from an Administrator prompt, after durability.sh step1:
+
+    db/iga/demos/durability.sh step1                  (insert + commit the marker row; note the LSNs)
+    net stop postgresql-x64-18                         (service name on this machine; or kill postgres.exe for a crash)
+    net start postgresql-x64-18
+    db/iga/demos/durability.sh step3                  (expected: one row, DEMO_DURABILITY_MARKER, "SURVIVED THE RESTART")
+    db/iga/demos/durability.sh cleanup
+
+Result of the owner's run: ____________________________________________
+
+=== Part 3: why the committed row survives (the write-ahead log) ===
+Changing a table page in memory is not durable: the page may be written to disk much later, and a
+power cut or crash in between would lose the change. PostgreSQL therefore follows the write-ahead
+rule: before any data page change may reach disk, a WAL record describing the change (the "redo"
+information) must be written to the WAL, an append-only log on disk.
+
+When a transaction commits, PostgreSQL appends a COMMIT record to the WAL and flushes the WAL to
+disk (fsync) BEFORE it tells the client the commit succeeded. That is what synchronous_commit = on
+and fsync = on above mean: once COMMIT returns, the record is on stable storage, even though the
+modified data pages may still be only in shared memory. The sequential WAL write is also cheap
+compared with writing many scattered data pages, which is why the data pages can be written lazily
+by the background writer and by checkpoints. The LSN (log sequence number) in Part 1 is the byte
+position in the WAL; it advanced for the one committed insert (the figure includes any other sessions writing at the same time, since the WAL is shared), and the
+flushed LSN caught up with the current LSN at COMMIT.
+
+After a crash, the server starts in recovery. It reads pg_control to find the last checkpoint, then
+replays (redoes) every WAL record from that checkpoint's redo point forward, re-applying changes
+whose data pages never reached disk. Transactions whose COMMIT record is in the WAL are restored;
+transactions without one are treated as aborted. A checkpoint is the point at which all dirty pages
+up to a known LSN have been flushed, so recovery never needs to look further back than that.
+full_page_writes = on protects against torn pages: the first change to a page after a checkpoint
+logs the whole page image, so recovery can repair a half-written page. wal_level = replica is the
+default level, enough for crash recovery and for physical replication or backups.

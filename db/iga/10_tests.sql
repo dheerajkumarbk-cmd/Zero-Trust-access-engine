@@ -775,25 +775,47 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------------------------
--- 19  PLACEHOLDER: phase-3 view counts (another worker fills this in when the views and seed exist).
---     SKIP while iga.v_orphan_accounts is missing. When present, only selectability is checked for now;
---     replace the marked block with assertions against the planted faults in 08_seed.sql.
+-- 19  seed + views: table counts and the planted faults (08_seed.sql) are returned exactly.
+--     SKIP when a view is missing or the seed is not loaded.
 -- ---------------------------------------------------------------------------------------------
 DO $$
-DECLARE v_n bigint; st text := 'FAIL'; dt text;
+DECLARE
+  v_m text; v_actual bigint; v_bad text := ''; r record; st text := 'PASS'; dt text;
 BEGIN
-  IF to_regclass('iga.v_orphan_accounts') IS NULL THEN
-    INSERT INTO test_result VALUES (19, 'phase-3 views return the planted faults', 'SKIP', 'not built: iga.v_orphan_accounts'); RETURN;
+  v_m := pg_temp.missing('iga.v_effective_access', 'iga.v_orphan_accounts', 'iga.v_leaver_residual_access',
+                         'iga.v_sod_violations', 'iga.v_dormant_accounts', 'iga.v_privileged_overdue',
+                         'iga.v_unowned_service_accounts', 'iga.mv_access_summary');
+  IF v_m IS NOT NULL THEN
+    INSERT INTO test_result VALUES (19, 'seed counts and planted faults', 'SKIP', 'not built: ' || v_m); RETURN;
+  END IF;
+  IF (SELECT count(*) FROM iga.person) = 0 THEN
+    INSERT INTO test_result VALUES (19, 'seed counts and planted faults', 'SKIP', 'seed not loaded'); RETURN;
   END IF;
   BEGIN
-    -- >>> PLACEHOLDER BLOCK: add count assertions for v_orphan_accounts and the other phase-3 views here <<<
-    EXECUTE 'SELECT count(*) FROM iga.v_orphan_accounts' INTO v_n;
-    st := 'PASS'; dt := 'placeholder: view is selectable (' || v_n || ' rows); planted-fault counts not asserted yet';
-    -- >>> END PLACEHOLDER BLOCK <<<
+    FOR r IN
+      SELECT * FROM (VALUES
+        ('person',                     'SELECT count(*) FROM iga.person',                                  200::bigint),
+        ('account',                    'SELECT count(*) FROM iga.account',                                 520),
+        ('role_assignment',            'SELECT count(*) FROM iga.role_assignment',                         900),
+        ('security_event',             'SELECT count(*) FROM iga.security_event',                          500000),
+        ('v_orphan_accounts',          'SELECT count(*) FROM iga.v_orphan_accounts',                       6),
+        ('v_leaver_residual persons',  'SELECT count(DISTINCT person_id) FROM iga.v_leaver_residual_access', 4),
+        ('v_sod_violations',           'SELECT count(*) FROM iga.v_sod_violations',                        3),
+        ('v_dormant_accounts',         'SELECT count(*) FROM iga.v_dormant_accounts',                      12),
+        ('v_unowned_service_accounts', 'SELECT count(*) FROM iga.v_unowned_service_accounts',              3),
+        ('v_privileged_overdue',       'SELECT count(*) FROM iga.v_privileged_overdue',                    2)
+      ) AS t(label, q, expected)
+    LOOP
+      EXECUTE r.q INTO v_actual;
+      IF v_actual <> r.expected THEN
+        v_bad := v_bad || format(' %s=%s (expected %s);', r.label, v_actual, r.expected);
+      END IF;
+    END LOOP;
+    IF v_bad <> '' THEN st := 'FAIL'; dt := btrim(v_bad); END IF;
   EXCEPTION WHEN OTHERS THEN
     st := 'FAIL'; dt := 'unexpected ' || SQLSTATE || ': ' || SQLERRM;
   END;
-  INSERT INTO test_result VALUES (19, 'phase-3 views return the planted faults', st, dt);
+  INSERT INTO test_result VALUES (19, 'seed counts and planted faults', st, dt);
 END $$;
 
 -- ---------------------------------------------------------------------------------------------

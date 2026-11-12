@@ -1,0 +1,92 @@
+Pager usage is off.
+Null display is "(null)".
+SET
+SET
+BEGIN
+CREATE FUNCTION
+CREATE TABLE
+=== 0. Fixture (rolled back at the end): 1 department, 1 system, 2 roles, 3 people, 1 account, 2 assignments, 1 campaign, 2 review items
+INSERT 0 1
+INSERT 0 1
+INSERT 0 2
+INSERT 0 1
+INSERT 0 3
+INSERT 0 1
+INSERT 0 2
+INSERT 0 1
+INSERT 0 2
+ review_items_total | for_a | for_b 
+--------------------+-------+-------
+                  2 |     1 |     1
+(1 row)
+
+INSERT 0 9
+INSERT 0 1
+INSERT 0 7
+INSERT 0 8
+INSERT 0 11
+
+=== RESULTS (verdict PASS when the actual outcome starts with the expected one) ===
+ n  |  role_name   |                       what                        |  expected  | verdict |                                           actual                                           
+----+--------------+---------------------------------------------------+------------+---------+--------------------------------------------------------------------------------------------
+  1 | iga_app      | DELETE FROM audit_log                             | 42501      | PASS    | 42501 permission denied for table audit_log
+  2 | iga_app      | TRUNCATE audit_log                                | 42501      | PASS    | 42501 permission denied for table audit_log
+  3 | iga_app      | SELECT FROM audit_log                             | 42501      | PASS    | 42501 permission denied for table audit_log
+  4 | iga_app      | INSERT INTO person (direct table write)           | 42501      | PASS    | 42501 permission denied for table person
+  5 | iga_app      | SELECT FROM person (no direct table read)         | 42501      | PASS    | 42501 permission denied for table person
+  6 | iga_app      | call iga.audit_write (forge an audit row)         | 42501      | PASS    | 42501 permission denied for function audit_write
+  7 | iga_app      | CALL iga.joiner(...) (SECURITY DEFINER)           | ok         | PASS    | ok, rows=1
+  8 | iga_app      | CALL iga.leaver(person C)                         | ok         | PASS    | ok, rows=0
+  9 | iga_app      | SELECT FROM review_item                           | 42501      | PASS    | 42501 permission denied for table review_item
+ 10 | iga_app      | SELECT FROM view v_dormant_accounts               | ok         | PASS    | ok, rows=1
+ 11 | iga_auditor  | SELECT FROM audit_log                             | ok         | PASS    | ok, rows=6
+ 12 | iga_auditor  | SELECT FROM person                                | ok         | PASS    | ok, rows=3
+ 13 | iga_auditor  | SELECT verify_audit_chain()                       | ok         | PASS    | ok, rows=1
+ 14 | iga_auditor  | sees ALL review items (rows=2)                    | ok, rows=2 | PASS    | ok, rows=2
+ 15 | iga_auditor  | DELETE FROM audit_log                             | 42501      | PASS    | 42501 permission denied for table audit_log
+ 16 | iga_auditor  | UPDATE person                                     | 42501      | PASS    | 42501 permission denied for table person
+ 17 | iga_auditor  | CALL iga.leaver(...)                              | 42501      | PASS    | 42501 permission denied for procedure leaver
+ 18 | iga_admin    | SELECT FROM audit_log                             | ok         | PASS    | ok, rows=6
+ 19 | iga_admin    | UPDATE audit_log                                  | 42501      | PASS    | 42501 permission denied for table audit_log
+ 20 | iga_admin    | DELETE FROM audit_log                             | 42501      | PASS    | 42501 permission denied for table audit_log
+ 21 | iga_admin    | INSERT INTO audit_log                             | 42501      | PASS    | 42501 permission denied for table audit_log
+ 22 | iga_admin    | TRUNCATE audit_log                                | 42501      | PASS    | 42501 permission denied for table audit_log
+ 23 | iga_admin    | UPDATE department (ordinary table)                | ok         | PASS    | ok, rows=1
+ 24 | iga_admin    | CREATE TABLE in schema iga                        | ok         | PASS    | ok, rows=0
+ 25 | iga_admin    | sees ALL review items (rows=2)                    | ok, rows=2 | PASS    | ok, rows=2
+ 26 | iga_reviewer | no iga.reviewer_id set: sees nothing              | ok, rows=0 | PASS    | ok, rows=0
+ 27 | iga_reviewer | as reviewer A: sees only A's item (rows=1)        | ok, rows=1 | PASS    | ok, rows=1
+ 28 | iga_reviewer | as reviewer B: sees only B's item (rows=1)        | ok, rows=1 | PASS    | ok, rows=1
+ 29 | iga_reviewer | A decides own item: keep                          | ok, rows=1 | PASS    | ok, rows=1
+ 30 | iga_reviewer | A tries to decide B's item: 0 rows (RLS hides it) | ok, rows=0 | PASS    | ok, rows=0
+ 31 | iga_reviewer | A tries to hand own item to B (column privilege)  | 42501      | PASS    | 42501 permission denied for table review_item
+ 32 | iga_reviewer | A sets an invalid decision (CHECK)                | 23514      | PASS    | 23514 new row for relation "review_item" violates check constraint "ck_review_item_decisio
+ 33 | iga_reviewer | INSERT a review item                              | 42501      | PASS    | 42501 permission denied for table review_item
+ 34 | iga_reviewer | DELETE a review item                              | 42501      | PASS    | 42501 permission denied for table review_item
+ 35 | iga_reviewer | SELECT FROM role_assignment (base table)          | 42501      | PASS    | 42501 permission denied for table role_assignment
+ 36 | iga_reviewer | SELECT FROM audit_log                             | 42501      | PASS    | 42501 permission denied for table audit_log
+(36 rows)
+
+ passed | failed 
+--------+--------
+     36 |      0
+(1 row)
+
+
+=== Policies on review_item (from pg_policies) ===
+   policyname    |  cmd   |       roles        |                                            qual                                            
+-----------------+--------+--------------------+--------------------------------------------------------------------------------------------
+ rv_admin_all    | ALL    | {iga_admin}        | true
+ rv_auditor_read | SELECT | {iga_auditor}      | true
+ rv_own_items    | ALL    | {iga_reviewer}     | (reviewer_id = (NULLIF(current_setting('iga.reviewer_id'::text, true), ''::text))::bigint)
+ rv_owner_all    | ALL    | {dwarpal_migrator} | true
+(4 rows)
+
+
+=== Fixture is rolled back: ===
+ROLLBACK
+ leftover_departments | leftover_campaigns 
+----------------------+--------------------
+                    0 |                  0
+(1 row)
+

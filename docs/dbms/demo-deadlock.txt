@@ -1,0 +1,69 @@
+DEMO 3 - DEADLOCK (opposite lock order)
+Database: dwarpal_dbms_restore (restore copy of the iga schema, built from 01..04). Timings, process ids, transaction ids, ids and ordering come from this one run.
+Reproduce: db/iga/demos/deadlock.sh dwarpal_dbms_restore
+
+Database: dwarpal_dbms_restore    Run at: 2026-11-12 19:56:34 IST
+--- the server waits this long on a lock before it checks for a deadlock:
+ deadlock_timeout 
+------------------
+ 1s
+(1 row)
+
+--- before: both people are in department DEMO_DL_DEPT_1
+ employee_no |      dept      
+-------------+----------------
+ DEMO-DL-X   | DEMO_DL_DEPT_1
+ DEMO-DL-Y   | DEMO_DL_DEPT_1
+(2 rows)
+
+
+Session A locks X then moves Y.  Session B locks Y then moves X.  Started together.
+--- session A output
+SET
+[session A] BEGIN
+BEGIN
+[session A] locking DEMO-DL-X (person_id 35) with SELECT ... FOR UPDATE
+        35
+
+[session A] holding the lock on DEMO-DL-X, sleeping 2 s
+[session A] CALL mover on DEMO-DL-Y (person_id 36); waits for the lock held by the other session
+CALL
+[session A] COMMIT
+COMMIT
+--- session B output
+SET
+[session B] BEGIN
+BEGIN
+[session B] locking DEMO-DL-Y (person_id 36) with SELECT ... FOR UPDATE
+        36
+
+[session B] holding the lock on DEMO-DL-Y, sleeping 2 s
+[session B] CALL mover on DEMO-DL-X (person_id 35); waits for the lock held by the other session
+psql:C:/Users/Admin/dwr/l5-try/db/iga/demos/deadlock_session.sql:20: ERROR:  40P01: deadlock detected
+DETAIL:  Process 9088 waits for ShareLock on transaction 13654; blocked by process 27120.
+Process 27120 waits for ShareLock on transaction 13653; blocked by process 9088.
+HINT:  See server log for query details.
+CONTEXT:  while locking tuple (0,36) in relation "person"
+SQL statement "SELECT p.dept_id, p.status
+                                      FROM person p
+     WHERE p.person_id = p_person_id
+       FOR UPDATE"
+PL/pgSQL function mover(bigint,bigint) line 6 at SQL statement
+LOCATION:  DeadLockReport, deadlock.c:1138
+[session B] COMMIT
+ROLLBACK
+
+--- after: only the session that was NOT aborted moved its person
+ employee_no |      dept      
+-------------+----------------
+ DEMO-DL-X   | DEMO_DL_DEPT_1
+ DEMO-DL-Y   | DEMO_DL_DEPT_2
+(2 rows)
+
+ employee_no | event_type |    old_dept    |    new_dept    
+-------------+------------+----------------+----------------
+ DEMO-DL-Y   | mover      | DEMO_DL_DEPT_1 | DEMO_DL_DEPT_2
+(1 row)
+
+
+Fixture removed.
