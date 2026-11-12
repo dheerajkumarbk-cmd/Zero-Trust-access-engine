@@ -162,6 +162,50 @@ CREATE TRIGGER trg_leaver_cascade
     WHEN (NEW.status = 'terminated' AND OLD.status IS DISTINCT FROM 'terminated')
     EXECUTE FUNCTION trg_leaver_cascade();
 
+
+-- ---------------------------------------------------------------------------
+-- Segregation of duties (phase 5, spec test 4): a live grant is rejected when the same account already holds
+-- a live role that forms a rule pair (sod_rule) with the new role. Enforced here, in the database, so that no
+-- application path (procedure, script, manual SQL) can bypass it. A per-account advisory lock serialises
+-- concurrent grants, otherwise two sessions could each pass the check and both insert.
+-- Existing violations (the seed plants three) are reported by v_sod_violations; they are not blocked retroactively.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION trg_sod_check()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = iga, pg_temp
+AS $$
+DECLARE
+    v_other bigint;
+BEGIN
+    IF NEW.revoked_at IS NOT NULL OR (NEW.valid_to IS NOT NULL AND NEW.valid_to <= now()) THEN
+        RETURN NEW;  -- not a live grant: nothing to protect
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtext('iga.sod_check'), NEW.account_id::int);
+    SELECT ra.role_id
+      INTO v_other
+      FROM iga.role_assignment ra
+      JOIN iga.sod_rule sr
+        ON (sr.role_a = NEW.role_id AND sr.role_b = ra.role_id)
+        OR (sr.role_b = NEW.role_id AND sr.role_a = ra.role_id)
+     WHERE ra.account_id = NEW.account_id
+       AND ra.revoked_at IS NULL
+       AND (ra.valid_to IS NULL OR ra.valid_to > now())
+       AND ra.assignment_id IS DISTINCT FROM NEW.assignment_id
+     LIMIT 1;
+    IF FOUND THEN
+        RAISE EXCEPTION 'segregation of duties: role % conflicts with live role % on account %',
+            NEW.role_id, v_other, NEW.account_id USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_sod_check ON role_assignment;
+CREATE TRIGGER trg_sod_check
+    BEFORE INSERT OR UPDATE OF role_id, revoked_at, valid_to ON role_assignment
+    FOR EACH ROW EXECUTE FUNCTION trg_sod_check();
 -- ---------------------------------------------------------------------------
 -- Privileges: nobody except the owner may change audit rows or call audit_write
 -- directly (the triggers call it as the owner). Application roles come in 07.

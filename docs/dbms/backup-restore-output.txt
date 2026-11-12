@@ -1,11 +1,12 @@
 === 1. Logical backup of schema iga from dwarpal_dbms (custom format, compressed)
-dump size (bytes): 11582426
-table of contents entries: 319
+dump size (bytes): 11593942
+table of contents entries: 345
 
 === 2. Restore into a NEW empty schema in dwarpal_dbms_restore (old demo schema dropped first)
-tables with data restored: 23
+tables with data restored: 25
 
 === 3. Row counts: source | restored
+access_request               0        0  match
 account                    520      520  match
 audit_log                 1898     1898  match
 department                   8        8  match
@@ -13,6 +14,7 @@ dept_birthright_role        16       16  match
 entitlement                120      120  match
 lifecycle_event             15       15  match
 person                     200      200  match
+privileged_session           0        0  match
 review_campaign              0        0  match
 review_item                  0        0  match
 role_assignment            900      900  match
@@ -57,11 +59,11 @@ ALL ROW COUNTS MATCH AFTER RECOVERY
 === 6. Restored copy rebuilt with the same objects? functions / views / indexes
  functions | views | indexes 
 -----------+-------+---------
-        11 |     7 |      68
+        12 |     7 |      71
 (1 row)
 
  functions | views | indexes 
 -----------+-------+---------
-        11 |     7 |      68
+        12 |     7 |      71
 (1 row)
 

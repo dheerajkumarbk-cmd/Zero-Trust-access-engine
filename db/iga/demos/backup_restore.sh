@@ -23,7 +23,8 @@ UNION ALL SELECT 'role_entitlement|'||count(*) FROM iga.role_entitlement UNION A
 UNION ALL SELECT 'sod_rule|'||count(*) FROM iga.sod_rule UNION ALL SELECT 'dept_birthright_role|'||count(*) FROM iga.dept_birthright_role
 UNION ALL SELECT 'lifecycle_event|'||count(*) FROM iga.lifecycle_event UNION ALL SELECT 'security_event|'||count(*) FROM iga.security_event
 UNION ALL SELECT 'audit_log|'||count(*) FROM iga.audit_log UNION ALL SELECT 'review_campaign|'||count(*) FROM iga.review_campaign
-UNION ALL SELECT 'review_item|'||count(*) FROM iga.review_item ORDER BY 1" -t -A -q; }
+UNION ALL SELECT 'review_item|'||count(*) FROM iga.review_item
+UNION ALL SELECT 'access_request|'||count(*) FROM iga.access_request UNION ALL SELECT 'privileged_session|'||count(*) FROM iga.privileged_session ORDER BY 1" -t -A -q; }
 
 echo "=== 1. Logical backup of schema iga from $SRC (custom format, compressed)"
 pg pg_dump -d "$SRC" -n iga -Fc --no-owner --enable-row-security -f "$DUMP" || exit 1

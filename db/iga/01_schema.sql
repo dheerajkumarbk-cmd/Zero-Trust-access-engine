@@ -214,4 +214,51 @@ CREATE TABLE review_item (
 );
 COMMENT ON TABLE review_item IS 'One reviewer decision on one role assignment within a campaign; decision is NULL until the reviewer decides.';
 
+
+-- ---------------------------------------------------------------- phase 5 tables (spec section 3.1, stretch)
+-- btree_gist lets an exclusion constraint combine equality on a bigint with overlap on a range.
+CREATE EXTENSION IF NOT EXISTS btree_gist SCHEMA public;
+
+CREATE TABLE access_request (
+    request_id    bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    requester_id  bigint      NOT NULL,
+    account_id    bigint      NOT NULL,
+    role_id       bigint      NOT NULL,
+    justification text        NOT NULL,
+    status        text        NOT NULL DEFAULT 'pending',
+    decided_by    bigint      NULL,
+    decided_at    timestamptz NULL,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT fk_access_request_requester_id FOREIGN KEY (requester_id) REFERENCES person (person_id),
+    CONSTRAINT fk_access_request_account_id   FOREIGN KEY (account_id)   REFERENCES account (account_id),
+    CONSTRAINT fk_access_request_role_id      FOREIGN KEY (role_id)      REFERENCES role (role_id),
+    CONSTRAINT fk_access_request_decided_by   FOREIGN KEY (decided_by)   REFERENCES person (person_id),
+    CONSTRAINT ck_access_request_status CHECK (status IN ('pending', 'approved', 'rejected', 'withdrawn')),
+    -- nobody decides their own request
+    CONSTRAINT ck_access_request_no_self_approval CHECK (decided_by IS NULL OR decided_by <> requester_id),
+    -- a decided request names who decided and when; a pending one names neither
+    CONSTRAINT ck_access_request_decision CHECK (
+        (status IN ('pending', 'withdrawn') AND decided_by IS NULL AND decided_at IS NULL)
+     OR (status IN ('approved', 'rejected') AND decided_by IS NOT NULL AND decided_at IS NOT NULL))
+);
+COMMENT ON TABLE access_request IS 'A request for a role on an account; the decider must be a different person (CHECK).';
+ALTER TABLE role_assignment ADD CONSTRAINT fk_role_assignment_request_id
+    FOREIGN KEY (request_id) REFERENCES access_request (request_id);
+
+CREATE TABLE privileged_session (
+    session_id  bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    account_id  bigint      NOT NULL,
+    role_id     bigint      NOT NULL,
+    approved_by bigint      NOT NULL,
+    reason      text        NOT NULL,
+    during      tstzrange   NOT NULL,
+    ended_at    timestamptz NULL,
+    CONSTRAINT fk_privileged_session_account_id  FOREIGN KEY (account_id)  REFERENCES account (account_id),
+    CONSTRAINT fk_privileged_session_role_id     FOREIGN KEY (role_id)     REFERENCES role (role_id),
+    CONSTRAINT fk_privileged_session_approved_by FOREIGN KEY (approved_by) REFERENCES person (person_id),
+    CONSTRAINT ck_privileged_session_range CHECK (NOT isempty(during) AND lower(during) IS NOT NULL AND upper(during) IS NOT NULL),
+    -- one account cannot have two overlapping privileged sessions (ended sessions no longer count)
+    CONSTRAINT ex_privileged_session_no_overlap EXCLUDE USING gist (account_id WITH =, during WITH &&) WHERE (ended_at IS NULL)
+);
+COMMENT ON TABLE privileged_session IS 'Time-boxed elevated access for one account; an EXCLUDE constraint forbids overlapping open sessions.';
 COMMIT;

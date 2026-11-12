@@ -1,0 +1,20 @@
+PASS 1 person end_date before hire_date rejected
+PASS 2 duplicate username in one system rejected
+PASS 3 grant to terminated person rejected
+PASS 4 segregation-of-duties grant rejected
+PASS 5 overlapping privileged sessions rejected
+PASS 6 self-approved request rejected
+PASS 7 joiner with bad role leaves no rows
+PASS 8 leaver leaves no residual access
+PASS 9 UPDATE/DELETE on audit_log rejected
+PASS 10 altered audit row is found by verifier
+PASS 11 one-month event query scans one partition
+PASS 12 reviewer cannot see another reviewer's items
+PASS 13 audit verification independent of session settings
+PASS 14 security_event partition layout
+PASS 15 one live grant per account and role
+PASS 16 terminating a person disables accounts (trg_leaver_cascade)
+PASS 17 mover swaps birthright roles
+PASS 18 TRUNCATE audit_log rejected
+PASS 19 seed counts and planted faults
+SUMMARY pass=19 fail=0 skip=0
