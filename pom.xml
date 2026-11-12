@@ -18,7 +18,7 @@
         <project.build.outputTimestamp>2026-11-02T00:00:00Z</project.build.outputTimestamp>
         <snakeyaml.version>2.7</snakeyaml.version>
         <postgresql.version>42.7.14</postgresql.version>
-        <junit.version>5.14.4</junit.version>
+        <junit.version>6.1.3</junit.version>
         <jacoco.version>0.8.16</jacoco.version>
         <spotbugs.plugin.version>4.10.5.0</spotbugs.plugin.version>
         <findsecbugs.version>1.14.0</findsecbugs.version>
