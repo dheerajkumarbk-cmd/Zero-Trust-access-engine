@@ -221,6 +221,18 @@ public final class EventStore implements EventSearch {
      * kind; a missing field counts as {@code -}).
      */
     public synchronized Counts counts(String query, Instant from, Instant to) {
+        return countsOf(query, from, to, c -> true);
+    }
+
+    @Override
+    public synchronized EventSearch.Counts counts(String query, Instant from, Instant to,
+                                                  java.util.function.Predicate<ChainedEvent> visible) {
+        Counts c = countsOf(query, from, to, Objects.requireNonNull(visible, "visible"));
+        return new EventSearch.Counts(c.groups().stream().map(g -> new EventSearch.Group(g.values(), g.count())).toList(),
+                c.matched(), c.truncated(), c.problem());
+    }
+
+    private Counts countsOf(String query, Instant from, Instant to, java.util.function.Predicate<ChainedEvent> visible) {
         Query q;
         try {
             EventSearch.check(query, from, to, 1);
@@ -245,8 +257,9 @@ public final class EventStore implements EventSearch {
                 stopped = true;
                 break;
             }
-            SecurityEvent e = byTime.get(k).event();
-            if (!q.matches(e)) {
+            ChainedEvent chained = byTime.get(k);
+            SecurityEvent e = chained.event();
+            if (!q.matches(e) || !visible.test(chained)) {
                 continue;
             }
             matched++;

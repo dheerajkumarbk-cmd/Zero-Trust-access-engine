@@ -1,6 +1,5 @@
 package dev.dwarpal.sim;
 
-import dev.dwarpal.Fixtures;
 import dev.dwarpal.audit.AuditLog;
 import dev.dwarpal.audit.InMemoryAuditSink;
 import dev.dwarpal.behavior.FailureLog;
@@ -27,7 +26,6 @@ import dev.dwarpal.engine.DecisionPoint;
 import dev.dwarpal.engine.DenyListGate;
 import dev.dwarpal.engine.HoneytokenGate;
 import dev.dwarpal.engine.PolicyEngine;
-import dev.dwarpal.engine.PolicyEngineTest;
 import dev.dwarpal.pip.InMemoryDirectory;
 import dev.dwarpal.pip.SignalFeed;
 import dev.dwarpal.pip.ThreatIntel;
@@ -77,6 +75,11 @@ public final class SimOrganisation {
     public static final String CLOUD_ASN = "AS16509";
     public static final String SPRAY_IP = "198.51.100.66";
     public static final KeyPair ANALYST_ANA = Ed25519.generateKeyPair();
+    /** The lab's two administrators: they sign policy and playbook changes and approve privileged access. */
+    public static final KeyPair ADMIN_ADA = Ed25519.generateKeyPair();
+    public static final KeyPair ADMIN_RAY = Ed25519.generateKeyPair();
+    /** The sealed break-glass credential of account {@code bg-root} (in a company it sits in a safe, not in code). */
+    public static final KeyPair BREAK_GLASS_ROOT = Ed25519.generateKeyPair();
     public static final KeyPair ANALYST_BEN = Ed25519.generateKeyPair();
 
     private static final String[][] CITIES = {   // name, lat, lon
@@ -149,6 +152,9 @@ public final class SimOrganisation {
         }
     }
 
+    /** The console server's delegation key (the key ring trusts it for {@code CONSOLE_DELEGATE} only). */
+    public static final String CONSOLE_KEY_ID = "console-delegate";
+    public final KeyPair consoleKey = Ed25519.generateKeyPair();
     public final long seed;
     public final List<User> users;
     public final KeyRing keys;
@@ -187,8 +193,14 @@ public final class SimOrganisation {
             managed.add(u.laptop());
             managed.add(u.laptop2());
         }
-        ks.add(new TrustedKey(Fixtures.IDP_KEY_ID, KeyPurpose.IDENTITY_PROVIDER, "corp-idp", Fixtures.IDP.getPublic(),
+        ks.add(new TrustedKey(SimRequests.IDP_KEY_ID, KeyPurpose.IDENTITY_PROVIDER, "corp-idp", SimRequests.IDP.getPublic(),
                 from, to));
+        ks.add(new TrustedKey(CONSOLE_KEY_ID, KeyPurpose.CONSOLE_DELEGATE, "console", consoleKey.getPublic(), from, to));
+        ks.add(new TrustedKey("pol-ada", KeyPurpose.POLICY_SIGNER, "ada", ADMIN_ADA.getPublic(), from, to));
+        ks.add(new TrustedKey("pol-ray", KeyPurpose.POLICY_SIGNER, "ray", ADMIN_RAY.getPublic(), from, to));
+        ks.add(new TrustedKey("elev-ada", KeyPurpose.ELEVATION_APPROVER, "ada", ADMIN_ADA.getPublic(), from, to));
+        ks.add(new TrustedKey("elev-ray", KeyPurpose.ELEVATION_APPROVER, "ray", ADMIN_RAY.getPublic(), from, to));
+        ks.add(new TrustedKey("bg-root", KeyPurpose.BREAK_GLASS, "bg-root", BREAK_GLASS_ROOT.getPublic(), from, to));
         ks.add(new TrustedKey("soc-ana", KeyPurpose.SOC_ANALYST, "ana", ANALYST_ANA.getPublic(), from, to));
         ks.add(new TrustedKey("soc-ben", KeyPurpose.SOC_ANALYST, "ben", ANALYST_BEN.getPublic(), from, to));
         this.users = List.copyOf(us);
@@ -224,11 +236,11 @@ public final class SimOrganisation {
 
     /** The reference engine with the reference policy. */
     public PolicyEngine engine() {
-        return engine(PolicyEngineTest.POLICIES);
+        return engine(SimRequests.defaultPolicies());
     }
 
     /** The full live pipeline: learning, audit (into {@link #sink}), engine. */
-    public DecisionPoint pipeline(PolicyEngine engine) {
+    public DecisionPoint pipeline(DecisionPoint engine) {
         return DecisionPipeline.standard(engine, audit, history, trust, clock);
     }
 
@@ -300,8 +312,8 @@ public final class SimOrganisation {
         }
     }
 
-    private Fixtures.RequestBuilder login(User u, Instant t, String id) {
-        return Fixtures.request().id(id).at(t).subject(u.id()).device(u.laptop())
+    private SimRequests.Builder login(User u, Instant t, String id) {
+        return SimRequests.request().id(id).at(t).subject(u.id()).device(u.laptop())
                 .postureSignedBy(u.laptopKey(), "agent-" + u.laptop())
                 .network(u.kind() == Kind.ROAMER ? "100.100.7." + Math.floorMod(id.hashCode(), 250)
                                 : "100.64." + u.id().substring(1) + ".10",
@@ -346,7 +358,7 @@ public final class SimOrganisation {
         return s;
     }
 
-    private static void add(List<Step> s, User u, Scenario c, Fixtures.RequestBuilder b) {
+    private static void add(List<Step> s, User u, Scenario c, SimRequests.Builder b) {
         s.add(new RequestStep(new Labelled(b.build(), c, u.id())));
     }
 }

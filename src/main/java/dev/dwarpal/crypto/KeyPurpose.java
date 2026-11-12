@@ -17,5 +17,7 @@ public enum KeyPurpose {
     /** Sealed emergency credential of one break-glass account. Bound to that account. */
     BREAK_GLASS,
     /** SOC analyst: signs verdicts on alerts, which can trigger response playbooks. Bound to the analyst. */
-    SOC_ANALYST
+    SOC_ANALYST,
+    /** The console server: signs, per request, "this call is made on behalf of analyst X". Bound to the console. */
+    CONSOLE_DELEGATE
 }

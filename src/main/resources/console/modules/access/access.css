@@ -1,0 +1,26 @@
+.acc-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--line); }
+.acc-tabs button { background: none; border-radius: 4px 4px 0 0; border-bottom: 2px solid transparent; color: var(--muted); }
+.acc-tabs button:hover:not(:disabled) { background: var(--bg3); color: var(--fg); }
+.acc-tabs button[aria-selected="true"] { color: var(--fg); font-weight: 600; border-bottom-color: var(--accent); }
+.acc-msg { margin: 0 0 8px; }
+.acc-msg:empty { display: none; }
+.acc-bad { color: var(--bad); font-weight: 600; }
+.acc-note { color: var(--muted); font-size: 13px; line-height: 20px; margin: 4px 0; }
+.acc-empty { color: var(--muted); margin: 8px 0 16px; }
+.acc-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; align-items: center; }
+.acc-card { background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin: 0 0 16px; }
+.acc-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 8px 0; }
+.acc-field { display: flex; flex-direction: column; gap: 4px; }
+.acc-field textarea, .acc-field input, .acc-field select { width: 100%; }
+.acc-picker { display: flex; flex-direction: column; margin: 8px 0; }
+.acc-item { display: flex; gap: 12px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.acc-item input[type="checkbox"] { flex: none; width: 18px; height: 18px; margin: 3px 0 0; }
+.acc-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.acc-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.acc-head label { display: inline; font-weight: 600; }
+.acc-tag { font-size: 12px; padding: 0 6px; border-radius: 4px; border: 1px solid var(--line); }
+.acc-hard { color: var(--warn, var(--fg)); font-weight: 600; }
+.acc-simple { color: var(--muted); }
+.acc-table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; }
+.acc-table th, .acc-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.acc-table th { background: var(--bg2); font-weight: 600; }

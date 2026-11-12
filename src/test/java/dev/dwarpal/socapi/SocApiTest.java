@@ -118,6 +118,18 @@ class SocApiTest {
         assertEquals(1, w.cases.view(c).orElseThrow().notes().size());
     }
 
+    @Test
+    void aRefusedOversizedBodyDoesNotHangTheNextCall() throws Exception {
+        String c = w.caseOf(w.raise("pam-refused", Severity.MEDIUM, Entity.subject("alice")));
+        String path = "/v1/cases/" + c + "/notes";
+        try (SocApiKit.Client ana = kit.as("ana")) {
+            for (int i = 0; i < 10; i++) {
+                assertEquals(413, ana.post(path, "{\"v\":1,\"text\":\"" + "x".repeat(17_000) + "\"}").status());
+                assertEquals(400, ana.post(path, "{\"v\":2,\"text\":\"a\"}").status(), "the connection is not reused");
+            }
+        }
+    }
+
     // ---- reads --------------------------------------------------------------------------------------------------
 
     @Test

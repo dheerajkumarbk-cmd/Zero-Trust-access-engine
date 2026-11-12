@@ -59,6 +59,8 @@ public final class UebaEngine {
                         long skewedEvents, int profiles, Optional<String> chainProblem) {
     }
 
+    private static final String HEARTBEAT = "sensor.heartbeat";
+
     private record Pending(ChainedEvent event, List<Entity> entities) {
     }
 
@@ -145,6 +147,9 @@ public final class UebaEngine {
     /** Judges one event, quarantines it for learning, and returns the anomalies it caused. */
     public List<Anomaly> observe(ChainedEvent ce) {
         Objects.requireNonNull(ce, "event");
+        if (HEARTBEAT.equals(ce.event().action())) {
+            return List.of(); // a sensor saying it is alive is not behaviour; missing ones are the correlation rule's job
+        }
         List<Anomaly> found = new ArrayList<>();
         List<Alert> raised = new ArrayList<>();
         synchronized (lock) {

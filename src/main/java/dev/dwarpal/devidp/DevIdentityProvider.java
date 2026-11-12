@@ -65,7 +65,7 @@ public final class DevIdentityProvider {
 
     private static final Set<String> CLIENT_DATA = Set.of("type", "challenge", "origin");
 
-    private final UserFile users;
+    private volatile UserFile users;
     private final KeyPair signer;
     private final String keyId;
     private final String rpId;
@@ -190,6 +190,11 @@ public final class DevIdentityProvider {
                 SignedMessages.authentication(p.subjectId(), p.deviceId(), ctx, now)));
         succeeded.incrementAndGet();
         return Optional.of(new IdentityProvider.MfaProof(ctx, proof));
+    }
+
+    /** Puts a changed user file in place; challenges already issued stay valid. */
+    public void replaceUsers(UserFile changed) {
+        users = Objects.requireNonNull(changed, "users");
     }
 
     public long succeeded() {

@@ -1,0 +1,9 @@
+.mon-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--line); }
+.mon-tabs button { background: none; border-radius: 4px 4px 0 0; border-bottom: 2px solid transparent; color: var(--muted); }
+.mon-tabs button:hover:not(:disabled) { background: var(--bg3); color: var(--fg); }
+.mon-tabs button[aria-selected="true"] { color: var(--fg); font-weight: 600; border-bottom-color: var(--accent); }
+.mon-note { color: var(--muted); margin: 0 0 12px; }
+.mon-bad { color: var(--bad); font-weight: 600; }
+.mon-table { width: 100%; border-collapse: collapse; }
+.mon-table th, .mon-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.mon-what { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }

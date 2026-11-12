@@ -17,6 +17,7 @@
         <!-- Reproducible builds: fixed timestamps in the jar, so anyone can rebuild and compare hashes. -->
         <project.build.outputTimestamp>2026-11-02T00:00:00Z</project.build.outputTimestamp>
         <snakeyaml.version>2.7</snakeyaml.version>
+        <postgresql.version>42.7.14</postgresql.version>
         <junit.version>5.14.4</junit.version>
         <jacoco.version>0.8.16</jacoco.version>
         <spotbugs.plugin.version>4.10.5.0</spotbugs.plugin.version>
@@ -33,6 +34,21 @@
             <groupId>org.yaml</groupId>
             <artifactId>snakeyaml</artifactId>
             <version>${snakeyaml.version}</version>
+        </dependency>
+
+        <!-- PostgreSQL JDBC driver (BSD-2-Clause): the only way the lab talks to the directory database.
+             Checked on 2026-11-08: no entry in the OSV database for this version.
+             checker-qual is left out on purpose: it only holds annotations the driver does not need at run time. -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>${postgresql.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.checkerframework</groupId>
+                    <artifactId>checker-qual</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -154,4 +170,54 @@
             </plugin>
         </plugins>
     </build>
+
+    <!-- One runnable jar for the lab: mvn -o -Plab-jar -DskipTests package  ->  target/dwarpal-lab.jar
+         Not part of the normal build or the quality gate. Main class is overridable with -Dlab.main=... -->
+    <profiles>
+        <profile>
+            <id>lab-jar</id>
+            <properties>
+                <lab.main>dev.dwarpal.console.ConsoleMain</lab.main>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-shade-plugin</artifactId>
+                        <version>3.5.3</version>
+                        <executions>
+                            <execution>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>shade</goal>
+                                </goals>
+                                <configuration>
+                                    <finalName>dwarpal-lab</finalName>
+                                    <createDependencyReducedPom>false</createDependencyReducedPom>
+                                    <transformers>
+                                        <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                            <mainClass>${lab.main}</mainClass>
+                                            <manifestEntries>
+                                                <Multi-Release>true</Multi-Release>
+                                            </manifestEntries>
+                                        </transformer>
+                                    </transformers>
+                                    <filters>
+                                        <filter>
+                                            <artifact>*:*</artifact>
+                                            <excludes>
+                                                <exclude>META-INF/*.SF</exclude>
+                                                <exclude>META-INF/*.DSA</exclude>
+                                                <exclude>META-INF/*.RSA</exclude>
+                                            </excludes>
+                                        </filter>
+                                    </filters>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

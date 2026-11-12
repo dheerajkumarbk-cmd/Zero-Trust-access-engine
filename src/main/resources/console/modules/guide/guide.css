@@ -1,0 +1,10 @@
+.guide { display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.guide-list { list-style: none; margin: 0; padding: 8px; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; }
+.guide-list button { width: 100%; text-align: left; white-space: normal; margin-bottom: 4px; background: none; color: var(--muted); }
+.guide-list button:hover:not(:disabled) { background: var(--bg3); color: var(--fg); }
+.guide-list button[aria-selected="true"] { background: var(--sel); color: var(--fg); font-weight: 600; }
+.guide-tag { display: inline-block; margin-left: 8px; font-size: 13px; color: var(--muted); }
+.guide-body { background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 16px; min-width: 0; }
+.guide-body ol, .guide-body ul { padding-left: 20px; }
+.guide-body li { margin-bottom: 4px; }
+@media (max-width: 760px) { .guide { grid-template-columns: minmax(0, 1fr); } }

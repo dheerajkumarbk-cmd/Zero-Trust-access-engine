@@ -46,8 +46,8 @@ public final class Fixtures {
 
     public static final Instant T0 = Instant.parse("2026-11-01T09:30:00Z");
 
-    public static final KeyPair DEVICE_AGENT = Ed25519.generateKeyPair();
-    public static final KeyPair IDP = Ed25519.generateKeyPair();
+    public static final KeyPair DEVICE_AGENT = dev.dwarpal.sim.SimRequests.DEVICE_AGENT;
+    public static final KeyPair IDP = dev.dwarpal.sim.SimRequests.IDP;
     public static final String DEVICE_KEY_ID = "agent-laptop-alice";
     public static final String IDP_KEY_ID = "idp-main";
 

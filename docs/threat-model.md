@@ -1,4 +1,4 @@
-# Dwarpal threat model (STRIDE), v1.4
+# Dwarpal threat model (STRIDE), v1.5
 
 Scope: the Policy Engine core (v0.1 to v0.6) and the Policy Administrator: sessions (v0.7, v0.8) and
 privileged access (v0.8). The PEP
@@ -17,7 +17,7 @@ and the SIEM loop get their own rows when they are built.
 | T7 | Spoofing | Device self-reports healthy posture | `AssuranceLevel` | `selfReportedHealthIsNotEnough...` |
 | T8 | Elevation | Signal outage becomes silent ALLOW | `FailMode` has no fail-open | `unavailableSignalFailsClosed...` |
 | T9 | Elevation | Engine bug / stack overflow yields ALLOW or a crash | Stage errors and `StackOverflowError` -> DENY | `unexpectedEngineError...`, `stackOverflowInACondition...` |
-| T10 | Info disclosure | Reason teaches attacker what to evade | Generic `userMessage()` | `userMessageNeverReveals...` |
+| T10 | Info disclosure | Reason teaches attacker what to evade | Generic `userMessage()`; the console adds only the kind of reason, never the signal or check | `userMessageNeverReveals...` |
 | T11 | Elevation | Reassuring evidence lowers a mandatory control | Monotonic outcome; policy effect is a floor | `reassuringEvidenceCannotLoosen...` |
 | T12 | Tampering | One noisy scorer dominates | Per-factor cap | `oneFactorCannotDominate` |
 | T13 | Tampering | Caller mutates collections after construction | Unmodifiable copies | `ImmutabilityTest` |
@@ -236,6 +236,9 @@ Cross-part red team at integration (`CrossPartRedTeamTest`, every component thro
 | X4 | Spoofing | A captured login replayed through another gateway instance would open a second session | Single use was remembered per gateway only | The PA remembers spent login MFA proofs for every PEP | `x4_aCapturedLoginCannotBeReplayedThroughAnotherGatewayInstance` |
 | X5 | Elevation | The web gateway's certificate could open and spend wiki sessions | Any PEP could ask about any resource | Every PEP caller has a required resource scope (`Caller.pepComponent("swg", "web:*")`); outside it: 403 | `x5_eachEnforcementPointStaysWithinItsOwnResources`, `ApiScopeTest` |
 | X6 | Elevation | Revoking a compromised person over the API left their admin elevation running | Revocation and PAM were separate calls | Subject revocation also ends their elevation grants | `revokingASubjectOverTheApiAlsoEndsTheirElevation` |
+| X7 | Info disclosure | `GET /v1/ready` could leak why a part is failing (exception text, paths, store addresses) to any caller | Readiness answers 200 or 503 with the fixed names of failing checks only (`[a-z-]{1,32}`, validated at build); a throwing check is "not ready"; same mutual TLS, caller list, rate limit and in-flight slot as `/v1/health`; `/v1/health` stays liveness | `readinessNamesOnlyTheFailingChecksAndNeverLeaksText`, `readinessNamesAreFixedIdentifiers` |
+| X8 | Repudiation | The engine API could be down for hours and the enforcement point only denied, with nobody told | `RemoteSessionAuthority` tells an `EngineAlarm` once after N (default 5) consecutive failures and once when the engine answers again (edge-triggered, no repeat); a throwing alarm is counted and never changes the DENIED answer | `engineGoesDownEverythingIsDeniedOnceAlarmedAndComesBack`, `anAlarmThatThrowsDoesNotChangeTheAnswer` |
+| X9 | Denial of service | The alarm file could fill the disk during a flapping engine; it could carry request data | `FileEngineAlarm` appends one fixed-text JSON line per event (event, time, failure count; no request data), capped at 1 MiB, then stops writing and counts the dropped lines | `aFileAlarmStopsAtItsCapAndCounts` |
 
 ## v1.1 Layer 5 part 0 (shared contracts for the SOC loop)
 
@@ -545,6 +548,315 @@ with cloud logs, faking the sensor's acknowledgement, backdating, a playbook fil
 real breaches (5.2I-1 and 5.2I-2), both fixed with a regression test. Slow baseline poisoning is part E's
 (E-R1) and was not repeated here.
 
+## v1.5 Layer 6 (the lab: launcher, console, scenario lab, admin views)
+
+Ids are prefixed by part: 6G (console server), 6H (analyst console, the front end), 6I (admin and user views), 6J (scenario lab and guide); `6X` is the cross-part integration. The control baseline each row is checked against is `docs/layer-6/standards.md` (OWASP ASVS L2/L3, NIST SP 800-53 and 800-207, SOC 2, ISO 27001, CIS, MITRE). Details are in `docs/layer-6/part-g.md` to `part-j.md`; the rows keep each part's own ids.
+
+### 6G Console server
+
+#### STRIDE and ASVS
+
+| # | Threat (STRIDE) | Control | ASVS 4.0.3 | Evidence |
+|---|---|---|---|---|
+| S1 | **Spoofing**: guessing or brute-forcing a login | PBKDF2 password + key PIN through the IdP; generic answer; per account+address exponential lockout, per address cap; throttle also on step-up | V2.1.1, V2.2.1, V2.2.2, V2.5.4, V2.8.x | `ConsoleThrottleTest`, `ConsoleSessionTest` |
+| S2 | Spoofing: fixation or stolen cookie | New id at login and step-up; 256-bit ids; address+agent binding ends the session; duplicate/malformed cookie ignored | V3.2.1, V3.2.3, V3.3.1 | `ConsoleSessionTest`, red team a3 |
+| S3 | Spoofing: another origin's page acting as the user (CSRF) | Strict cookie + token + Origin + Sec-Fetch-Site + JSON | V4.2.2, V13.2.3 | `ConsoleRequestGuardTest`, a2 |
+| S4 | Spoofing: DNS rebinding | `Host` must be one of the server's names | V14.5.x | `aForeignHostHeaderIsRefused` |
+| S5 | Spoofing: sign-in under another letter case, or a look-alike name (letter case of user names) | User name folded to lower case at the sign-in edge (ASCII only); non-ASCII is refused, never mapped, so Kelvin sign or Cyrillic look-alikes cannot reach a real name; one lockout counter per person whatever the case | V2.1.1, V2.2.1 | `SignInNameTest` |
+| T1 | **Tampering**: changing who acts, or smuggling fields | Person from session only; exact-field bodies; SOC body rebuilt; delegation signed per call | V4.1.2, V5.1.5, V13.2.x | `ConsoleAccessTest.theBrowserNeverNamesWho...`, a4 |
+| T2 | Tampering: path traversal, request smuggling, odd encodings | Allow-list by exact name; strict raw path; JDK server handles framing; header size cap | V12.3.x, V14.5.x | `ConsoleStaticTest`, a7, a8 |
+| T3 | Tampering: forged or injected audit lines | All values sanitised and JSON-escaped, flat map, actor validated | V7.3.1 | `ConsoleAuditTest.whatTheBrowserSendsCannotForgeARecord` |
+| R1 | **Repudiation**: a person denies an action | Intent + result for each write, reads of sensitive objects, login/step-up/logout, under the person's id with a hashed session tag; chain is keyed and anchored, verifiable in the page | V7.1.x, V7.2.x | `ConsoleAuditTest` |
+| I1 | **Information disclosure**: errors, caching, side channels | Four error shapes, no reasons, `no-store`, uniform login answers; unknown users cost the same hashing | V7.4.1, V8.2.1, V2.2.x | a9, headers tests |
+| I2 | Disclosure: records about colleagues through the audit explorer | Analysts get headers only for records outside the console's/SOC API's own types; the SOC API enforces the case/risk/search rules | V4.2.1 | `anAnalystSeesTheConsolesRecordsInFull...` |
+| I3 | Disclosure: SSE events | Events carry no ids, names or text; each follow-up request is checked | V13.x | `ConsoleStreamTest` |
+| D1 | **Denial of service**: floods, slow clients, large inputs | Per-person and per-address rates; worker pool + semaphore + deadline; 16 KiB bodies; 16 KiB headers; stream cap; login-id cap; throttle table bound | V11.1.x, V13.x | a6, a8, a13, `ConsoleStreamTest` |
+| E1 | **Elevation of privilege**: reaching a route above one's role | Role check on every route in the host, module routes included; module files gated by role | V4.1.1, V4.1.3 | `ConsoleAccessTest` |
+| E2 | Elevation: a stolen session making a privileged write | Step-up (password + PIN) for verdicts and any module route that asks for it; signing only for the session's own person | V2.8, V4.3.x | `aVerdictNeedsAFreshStepUp...`, a4, a12 |
+| E3 | Elevation: the console used to reach the SOC API as someone else | Console cert + one-use 60 s delegation per call, only for analysts; server pinned to `CN=soc-api` | V9.2.x | a10, a11 |
+
+#### Red-team findings
+
+Each attack was written as a probe and run against the build (`ConsoleRedTeamTest` and the other classes).
+
+| ID | Attack | Result | Fix and regression test |
+|---|---|---|---|
+| **F-G1** | A 200 KB request header value | **Succeeded**: the JDK server limits the number of headers but not their size, and answered 200 | Header bytes counted in the pipeline, over 16 KiB is 431. `ConsoleRedTeamTest.a8` (also a 3 MB header: refused) |
+| **F-G2** | Open four sessions for one person in the same instant | **Succeeded (a bug, found by the test of the session limit)**: "oldest" was chosen by random id when creation times were equal, so a new session could be the one ended | Sessions carry a creation counter; step-up keeps it. `ConsoleSessionTest.aPersonHasAtMostThreeSessions...` |
+| F-G3 | Builder setters kept references to mutable objects (SpotBugs EI_EXPOSE_REP2); an unchecked queue offer (RV_RETURN_VALUE_IGNORED) | Found by the gate | Holders and a loop; no suppression |
+| a1 | Stored XSS through a note | Failed: the API only returns `application/json` with `nosniff` and the strict CSP; the text comes back verbatim (escaping on output is part H, with its source test) | `a1_scriptInANoteComesBackAsJsonTextOnly` |
+| a2 | One session's CSRF token in another session | Failed (403) | kept |
+| a3 | Session id in query or `Authorization` | Failed (401) | kept |
+| a4 | Step-up or login naming another person; using ben's secrets in ana's session | Failed (400, 401, still stale) | kept |
+| a5 | One login id used by eight threads at once | Failed: exactly one session | kept |
+| a6 | Flood of unfinished logins from one address | Bounded at 20 per address (see open issue 1) | kept |
+| a7 | Content-Length plus Transfer-Encoding smuggling | Failed: no hidden request ran | kept |
+| a8 | Twelve stalled request bodies (more than the 8 workers) | Bounded: a normal request was answered within the 5 s deadline plus margin | kept |
+| a9 | 12 malformed requests looking for a stack trace, class name or path in an answer | Failed: only the four short shapes | kept |
+| a10 | Asking for people without standing; pointing the channel at a server that is not the SOC API | Failed (empty / 503) | kept |
+| a11 | A copied delegation header without the console's certificate | Failed: the TLS handshake is refused | kept |
+| a12 | Signing for a lead or an administrator | Failed (no key) | kept |
+| a13 | 300 parallel calls from 24 threads | Only 200/429/503, no hang | kept |
+| (guard tests) | Path traversal forms (22 of them), foreign Host, cross-site fetch, text/plain and form posts, `OPTIONS` preflight | Failed | `ConsoleStaticTest`, `ConsoleRequestGuardTest` |
+
+##### Open issues (not fixed, named)
+
+1. **Login flood on a shared address.** On the loopback every browser shares one source address, so someone who can reach the
+   port can fill the 20 pending-login slots of that address for two minutes and make logins on it fail. A real deployment
+   puts the console behind the gateway, where the source differs per user. Accepted for the lab; named in the report.
+2. **A stalled body holds a worker up to the request deadline (5 s).** Eight workers means a determined local client can slow
+   everyone. The anonymous limit (120 per minute per address) and the deadline bound it; a separate short read timeout for
+   unauthenticated bodies would need a change in how the JDK server hands out the stream.
+3. **Sessions are in memory.** A console restart logs everybody out (safe direction).
+4. **The JDK server's header read time** (`sun.net.httpserver.maxReqTime`) is read once, when the server class first loads;
+   `ConsoleMain` sets it to 30 s before anything else, but a test harness that loaded the server earlier keeps the default.
+
+### 6H Analyst console (front end)
+
+#### Standards lines for the front end, and their tests
+
+| Standards line (section 3, "Output and input", "Secrets", "Static files") | How | Test |
+|---|---|---|
+| No `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, `eval`, `new Function`, string `setTimeout`, inline handlers | Not present; `dom.js` is the only way elements are made | `ConsoleSourceTest.noScriptCanTurnText...` (19 patterns, comments stripped), `noPageHasInlineScriptStyleOrHandlers`, and `theGateCatchesWhatItIsMeantToCatch` proves each pattern matches its attack |
+| Strict CSP with Trusted Types works | No inline script/style, no `.style` writes, no `javascript:` URLs, no foreign addresses | `ConsoleSourceTest` (the same patterns) |
+| One place talks to the server | `api.js` | `ConsoleSourceTest.onlyApiJsTalksToTheServer` |
+| Only a harmless preference in `localStorage`, guarded | `prefs.js` | `ConsoleSourceTest.storageIsOnlyInThePreferencesFile...` |
+| Nothing secret in the page | The session cookie is HttpOnly; the CSRF token is in a JS variable only; passwords are cleared from the form after use | `ConsoleSourceTest` (no `sessionStorage`, `indexedDB`, `document.cookie`) |
+| Every file the page needs is served, every import resolves | | `ConsoleShellTest` |
+| Fail closed: an error is shown as "Unavailable", never as an empty list | `DwView.fail`, `unavailable()`; the ATT&CK view says "Incomplete" when cases could not be read | exercised in the live run below |
+
+##### What was and was not checked in a browser (honest account)
+
+The built-in browser refuses the lab's own certificate authority (`ERR_CERT_AUTHORITY_INVALID`), and trusting a CA or turning
+certificate checks off is the user's decision, not mine; the owner chose to **skip the browser check**. So **nothing was
+looked at with eyes**: layout, colours, dark/light, focus rings, dialogs and the keyboard shortcuts are untested in a real
+browser. What was done instead:
+
+* Every script passes `node --check` (syntax).
+* A scratch harness (not in the repository) ran the real `api.js` and every view against a **running `ConsoleMain`**
+  (`NODE_EXTRA_CA_CERTS` pointed at the lab CA for that Node process only) with a small stand-in DOM, as cleo and as ana, and
+  printed what each view rendered: overview, queue, cases, case, entity (landing and one entity), hunt, response, audit
+  (list and one record), ATT&CK. All rendered real data from the SOC API with no "Unavailable".
+* The same harness added a note containing `<img onerror>`, `<script>` and `<svg onload>` to a case and rendered the case:
+  no `img`, `script`, `svg` or `iframe` element appeared in the tree, no `on*` attribute and no non-route `href`; the text
+  was in the page as text.
+* Server side, everything the views call is covered by part G's tests.
+
+The owner should open `https://localhost:8443/` once (`ConsoleMain` prints the logins) and look.
+
+#### Red-team notes for part H
+
+| ID | Attack | Result |
+|---|---|---|
+| H1 | Stored XSS in a note, an alert text, a host name, a user agent: markup in every free-text field the SOC API returns | Failed. All text enters through `h()` text nodes; the harness above proved it for a note; the source test fails the build on any markup sink |
+| H2 | A link in data that goes elsewhere (`javascript:`, another origin) | Failed. `h()` writes an `href` only if it matches `#/...`; a test pattern in `ConsoleSourceTest` also forbids `javascript:` in any file |
+| H3 | A query in the hunt box that breaks the page when echoed (`"` and `\` in an entity id) | Failed. The entity page escapes only for the query language and inserts everything else as text; the hunt link goes through `encodeURIComponent` and the route allow-list for hrefs |
+| H4 | Another module (parts I, J) with `innerHTML` or a script from a CDN | Would fail the build: the scan includes `modules/**` |
+| **H5** | `encodeURIComponent` leaves `! ' ( ) *` unescaped, and the first version of the href allow-list did not accept them, so a hunt link for a query containing them silently lost its `href` (found while reading the code, not an attack) | Fixed in `dom.js` (the characters are allowed in the fragment); every link goes through the same function |
+| H6 | The page keeps a session alive by polling | Refreshes triggered by the live feed or timers send `X-Dwarpal-Background: 1`, which the server does not count as activity (tested server side) |
+
+Open points: no browser check (above); the ATT&CK view shows detections only because the SOC API does not expose rule
+coverage; the entity page cannot show half-lives because the risk JSON gives the current (decayed) weight only.
+
+### 6I Admin and user views
+
+#### Threat model: STRIDE with ASVS / Top 10
+
+| # | Threat | Control | Test | Reference |
+|---|---|---|---|---|
+| S1 | A person signs as another administrator | the signing key is looked up by the logged-in person's id; a person without a key (any other id) gets 403 | `AdminModuleTest.aPersonWithoutASigningKey...` | ASVS V2, V4; A01 |
+| S2 | A stale session approves or installs | host step-up plus a second check in every privileged handler | `privilegedWritesAlsoRefuseAStaleSecondFactor...` | ASVS V2.8 |
+| T1 | One administrator approves twice, or alone | the installer counts distinct signers; the test signs twice and installs: refused | `aPolicyNeedsTwoDifferentAdministrators...` | CM-5, SOC 2 CC8.1 |
+| T2 | An old sequence replayed, or an approved file edited | approvals sign the exact text and sequence (a proposal cannot be edited, only withdrawn); the installer refuses rollback | `anOldSequenceIsRefusedByTheInstaller...` | ASVS V13 |
+| T3 | A hostile policy or playbook file (tags, aliases, nesting, duplicate keys, control characters, unknown rules, destructive default, secret) | the real safe loaders and linters; a refused file is shown with findings but never kept; its text is not echoed back | `LabAdminModuleTest.hostileFiles...`, `AdminModuleTest` | ASVS V5; A03, A08 |
+| T4 | Elevation without a second person | PAM refuses own approval, ineligible people and roles, short reasons, long windows | `anElevationNeedsADifferentApprover...`, `...Ineligible...` | AC-5, AC-6 |
+| R1 | Who changed what | every install, grant and revoke is an audit record written by the component under the administrator's id; the history page reads them | `LabAdminModuleTest.anInstalledPolicy...` | AU-2, AU-10 |
+| I1 | "Why was I denied" teaches an attacker | only the engine's requester message, the reference, time, resource, action and generic next steps: no policy, score, signal, address, device or threshold | `theRequestersPageUsesTheEnginesOwnWords...` | ASVS V7.4, V8; A04 |
+| I2 | Reading another person's decision by guessing a reference | a reference that is not yours answers exactly like one that does not exist (same status and body) | `anotherPersonsReferenceLooksExactlyLike...` | ASVS V4.2; API1 |
+| I3 | Stored XSS through policy descriptions or justifications | text goes in only with `textContent`; JSON stays valid whatever the text holds; the source test covers the admin pages | `textFromTheFileComesBackAsData...`, `FrontEndRulesTest` | ASVS V5.3 |
+| D1 | Proposal flood | at most 10 open, 64 KiB each, one hour; PAM's own rate limits | `proposalsAreBoundedAndLapse` | ASVS V11 |
+| D2 | What-if too large | at most 20,000 recent requests, the replay's own 200,000 cap | `whatIfReplays...` | |
+| E1 | An analyst or ordinary person reaches admin data | role in registration and in every handler | `handlersRefuseTheWrongRoleEvenWithoutTheHostsCheck` | ASVS V4.1 |
+
+#### Red-team pass
+
+| Probe | First result | Now |
+|---|---|---|
+| Refused proposal file echoed back to the browser in the answer | **Leak of the submitted text** (found by the hostile-file test: an object tag came back in the response) | A refused file's text is not returned |
+| Same administrator signs twice then installs | Held (installer: "1 distinct") | Regression test |
+| Person with ADMIN role but no signing key approves | Held (403) | Regression test |
+| Stale second factor on approve, install, request | Held (403) | Regression test |
+| Install the same proposal twice; install an older sequence after a newer one | Held (404; "rollback") | Regression tests |
+| Someone else's decision reference, a made-up one, and `../..` | Held (identical 404; 400) | Regression tests |
+| Decision details page as an ordinary person | Held (403) | Regression test |
+| Elevation: own approval, ineligible role, stranger, 1-character reason, 600 minutes | Held (PAM refuses each) | Regression tests |
+| 11th proposal; proposal after the hour | Held (429; lapses) | Regression test |
+| Object tag, alias, 5,000-deep nesting, duplicate keys, control character in policy and playbook files | Held; no stack trace | Regression test |
+| Word "factor" in the requester's page | Test too strict, not a leak: the generic advice says "second factor" | Test now looks for risk, score, policy names |
+
+### 6J Scenario lab and guide
+
+#### Threat model: STRIDE with ASVS / Top 10
+
+| # | Threat | Control | Test | Reference |
+|---|---|---|---|---|
+| S1 | A non-admin resets the lab | role in route registration and again in the handler; reset also needs `stepUpFresh` | `LabModuleTest` (3 tests) | ASVS V4.1, V4.2; A01 |
+| S2 | A stale session performs a privileged write | host step-up and a second check inside the handler | `LabModuleTest.resetNeedsAFreshSecondFactor...` | ASVS V2.8, V4.3 |
+| T1 | A learner's rule or playbook escapes the sandbox (object tags, aliases, bombs, deep nesting, giant files) | safe YAML loaders (no objects, no aliases, no duplicate keys), 16 KiB limit, 20 rules, linter refuses rules that can never fire | `ScenarioToolsTest.yamlTagsAliasesAndBombs...`, `...aRuleWithTooMany...` | ASVS V5.1, V5.5; A03, A08 |
+| T2 | A learner's rule affects the live SOC | the rule runs in a private engine over a private copy of the records; alerts go to a list; test compares cases, raised alerts and chain head before and after | `ScenarioToolsTest.aGoodRuleRunsOnRecordedEvents...` | ASVS V1.4, V13.1 |
+| T3 | A playbook acts on forgeable evidence | the real `PlaybookCompiler` refuses destructive steps on collected-only rules; sandbox never installs | `ScenarioToolsTest.aPlaybookOnForgeableEvidence...`, `ExamplesTest` | ASVS V11 |
+| R1 | Who launched what | every write is audited by the host under the person; the journal keeps `by`, scenario, time | `LabModuleTest` | ASVS V7.1 |
+| I1 | The export leaks a key, a hash, the lab directory, the host's names or real people | pseudonyms, field allow-list, key-like runs removed, final scan fails the export | `ScenarioToolsTest.theExportHolds...`, `...lastLineOfDefence...` | ASVS V8.3, V9; A02 |
+| I2 | Error text echoes the submitted rule | findings name places and rule ids only | `ScenarioToolsTest.lintingNeverEchoes...` | ASVS V7.4 |
+| I3 | Stored XSS through rule titles, findings, alert text, guide text | the pages insert text only with `textContent`; attributes from an allow-list; link targets restricted; a source test forbids `innerHTML`, `eval`, inline handlers and style | `FrontEndRulesTest` | ASVS V5.3; A03 |
+| D1 | A scenario button held down | one launch per second, 12 per person per five minutes, a scenario cannot be launched again while it plays, world refuses more than 50,000 waiting items, past-dated items and unknown types | `LabModuleTest.aScenarioButtonHeldDown...`, `ScenarioToolsTest` (3 tests) | ASVS V11.1, V13.2; API4 |
+| D2 | Expensive sandbox runs | one run at a time, one per person per 2 s, 100,000 records, 8 s budget, engine's own state limits | `ScenarioToolsTest.oneRunAtATime...` | ASVS V11.1 |
+| D3 | Fast-forward or reset used to freeze the lab | one heavy operation at a time (429), fast-forward in 10-minute steps so the SOC API answers between steps | `LabModuleTest` | |
+| E1 | Path parameters used for traversal or injection | identifier-only path parameters (letters, digits, `-`, `_`, 64 characters) | `LabModuleTest.badLaunches...` | ASVS V5.1.3, V12.3 |
+
+ASVS levels touched: V4 (access control), V5 (validation and encoding), V7 (error handling), V8, V11 (business logic),
+V13 (API), V14 (configuration; no new dependency).
+
+#### Red-team pass
+
+Each probe is a working test. The first column says what happened on the first build.
+
+| Probe | First result | Now |
+|---|---|---|
+| First launch of any lab | **Breach of the lab's own limit: refused.** The rate limiter's "never launched" marker was `Long.MIN_VALUE`; subtracting it overflowed, so the gap check refused the very first launch (found by the first probe run) | Fixed (marker is half of it); every test launches |
+| Injecting an endpoint batch with the next number | Design finding: a collector refuses numbers that go backwards, so an injected batch would have made every later scripted batch of that device "replayed" | `LabWorld` numbers and signs every batch with the device key when it runs |
+| Export of a lab with the A9 alert | **Would have refused every export:** the "base64-like" scan matched the 39-character rule name `cloud-bulk-download-then-external-share` and the alert id built from it (found while writing the export tests, before any export ran) | The scan needs upper case, lower case and digits and excludes `-`; the test keeps the rule name as a negative case |
+| Command line with a PEM header in an event that is cited as evidence | **Self-inflicted denial:** the last-line scan refuses the whole export | PEM markers are removed from values first; the scan still refuses if one gets through |
+| Launch or fast-forward during a reset | Launch went into the old, closed world and was lost | Refused with 409 while resetting; a second reset is refused with 429 |
+| A6 as first built | Fidelity: the login at the launch hour was STEP_UP, not the simulation's ALLOW | The thief has the owner's security key; the test pins ALLOW |
+| Reset by an analyst, a lead, and an administrator with a stale second factor | Held (403) | Regression tests |
+| Object tag, alias bomb, 5,000-deep nesting, duplicate keys, oversize, control characters, empty, in a rule file | Held; no stack trace, no echo | Regression tests |
+| Playbook with a destructive default, a 400-day deny, an unknown rule, an unknown step, an extra key, a secret in the version | Held | Regression tests |
+| Rule that matches every event | Held: sample capped, records capped, engine's flood limits | Regression test |
+| 20,000 junk lines three times over | Held: the world refuses after 50,000 waiting items; past-dated and non-item objects refused | Regression test |
+| Scenario button pressed 60 times; 15 launches by one person | Held: one accepted; at most twelve in five minutes | Regression tests |
+| Path parameter with `../`, `%00`, `;` | Held (400/404, not echoed) | Regression test |
+| An analyst reads the export | Held (403; leads only) | Regression test |
+
+### 6X Integration (cross-part)
+
+Run over HTTPS against the real launcher (`ConsoleMain`: lab session, console server, lab, guide and admin
+modules, SOC API, audit chain): tests `LabConsoleEndToEndTest` and `LabConsoleRedTeamTest`. Earlier in 0b the
+integration session also found and fixed two leaks while building the shared pieces (6X-1, 6X-2). A probe that
+succeeded would be a breach; none of the eight cross-part probes succeeded.
+
+| # | STRIDE | Threat or breach | Mitigation in code | Test |
+|---|---|---|---|---|
+| 6X-1 | Information disclosure (F) | A `count by` over all events would show an analyst how active a colleague is (grouped counts and totals) | Counts are taken over only the events the caller may see, per event, exactly as for search | `SocApiRedTeamTest.countByDoesNotRevealColleaguesGroupsOrTotals` |
+| 6X-2 | Tampering (F) | The anchor check passed a chain whose history had been rewritten and then extended past the anchor | `LabAudit.verify` also compares the record at the anchored sequence number | `LabAuditTest.aChainCutShortRewrittenAndExtendedOrAlteredIsCaught` |
+| 6X-3 | Spoofing / elevation | The console, if compromised or confused, acts as any analyst | The console's certificate alone is nobody; every call needs a per-call assertion signed with a key the ring trusts only for this, bound to method, path and body, one use, 60 seconds | `ConsoleDelegationTest` |
+| 6X-4 | Elevation (CSRF) | A page on another site, or a script with a stolen cookie, makes a write | Token header, same-origin `Origin`, JSON content type, no CORS | `LabConsoleRedTeamTest.aWriteWithTheCookieButWithoutTheTokenOrFromAnotherOriginIsRefused` |
+| 6X-5 | Tampering (XSS) | Hostile text in a note, alert or host name runs in an analyst's browser | Every API answer is JSON with `nosniff` and the strict CSP; the front end inserts text only with `textContent` (source test forbids `innerHTML`, `eval`, inline script) | `LabConsoleRedTeamTest.hostileTextComesBackAsJsonTextOnly...`, `ConsoleSourceTest`, `FrontEndRulesTest` |
+| 6X-6 | Repudiation / spoofing | A verdict names someone else, or is signed without a fresh second factor | The signer is the session's person, never a field; step-up no older than five minutes | `LabConsoleRedTeamTest.aVerdictCannotNameAnotherAnalystAndNeedsAFreshStepUp` |
+| 6X-7 | Elevation | Escalation across modules: an analyst resets the lab or installs policy; an administrator signs a verdict or launches an attack; a user reads policy | Role checked in the host (hierarchical, ANALYST < LEAD < ADMIN, USER separate) and again in each module; administrators are not analysts | `LabConsoleRedTeamTest.roleEscalationAcrossTheModulesFails`, `LabConsoleEndToEndTest` |
+| 6X-8 | Information disclosure | The run export or a crafted URL gives away key store passwords, demo logins, certificates or the lab path | Export is sanitised and for leads only; static files are served only from a fixed in-jar allow-list by exact name | `LabConsoleRedTeamTest.theRunExportCarriesNoKey...`, `...filesOutsideTheStaticAllowListAreNotServed...` |
+| 6X-9 | Denial of service / integrity | A reset of the lab leaves the console with a stale SOC address, a dead channel or a broken audit chain | The console reads the lab through one handle on every call; the new chain starts anchored; analysts' sessions keep working | `LabConsoleRedTeamTest.anAdministratorResetsTheLab...` |
+| 6X-10 | Repudiation | The console's own actions are not on the trail | Login, step-up, writes and sensitive reads are audited under the person's name | `LabConsoleRedTeamTest.whatTheConsoleDid...`, `ConsoleAuditTest` |
+| 6X-11 | Elevation (functional) | The host reserved the module id `lab` for its own status route, so the lab module could not load and the launcher stopped at start-up | `lab` freed; routes do not collide (different path lengths) | `LabConsoleEndToEndTest` |
+
+Cross-part red-team pass: eight probes, none succeeded. Open items named by the parts are in the residual risks
+below.
+
+### Saved policy and playbook bundles
+
+An installed policy or playbook bundle is kept in the lab folder (`installed/policy.bundle`, `installed/playbook.bundle`)
+so that it survives a restart and a lab reset. Each file holds the kind, sequence, SHA-256 of the text, approvers, real
+install time and the text, sealed with HMAC-SHA256 under `installed-key/seal.key` (32 random bytes, made once, owner-only
+like the vault key). The administrators' signing keys are made fresh at every start, so the original signatures cannot be
+checked again; the seal and the audit record of the original approval take their place.
+
+| # | STRIDE | Threat | Control | Test |
+|---|---|---|---|---|
+| B1 | Tampering | A saved file is edited (text, sequence, kind, approvers) | The seal covers every byte; a bad seal, hash, kind or form is refused and counted; the lab refuses to start (fail-closed, no silent rollback to the shipped defaults); the message names the file and a plain reason, never the text or key | `InstalledBundlesTest.oneFlippedByteAnywhereIsRefused`, `InstalledBundlesEndToEndTest` |
+| B2 | Elevation | The unsigned restore path is used to install a policy while the lab runs | `restore` is allowed once, only while the installer has installed or restored nothing, only for a higher sequence; same strict loader and lint gate as an install; audited (`POLICY_RESTORED`, `PLAYBOOKS_RESTORED`) before it takes effect | `PolicyRestoreTest`, `PlaybookRestoreTest` |
+| B3 | Tampering | A file with write access to the lab folder and the seal key installs a policy at the next start | Accepted: same trust level as the vault key; the restore is on the audit chain | residual risk |
+| B4 | Information disclosure | The text or key reaches a log or an error | Never logged; refusals carry fixed reasons only; the key file and folder are owner-only | `InstalledBundlesTest.aRefusalIsCountedAndNamedWithoutAnyContent` |
+| B5 | Denial of service | A new key orphans saved files | A save never makes a new key while a saved file exists; a missing or changed key refuses the load | `InstalledBundlesTest.aMissingOrChangedKeyRefuses...` |
+| B6 | Repudiation | An install that could not be kept is not noticed | The install answer says "installed, but not kept for a restart" and the failure is counted | `LabAdminServices.keepFailures` |
+
+Residual risk: deleting the saved file (and nothing else) returns the lab to the shipped defaults. That is an operator
+action outside the console and is not detected.
+
+### Elevation for administrator actions
+
+Five administrator actions no longer ask for a fresh password, PIN and single-use passkey each time: requesting, approving
+and revoking privileged access (`pam/request`, `pam/approve/{}`, `pam/revoke/{}`) and the lab reset (`lab/reset` on the
+administration page, `control/reset` on the lab page). They need an open elevation instead (PIN, passkey and a reason given
+once, ten real minutes, ended by sign-out), answered with 423 "elevation required" when there is none. This gives one prompt
+per ten-minute window, and every one of these writes carries the elevation id on its audit record. Approving and installing
+a policy or playbook change (`proposals/{}/approve`, `proposals/{}/install`) and the break-glass review (`pam/review/{}`)
+keep a fresh step-up and a single-use passkey, because they change what the engine enforces or use a signing key.
+
+| # | STRIDE | Threat | Control | Test |
+|---|---|---|---|---|
+| E1 | Elevation | One of the five actions is done without an elevation | The handler refuses with 423 before it reads the body; the host still checks the role first; nothing is changed or recorded as done | `AdminElevationTest` (one test per route) |
+| E2 | Repudiation | A write inside an elevation cannot be tied to it | The host puts the elevation id on the record of every write made inside one | `AdminElevationTest` (audit record carries the id) |
+| E3 | Elevation | An elevation is used as a fresh proof for a policy install or a signing action | The three kept routes still need a fresh step-up, whatever elevation is open | `AdminElevationTest.theThreeKeptActionsStillNeedAFreshStepUp...` |
+| E4 | Elevation | The elevation is used after its ten minutes | The host closes it by the real clock; the same call is refused again | `AdminElevationTest` (clock moved past ten minutes) |
+| E5 | Elevation | A hijacked session inside an open elevation | Accepted: it can act for at most ten minutes, and the elevation ends on sign-out; the opening needed the PIN and the passkey | residual risk |
+
+### Team activity view
+
+The monitoring page gains `GET monitor/team`, a read-only list of what team members did, taken from the tamper-checked console
+trail (newest first, filters `person`, `type`, paging `before`). It widens who can read the trail's contents: an administrator
+sees every actor except themself, a lead who is not an administrator sees every actor who is neither an administrator nor
+themself (the host cannot tell analysts from other non-administrators, so this is the rule), anyone else is refused as on the other
+monitor routes. Plain page views are not listed.
+
+| # | STRIDE | Threat | Control | Test |
+|---|---|---|---|---|
+| T1 | Information disclosure | A person sees more of the team than intended, or sees their own rows or a hidden administrator's | The actor set is fixed on the server from the caller's role and the live administrator list; filters can only narrow it; the lists for the menus are built from the visible rows only | `TeamActivityTest` (administrator, lead, analyst cases) |
+| T2 | Information disclosure | A secret or reason from a vault record, or a housekeeping field, is shown | Vault types always go through the lead view (action and target only); the same quiet-field removal as the administrator view; no other payload field is returned | `TeamActivityTest.aVaultRecordNeverShowsASecretOrReason` |
+| T3 | Tampering | The view is used to change or delete a record | Only a GET route exists; the host has no write path for it; the module can only read the trail | `TeamActivityTest.thereIsNoWayToWriteThroughTheRoute` |
+| T4 | Denial of service | A large trail makes the view slow | The scan is the latest 2,000 records, a page is at most 100 rows, and the answer says the window | `TeamActivityTest` (paging) |
+| T5 | Injection | A trail value runs as markup in the page | Malformed filters are refused with 400; the page builds elements and sets text only, never HTML from row data | `TeamActivityTest` (malformed), `FrontEndRulesTest` |
+
+## OIDC token verification (not yet wired in)
+
+Package `dev.dwarpal.oidc`. No console route uses this yet: nothing here is reachable from a request, and no network access
+exists in part A. `IdTokenVerifier` checks an ID token against keys and a policy the caller hands it (OIDC Core 3.1.3.7, RFC 8725,
+RFC 7515/7517/7518/8037). The later parts (discovery, key fetching, the sign-in routes) add their own rows below.
+
+### Part A: the ID-token verifier
+
+| # | STRIDE | Threat | Control | Test |
+|---|---|---|---|---|
+| O1 | Spoofing | Forged or altered token (changed claim, header, or signature; truncated or longer signature; DER-encoded ES256) | Signature is checked first, over the exact `header.payload` bytes, and before any claim is read; RS256, ES256 (raw R and S, 64 bytes) and EdDSA only; every failure gives the same reason and message | `IdTokenVerifierTest` (tampered payload, header, signature; DER ES256), `IdTokenMutationTest` (1,500 one-byte changes, none accepted) |
+| O2 | Spoofing | Algorithm confusion: `alg` none, HS256 signed with the public key as the secret, an RSA key under an ES256 header, a key that names another algorithm | The policy lists only RS256, ES256 and EdDSA and refuses to be built with HS* or anything else; `none` and unknown values are refused; the key type must match the header algorithm, and a key's own `alg` and `use` must agree; `oct` keys are never loaded | `IdTokenVerifierTest` (none, HS256 with RSA key, outside the list, key mismatch, key `alg`, key `use`), `JwkSetTest` (oct skipped), policy test |
+| O3 | Spoofing | Key confusion: header `kid`, `jku`, `x5u`, `x5c` or `jwk` steers the verifier to an attacker's key | Only the key set the caller passes is used; `jku`, `x5u`, `x5c`, `jwk` are ignored; a `kid` must exist in the set; no `kid` works only with exactly one key of the right type; duplicate `kid` refuses the whole set; `crit` refuses the token | `IdTokenVerifierTest` (embedded jwk, kid at another key, unknown kid, no kid with two keys, crit), `JwkSetTest` (duplicate kid) |
+| O4 | Spoofing | Weak or invalid public key (RSA under 2048 bits, an EC point off the curve, a malformed Ed25519 point) | Key rules at parsing: RSA modulus 2048 to 8192 bits, odd modulus, odd exponent; the P-256 point is checked against the curve equation by hand (the JDK `KeyFactory` accepts an off-curve point); Ed25519 point checked per RFC 8032; a bad key refuses the whole set | `JwkSetTest` (1024-bit RSA, off-curve EC, wrong lengths, Ed25519 points) |
+| O5 | Spoofing | Wrong audience or issuer mix-up (token for another client or another provider) | `iss` must equal the configured issuer exactly (no trailing slash or case folding); `aud` must contain the client id; an audience list needs `azp`, and `azp` must be this client | `IdTokenVerifierTest` (issuer, audience, azp cases) |
+| O6 | Spoofing | Replay of an earlier token | The nonce must be present and equal the one the caller sent (constant-time compare); an empty expected nonce is a programming error; one-time use of state and nonce belongs to the sign-in flow (later part) | `IdTokenVerifierTest` (nonce cases) |
+| O7 | Spoofing | Stale or early token; clock skew abused | `exp` (plus 2 minutes of skew), `iat` (not more than the skew in the future, not older than 10 minutes), `nbf`, and optional `auth_time` age; clock passed in by the caller; times must be whole seconds up to the year 2200 (floats, strings, huge values refused) | `IdTokenVerifierTest` (boundaries just inside and outside, float and huge times, auth age) |
+| O8 | Spoofing | Cross-token confusion: a logout token or other JWT presented as an ID token | A header type of `logout+jwt` (also as `application/logout+jwt`) is refused; the nonce claim is required | `IdTokenVerifierTest.aLogoutTokenTypeIsRefused` |
+| O9 | Denial of service | Oversized or hostile input (huge token, deep JSON, huge key set, padded or odd base64) | Token at most 16 KiB; exactly three parts; strict base64url with no padding and no spare bits; JSON through the bounded strict reader; key set at most 256 KiB and 20 keys | `IdTokenVerifierTest` (oversized, five-part, padding, characters), `JwkSetTest` (size, count) |
+| O10 | Information disclosure | Error messages leak token content, claim values or keys | `OidcException` has one fixed message per reason and never a cause; a parse error is replaced, not echoed | `IdTokenVerifierTest` (every refusal checks the message against the token, claims and key ids) |
+| O11 | Elevation | A claim shape that a loose parser accepts (duplicate members, wrong types, odd `sub`, long `amr`) | Duplicate members refused by the reader; `sub` 1 to 255 printable ASCII; `acr` up to 128; `amr` at most 16 short safe strings; result has no map of raw claims | `IdTokenVerifierTest` (sub, acr, amr, duplicate member) |
+
+### Part B: discovery, key fetching, fake provider
+
+Classes `OidcHttp`, `OidcDiscovery`, `JwksSource`, `OidcVerifier`; the test provider is `FakeIdp` (test code only). The only addresses ever
+contacted are the discovery URL built from the configured issuer and the `jwks_uri` found in that document. Still no console route uses this.
+
+| # | STRIDE | Threat | Control | Test |
+|---|---|---|---|---|
+| O12 | Tampering | SSRF through discovery or key fetching: a document that points `jwks_uri`, `authorization_endpoint` or `token_endpoint` at an internal address, another host, another port, or a URL with user information or a fragment | The issuer is configuration, not input. Every endpoint must be https with a host, no user information, no fragment, and the issuer's own host and port unless the caller names extra hosts (default none); the document's `issuer` must equal the configured one exactly; nothing else is ever fetched | `OidcDiscoveryTest` (other host, other port, user info, fragment, relative and non-http schemes, issuer mismatch, named extra host) |
+| O13 | Tampering | Redirect to an internal or hostile address (open redirect on the provider, a hijacked path) | Redirects are never followed; any status other than 200 is a refusal, so a 3xx cannot reach another address | `OidcDiscoveryTest.aRedirectIsRefusedAndNotFollowed`, `JwksSourceTest` (redirect never followed, never replaces a good set) |
+| O14 | Spoofing | Downgrade to plain http (keys or metadata read or altered on the path) | Only https is accepted for the issuer and every endpoint. The one exception is a package-private flag, set by tests only, that allows http to a literal `localhost`, `127.0.0.1` or `[::1]`; look-alike names such as `127.0.0.1.evil.example` do not qualify; the public factories never set it | `OidcDiscoveryTest` (http issuer and http key address refused, loopback flag limits, production helper) |
+| O15 | Denial of service | JWKS fetch flooding: a stream of tokens with invented `kid` values makes the application hit the provider on every request (or turns the application into a flood source) | `JwksSource` asks the provider at most once per 30 seconds (success or failure, all callers, one at a time), caches a good set for 10 minutes, and a token with an unknown `kid` causes one refresh and one retry at most; the clock is injected | `JwksSourceTest` (30 s limit, flood of refresh calls, 24 threads cause one request), `OidcVerifierEndToEndTest` (1,500 unknown-`kid` tokens over 5 simulated minutes: 10 requests) |
+| O16 | Tampering | Poisoned or invalid key set replaces a good one (garbage, duplicate `kid`, weak RSA, off-curve EC point, empty set, wrong media type, redirect, oversized) | A fetched set replaces the held one only if it parses whole under the part A rules and has at least one usable key; otherwise the old set stays | `JwksSourceTest` (invalid new set never replaces a good one, redirect/oversized/media type, empty set), `OidcVerifierEndToEndTest` (poisoned set) |
+| O17 | Denial of service | Provider outage or a blocked path leaves the application on stale keys for ever, or locks every user out at once | A held set is used while it is under one hour old (failed refresh attempts are retried every 30 s); at one hour `current()` throws `KEYS_UNAVAILABLE` and verification fails closed; recovery needs only the provider to answer again | `JwksSourceTest` (outage, 59 min 59 s versus 60 min, recovery, failed first fetch), `OidcVerifierEndToEndTest` (outage) |
+| O18 | Denial of service | Oversized or slow responses (huge body, endless stream, trickled bytes, no answer) | Body caps while streaming (discovery 64 KiB, JWKS 256 KiB; a declared length over the cap is refused early, an undeclared one is cut at the cap); connect limit 3 s; the whole answer must arrive within 5 s; media type must be `application/json` (JWKS also `application/jwk-set+json`); status must be 200; lock is held during a fetch so callers do not pile up requests | `OidcDiscoveryTest` (oversized with and without declared length, media type, status), `JwksSourceTest` (oversized, chunked, trickled body about 5 s, no answer at the request limit) |
+| O19 | Information disclosure | Fetch errors leak the URL, query, headers or response body into logs or messages | Fetch failures are `OidcException` with one fixed message per reason (`KEYS_UNAVAILABLE` for network, status, size, media type, timeout; `KEYS_INVALID` for a document that breaks a rule); a bad configured issuer gives a fixed `IllegalArgumentException` text that does not echo the value | `OidcDiscoveryTest` (messages), `JwksSourceTest`, `OidcVerifierEndToEndTest` |
+
+Residual risk (accepted): the issuer is trusted configuration, so a host name that resolves to a private address is not blocked here; the
+network layer (egress rules) owns that. No cookies, proxies or authentication are sent with these requests.
+
 ## Residual risks (accepted for this layer, scheduled)
 
 | Risk | Why accepted now | Planned in |
@@ -570,6 +882,7 @@ real breaches (5.2I-1 and 5.2I-2), both fixed with a regression test. Slow basel
 | Whoever holds a stolen token can end the victim's session by presenting it for another device (S10) | Ending a possibly stolen session is the safe side | Accepted; the victim logs in again |
 | Sessions and nonces live in memory: a restart ends all sessions | Simplicity, no database yet | Layer 4 persistent store (tokens stay hashed) |
 | A session opened while its subject is being revoked can survive the revocation | Open and revoke are not one transaction | Continuous evaluation denies its first use once the directory disables the account; revoke together with the directory change |
+| Availability: when the engine API is down there is no access (fail-closed, drilled by `FailClosedDrillTest`); there is no offline emergency token by design, and PAM break-glass needs the engine too | An offline bypass would be the first thing an attacker looks for | Run the engine redundantly; the engine-down alarm and `/v1/ready` tell the operator |
 | Break-glass needs the identity provider for MFA on each admin action (P-05) | Consistency: every admin action needs fresh MFA | An offline emergency procedure for 'identity provider down' (Layer 5 runbook) |
 | Approvers are any holder of an `ELEVATION_APPROVER` key; no per-role approver lists; one human with two accounts could approve themselves | Simplicity | Per-role approver groups in the admin console (Layer 6) |
 | Elevation applies to all of the subject's sessions, not one device | The directory has no device context | Admin actions still need fresh MFA bound to the session key on every request (P-05 + R4), so another device without that key gains nothing |
@@ -599,3 +912,9 @@ real breaches (5.2I-1 and 5.2I-2), both fixed with a regression test. Slow basel
 | Isolation commands to the sensor are not signed by Dwarpal (the simulated sensor trusts its channel) | A real sensor needs a signed command | Key purpose and `SignedMessages.isolationCommand` with a real sensor |
 | Cases, isolation state, protected-device waits and the collected-watch budget live in memory | No database yet | Persistent store |
 | `count by` queries are answered by the event store but not yet exposed through the SOC API's search | `EventSearch` returns events only | Add a `counts` method to `EventSearch` |
+| The lab starts from day zero on every restart: cases, risk and isolations live in memory (certificates and demo logins are kept) | Rebuilding six components from the trail is large | Persistent state with the store, after the submission |
+| `sensor-heartbeat-missing` is still silent: the simulated sensors seal telemetry hourly and send no heartbeats | Needs the simulator to seal every 10 minutes | After the submission |
+| The console's screens were tested against the real scripts in a simulated page and over HTTPS, but not looked at in a real browser by the build sessions (the built-in browser refuses the lab's CA) | Layout, themes and shortcuts are unverified by eye | The owner looks once with the lab CA trusted (runbook) |
+| Login flood on the loopback address: all local browsers share one source address, so pending logins can be exhausted for two minutes | Behind the gateway the source differs per person | Accepted for the lab (6G open issue 1) |
+| Verdicts are signed on the console server with the lab's analyst key after a fresh step-up, not in the analyst's browser or hardware key | The seam is `VerdictSigner` | WebAuthn or WebCrypto signing |
+| The console is a trusted proxy: it holds the delegation key that lets it speak for any configured analyst, though each call is signed and audited | An identity provider would issue the tokens in a company | Token issuance by the identity provider |

@@ -23,4 +23,67 @@
             <Class name="dev.dwarpal.pip.ThreatIntel"/>
         </Or>
     </Match>
+    <!--
+      PREDICTABLE_RANDOM in the simulation: the organisation, its traffic and its attacks are generated from a
+      seed so that the same seed gives the same lab, which is what lets tests and walkthroughs repeat. Nothing
+      generated here is a secret: the simulation's keys come from the JDK's key generators, not from this Random.
+    -->
+    <Match>
+        <Bug pattern="PREDICTABLE_RANDOM"/>
+        <Or>
+            <Class name="dev.dwarpal.sim.SimOrganisation"/>
+            <Class name="dev.dwarpal.sim.SimTelemetry"/>
+        </Or>
+    </Match>
+    <!--
+      COMMAND_INJECTION in DevPki: the program is the JDK's own keytool (a path built from java.home), the
+      options are constants, and the only variable parts are certificate and file names, which are checked
+      against a strict pattern before use (DevPkiNameTest). The store password goes in through an environment
+      variable, never on the command line.
+    -->
+    <Match>
+        <Bug pattern="COMMAND_INJECTION"/>
+        <Class name="dev.dwarpal.edge.DevPki"/>
+    </Match>
+    <!--
+      SQL_INJECTION_JDBC and SQL_NONCONSTANT_STRING_PASSED_TO_EXECUTE in Migrator: the only text it executes is a
+      migration script shipped inside the jar (db/migrations/V###__*.sql). It is not built from anything a person types,
+      is checksummed against the value recorded when it was first applied (an edited script is refused), and runs only as
+      the migrator database user from MigrateMain or the test set-up. Proof: DirectorySourceTest (plain statements exist
+      only in Migrator and run only constants or the shipped script) and MigratorTest.
+    -->
+    <Match>
+        <Or>
+            <Bug pattern="SQL_INJECTION_JDBC"/>
+            <Bug pattern="SQL_NONCONSTANT_STRING_PASSED_TO_EXECUTE"/>
+        </Or>
+        <Class name="dev.dwarpal.directory.Migrator"/>
+    </Match>
+    <!--
+      EI_EXPOSE_REP2 on LabAdminServices.people: the field holds a service (the directory), not data. The directory is
+      thread-safe by construction (every call opens its own database connection) and is meant to be shared with the
+      launcher that built it.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="dev.dwarpal.console.admin.LabAdminServices"/>
+        <Field name="people"/>
+    </Match>
+    <!--
+      EI_EXPOSE_REP on ConsoleTrail.log: the audit log is a service (the single writer of the chain, synchronised inside),
+      not data. The console server must write through this one instance, so that every record joins the same chain.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+        <Class name="dev.dwarpal.console.ConsoleTrail"/>
+        <Method name="log"/>
+    </Match>
+    <!--
+      EI_EXPOSE_REP2 in VaultModule: the module exists to drive the one Vault service it is handed at start-up, and it
+      keeps it privately; nothing returns it. Proof: VaultTest and VaultEndToEndTest.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="dev.dwarpal.console.vault.VaultModule"/>
+    </Match>
 </FindBugsFilter>

@@ -66,6 +66,10 @@ public final class SimTelemetry {
     /** One signed endpoint batch: JSON lines, one per event; {@code activities} labels each line. */
     public record EndpointBatch(String deviceId, String keyId, long batch, Instant at, String body, String signature,
                                 List<Activity> activities, String userId) implements Item {
+        public EndpointBatch {
+            activities = List.copyOf(activities);
+        }
+
         /** The proof a collector verifies against the key ring ({@code DEVICE_AGENT}, bound to the device). */
         public SignatureProof proof() {
             return new SignatureProof(keyId, at, signature);

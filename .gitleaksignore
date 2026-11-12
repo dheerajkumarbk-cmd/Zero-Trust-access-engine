@@ -1,0 +1,2 @@
+# Reviewed false positive: a test canary (not a credential) that checks error messages never repeat hostile input.
+b33eac37d6642bdc24826a149e99f10a3e2fff0a:src/test/java/dev/dwarpal/lab/scenarios/ScenarioToolsTest.java:generic-api-key:35

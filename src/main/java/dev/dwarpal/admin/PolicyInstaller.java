@@ -8,6 +8,7 @@ import dev.dwarpal.crypto.SignatureProof;
 import dev.dwarpal.crypto.SignedMessages;
 import dev.dwarpal.decision.Decision;
 import dev.dwarpal.domain.AccessRequest;
+import dev.dwarpal.domain.Sanitize;
 import dev.dwarpal.domain.Validate;
 import dev.dwarpal.engine.DecisionPoint;
 import dev.dwarpal.engine.PolicyEngine;
@@ -52,6 +53,8 @@ public final class PolicyInstaller implements DecisionPoint {
     public static final int AUDITED_REJECTIONS_PER_HOUR = 10;
     /** Rejections audited one by one per hour across all requesters (names are not authenticated). */
     public static final int AUDITED_REJECTIONS_PER_HOUR_TOTAL = 100;
+    /** The actor named on the audit record of a restore. */
+    public static final String RESTORE_ACTOR = "policy-restore";
 
     private final RateLimiter rejectionAudits = new RateLimiter(AUDITED_REJECTIONS_PER_HOUR, Duration.ofHours(1), 1_000);
     private final RateLimiter totalRejectionAudits = new RateLimiter(AUDITED_REJECTIONS_PER_HOUR_TOTAL,
@@ -66,6 +69,7 @@ public final class PolicyInstaller implements DecisionPoint {
 
     private volatile PolicyEngine current;
     private long currentSequence;
+    private boolean changed;
 
     public PolicyInstaller(PolicyEngine initial, long initialSequence, KeyRing keys, int requiredApprovers,
                            AuditLog audit, Clock clock) {
@@ -123,14 +127,14 @@ public final class PolicyInstaller implements DecisionPoint {
                     + approvers + ", " + requiredApprovers + " required");
         }
 
-        PolicyEngine next;
-        PolicySet set;
+        Compiled compiled;
         try {
-            set = loader.load(bundle.yaml());
-            next = current.withPolicySet(set);
+            compiled = compile(bundle.yaml());
         } catch (PolicyLoadException | IllegalArgumentException e) {
             return reject(bundle, hash, requestedBy, now, "policy rejected: " + e.getMessage());
         }
+        PolicyEngine next = compiled.next();
+        PolicySet set = compiled.set();
 
         Map<String, String> f = fields(bundle, hash, requestedBy);
         f.put("policyVersion", set.version());
@@ -140,7 +144,55 @@ public final class PolicyInstaller implements DecisionPoint {
         audit.append("POLICY_INSTALLED", requestedBy, now, f);
         current = next;
         currentSequence = bundle.sequence();
+        changed = true;
         return new Result(true, "installed sequence " + bundle.sequence() + " approved by " + approvers);
+    }
+
+    private record Compiled(PolicySet set, PolicyEngine next) {
+    }
+
+    /** The one path from text to engine: safe loader, strict lint gate, then the engine rebuilt around the set. */
+    private Compiled compile(String yaml) {
+        PolicySet set = loader.load(yaml);
+        return new Compiled(set, current.withPolicySet(set));
+    }
+
+    /**
+     * Puts back a bundle that was installed before a restart or lab reset. This is the only unsigned way in, so it is
+     * narrow: allowed once, and only while this installer has not installed or restored anything (the start of a lab),
+     * for a sequence above the one it was built with. The text goes through exactly the same loader and lint gate as an
+     * install. The restore is audited (POLICY_RESTORED) before it takes effect; if the audit refuses, nothing changes.
+     * The caller vouches for the text (the lab checks its own seal first).
+     */
+    public synchronized Result restore(String yaml, long sequence, String note) {
+        Objects.requireNonNull(yaml, "yaml");
+        if (changed) {
+            return new Result(false, "restore refused: this installer already installed or restored a bundle");
+        }
+        if (sequence <= currentSequence) {
+            return new Result(false, "restore refused: sequence " + sequence + " is not newer than " + currentSequence);
+        }
+        Compiled compiled;
+        try {
+            compiled = compile(yaml);
+        } catch (PolicyLoadException | IllegalArgumentException e) {
+            return new Result(false, "restore refused: policy rejected: " + e.getMessage());
+        }
+        Instant now = clock.instant();
+        Map<String, String> f = new LinkedHashMap<>();
+        f.put("sequence", Long.toString(sequence));
+        f.put("sha256", Digests.sha256Hex(yaml));
+        f.put("note", Sanitize.text(note == null ? "" : note, 300));
+        f.put("policyVersion", compiled.set().version());
+        try {
+            audit.append("POLICY_RESTORED", RESTORE_ACTOR, now, f);
+        } catch (RuntimeException e) {
+            return new Result(false, "restore refused: audit trail unavailable");
+        }
+        current = compiled.next();
+        currentSequence = sequence;
+        changed = true;
+        return new Result(true, "restored sequence " + sequence);
     }
 
     /**

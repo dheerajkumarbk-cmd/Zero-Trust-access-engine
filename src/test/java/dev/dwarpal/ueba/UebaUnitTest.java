@@ -363,7 +363,7 @@ class UebaUnitTest {
         SocReport rep = SocReport.daily(src, day, ranked, f.risk, v, TechniqueMap.standard().build());
         assertEquals(2, rep.byPriority().values().stream().mapToLong(Long::longValue).sum());
         String text = rep.text();
-        assertTrue(text.startsWith("Data: " + src.statement()), text);
+        assertTrue(text.startsWith(src.statement()), text);
         assertTrue(text.contains("mean time to verdict: 60 min"), text);
         assertTrue(text.contains("of which 1 backed only by collected evidence"), text);
         assertEquals(2, rep.rates().size());

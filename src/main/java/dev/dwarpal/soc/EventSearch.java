@@ -46,6 +46,37 @@ public interface EventSearch {
         }
     }
 
+    /** One group of a {@code count by}: the values of the grouping fields, and how many events had them. */
+    record Group(List<String> values, long count) {
+        public Group {
+            values = List.copyOf(values);
+        }
+    }
+
+    /**
+     * The answer to a {@code count by} query: groups, largest first. {@code matched} counts only events the caller
+     * may see, so a total never gives away what was left out.
+     */
+    record Counts(List<Group> groups, long matched, boolean truncated, Optional<String> problem) {
+        public Counts {
+            groups = List.copyOf(groups);
+            Objects.requireNonNull(problem, "problem");
+        }
+
+        public static Counts refused(String why) {
+            return new Counts(List.of(), 0, false, Optional.of(why));
+        }
+    }
+
+    /**
+     * Counts events by the fields after {@code count by} in the query, over only the events {@code visible} accepts
+     * (the caller's own right to see them, decided per event exactly as for {@link #search}). A store that cannot
+     * count says so as a problem.
+     */
+    default Counts counts(String query, Instant from, Instant to, java.util.function.Predicate<ChainedEvent> visible) {
+        return Counts.refused("this search cannot count");
+    }
+
     /** Checks the arguments every implementation must refuse. */
     static void check(String query, Instant from, Instant to, int limit) {
         Objects.requireNonNull(query, "query");

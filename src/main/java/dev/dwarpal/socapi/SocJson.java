@@ -101,6 +101,16 @@ final class SocJson {
         return new Search(qs.value(), time(o, "from"), time(o, "to"), (int) l);
     }
 
+    static Search readCounts(JsonValue v) {
+        JObject o = object(v);
+        only(o, Set.of("v", "query", "from", "to"));
+        JsonValue q = member(o, "query");
+        if (!(q instanceof JsonValue.JString qs) || qs.value().length() > MAX_QUERY) {
+            throw new JsonException("query must be text of at most " + MAX_QUERY + " characters");
+        }
+        return new Search(qs.value(), time(o, "from"), time(o, "to"), 1);
+    }
+
     // ---- writers ----------------------------------------------------------------------------------------------
 
     static JObject error(String text) {
