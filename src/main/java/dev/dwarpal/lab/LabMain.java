@@ -19,6 +19,7 @@ public final class LabMain {
     }
 
     public static void main(String[] args) throws Exception {
+        CrashLog.install(CrashLog.logDirFor(args));
         run(args, System.out);
     }
 
