@@ -40,3 +40,15 @@ The wrapper connects to localhost:5432 as `dwarpal_migrator` with `ON_ERROR_STOP
     db/iga/run.sh 99_drop.sql
 
 This removes the `iga` schema and everything in it. Cluster-level roles are not dropped.
+
+## Demos and captures (db/iga/demos)
+
+| Script | Output | Notes |
+|---|---|---|
+| `explain_capture.sql` | `docs/dbms/explain-before.txt`, `explain-after.txt` | Run before and after `06_indexes.sql` |
+| `pruning_capture.sql` | `docs/dbms/explain-pruning.txt` | One-month query touches one partition |
+| `backup_restore.sh [DUMP]` | `docs/dbms/backup-restore-output.txt` | `pg_dump -Fc`, restore into `dwarpal_dbms_restore`, row counts, audit chain check, dropped-table recovery. The dump file stays outside the repo |
+| `roles_demo.sql` | `docs/dbms/roles-demo-output.txt` | Grants and row-level security checks |
+| `atomicity.sql`, `isolation.sh`, `deadlock.sh`, `durability.sh` | `docs/dbms/demo-*.txt` | Run against `dwarpal_dbms_restore`; see `demos/README.md` |
+
+`09_demo_queries.sql` output is saved in `docs/dbms/demo-queries-output.txt`.

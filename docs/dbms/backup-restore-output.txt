@@ -1,0 +1,67 @@
+=== 1. Logical backup of schema iga from dwarpal_dbms (custom format, compressed)
+dump size (bytes): 11582426
+table of contents entries: 319
+
+=== 2. Restore into a NEW empty schema in dwarpal_dbms_restore (old demo schema dropped first)
+tables with data restored: 23
+
+=== 3. Row counts: source | restored
+account                    520      520  match
+audit_log                 1898     1898  match
+department                   8        8  match
+dept_birthright_role        16       16  match
+entitlement                120      120  match
+lifecycle_event             15       15  match
+person                     200      200  match
+review_campaign              0        0  match
+review_item                  0        0  match
+role_assignment            900      900  match
+role_entitlement           312      312  match
+role                        30       30  match
+security_event          500000   500000  match
+sod_rule                     6        6  match
+system                       6        6  match
+ALL ROW COUNTS MATCH
+
+=== 4. Audit chain verified on the restored copy (NULL = chain intact, otherwise the first bad seq)
+ first_bad_seq | chain_intact | audit_rows 
+---------------+--------------+------------
+               | t            |       1898
+(1 row)
+
+
+=== 5. Accident: DROP TABLE iga.lifecycle_event in dwarpal_dbms_restore, then recover only that table from the dump
+ rows_before_accident 
+----------------------
+                   15
+(1 row)
+
+ERROR:  relation "iga.lifecycle_event" does not exist
+LINE 1: SELECT count(*) FROM iga.lifecycle_event
+                             ^
+--- pg_restore -L <list of every dump entry that belongs to lifecycle_event: table, data, key, checks, foreign keys>
+entries selected: 10
+restore of the single table finished
+ rows_after_recovery 
+---------------------
+                  15
+(1 row)
+
+ALL ROW COUNTS MATCH AFTER RECOVERY
+ chain_intact_after_recovery 
+-----------------------------
+ t
+(1 row)
+
+
+=== 6. Restored copy rebuilt with the same objects? functions / views / indexes
+ functions | views | indexes 
+-----------+-------+---------
+        11 |     7 |      68
+(1 row)
+
+ functions | views | indexes 
+-----------+-------+---------
+        11 |     7 |      68
+(1 row)
+
