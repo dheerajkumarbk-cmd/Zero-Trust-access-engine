@@ -8,12 +8,12 @@ All five phases are built and committed. The last full test run, on a database r
 
 | Commit | What it holds |
 |---|---|
-| `c8e6646` | Phase 0: existing-schema report, setup script, `run.sh`, README |
-| `731f898` | Phase 1: tables, keys, checks, ER diagram (Mermaid text) |
-| `07ba4b9` | Phase 2: procedures, triggers, audit hash chain, first tests |
-| `ebbbbbe` | Phase 3: seed, views, indexes, EXPLAIN captures, demo queries, transaction demos. It also carries the roles and row-level-security files, which were ready and tested |
-| `ef7b482` | Phase 4: backup, restore, dropped-table recovery |
-| `0ecb6b1` | Phase 5: segregation-of-duties trigger, `access_request`, `privileged_session` |
+| `22823ad` | Phase 0: existing-schema report, setup script, `run.sh`, README |
+| `62632ab` | Phase 1: tables, keys, checks, ER diagram (Mermaid text) |
+| `0da6e48` | Phase 2: procedures, triggers, audit hash chain, first tests |
+| `b7157e3` | Phase 3: seed, views, indexes, EXPLAIN captures, demo queries, transaction demos. It also carries the roles and row-level-security files, which were ready and tested |
+| `2287572` | Phase 4: backup, restore, dropped-table recovery |
+| `822932b` | Phase 5: segregation-of-duties trigger, `access_request`, `privileged_session` |
 
 To rebuild from nothing: `db/iga/run.sh --build` (about 60 seconds, mostly the 500,000-event seed), then `db/iga/run.sh --test`.
 
